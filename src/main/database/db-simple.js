@@ -1,0 +1,1009 @@
+﻿const fs = require('fs');
+const path = require('path');
+const { app } = require('electron');
+
+class DatabaseManager {
+  constructor() {
+    // 鏁版嵁鏂囦欢璺緞
+    const userDataPath = (app && typeof app.getPath === 'function')
+      ? app.getPath('userData')
+      : (process.env.ELECTRON_USER_DATA || process.env.APPDATA || process.env.LOCALAPPDATA || process.cwd());
+    this.dbPath = path.join(userDataPath, 'course-designer-data.json');
+    
+    
+    // 鍒濆鍖栨暟鎹簱
+    this.initDatabase();
+  }
+
+  // 鍒濆鍖栨暟鎹簱
+  initDatabase() {
+    if (!fs.existsSync(this.dbPath)) {
+      const initialData = {
+        notebooks: [],
+        modules: [],
+        frameworks: [],
+        artifacts: [],
+        operations: [],
+        backendEvents: [],
+        workflowStates: [],
+        resources: [],
+        agent_memories: [],          // Phase-5C Step 4: Agent 跨会话记忆
+        settings: {
+          app_version: '1.0.0',
+          first_run: '1'
+        }
+      };
+      fs.writeFileSync(this.dbPath, JSON.stringify(initialData, null, 2), 'utf8');
+    } else {
+      const current = this._readData();
+      let changed = false;
+      if (!Array.isArray(current.artifacts)) {
+        current.artifacts = [];
+        changed = true;
+      }
+      if (!Array.isArray(current.operations)) {
+        current.operations = [];
+        changed = true;
+      }
+      if (!Array.isArray(current.backendEvents)) {
+        current.backendEvents = [];
+        changed = true;
+      }
+      if (!Array.isArray(current.workflowStates)) {
+        current.workflowStates = [];
+        changed = true;
+      }
+      // Migration: add agent_memories for Phase-5C Step 4
+      if (!Array.isArray(current.agent_memories)) {
+        current.agent_memories = [];
+        changed = true;
+      }
+      // Migration: add enriched context fields to existing notebooks (Phase-5B)
+      if (Array.isArray(current.notebooks)) {
+        let notebooksChanged = false;
+        current.notebooks = current.notebooks.map((nb) => {
+          const next = { ...nb };
+          let localChanged = false;
+          if (next.softwareTools === undefined) { next.softwareTools = ''; localChanged = true; }
+          if (next.jobTargets === undefined) { next.jobTargets = ''; localChanged = true; }
+          if (next.industryScenarios === undefined) { next.industryScenarios = ''; localChanged = true; }
+          if (next.learnerProfile === undefined) { next.learnerProfile = ''; localChanged = true; }
+          if (next.teachingMaterials === undefined) { next.teachingMaterials = ''; localChanged = true; }
+          if (next.linkedResources === undefined) { next.linkedResources = []; localChanged = true; }
+          if (next.researchNotes === undefined) { next.researchNotes = null; localChanged = true; }
+          if (localChanged) notebooksChanged = true;
+          return localChanged ? next : nb;
+        });
+        changed = changed || notebooksChanged;
+      }
+
+      if (Array.isArray(current.artifacts)) {
+        let artifactsChanged = false;
+        current.artifacts = current.artifacts.map((item) => {
+          const next = { ...item };
+          let localChanged = false;
+          if (!Array.isArray(next.reviewFlags)) {
+            next.reviewFlags = [];
+            localChanged = true;
+          }
+          if (!Array.isArray(next.validationResults)) {
+            next.validationResults = [];
+            localChanged = true;
+          }
+          if (!Array.isArray(next.sourceRefs)) {
+            next.sourceRefs = [];
+            localChanged = true;
+          }
+          if (!Array.isArray(next.blockingIssues)) {
+            next.blockingIssues = [];
+            localChanged = true;
+          }
+          if (!next.lifecycle || typeof next.lifecycle !== 'object') {
+            next.lifecycle = {
+              generatedAt: next.createdAt || new Date().toISOString(),
+              confirmedAt: next.confirmed ? (next.updatedAt || next.createdAt || new Date().toISOString()) : null
+            };
+            localChanged = true;
+          }
+          if (localChanged) artifactsChanged = true;
+          return localChanged ? next : item;
+        });
+        changed = changed || artifactsChanged;
+      }
+      if (changed) {
+        this._writeData(current);
+      }
+    }
+  }
+
+  // 璇诲彇鏁版嵁
+  _readData() {
+    const data = fs.readFileSync(this.dbPath, 'utf8');
+    const normalized = typeof data === 'string' ? data.replace(/^\uFEFF/, '') : data;
+    return JSON.parse(normalized);
+  }
+
+  // 鍐欏叆鏁版嵁
+  _writeData(data) {
+    fs.writeFileSync(this.dbPath, JSON.stringify(data, null, 2), 'utf8');
+  }
+
+  // ========================================
+  // 绗旇鏈紙Notebooks锛夌浉鍏虫搷锟?
+  // ========================================
+
+  // 鍒涘缓绗旇锟?
+  createNotebook(data) {
+    const allData = this._readData();
+    
+    const notebook = {
+      id: Date.now(),
+      name: data.name,
+      courseCode: data.courseCode || null,
+      totalHours: data.totalHours,
+      theoryHours: data.theoryHours || 0,
+      practiceHours: data.practiceHours || 0,
+      grade: data.grade || null,
+      prerequisite: data.prerequisite || null,
+      description: data.description || null,
+      workspacePath: data.workspacePath || null,
+      currentStage: data.currentStage || 'framework',
+      teachingSchedule: null,
+      currentFrameworkId: null,
+      // 课程富上下文（Phase-5B：用于提升 AI 生成质量）
+      softwareTools: data.softwareTools || '',       // 具体软件工具，如"Blender 4.x"
+      jobTargets: data.jobTargets || '',             // 目标职业岗位，如"橱窗陈列师"
+      industryScenarios: data.industryScenarios || '',  // 行业应用场景
+      learnerProfile: data.learnerProfile || '',     // 学情描述
+      teachingMaterials: data.teachingMaterials || '', // 参考教材/课程标准
+      linkedResources: data.linkedResources || [],   // 关联的本地素材库资源 IDs
+      researchNotes: data.researchNotes || null,     // AI/联网研究结果
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    
+    allData.notebooks.push(notebook);
+    allData.workflowStates = Array.isArray(allData.workflowStates) ? allData.workflowStates : [];
+    allData.workflowStates.push({
+      notebookId: notebook.id,
+      currentStage: notebook.currentStage || 'framework',
+      unlockedStages: ['framework'],
+      currentArtifactRefs: {},
+      updatedAt: new Date().toISOString()
+    });
+    this._writeData(allData);
+    
+    return notebook;
+  }
+
+  // 鑾峰彇鎵€鏈夌瑪璁版湰
+  getAllNotebooks() {
+    const data = this._readData();
+    return data.notebooks.sort((a, b) => 
+      new Date(b.updatedAt) - new Date(a.updatedAt)
+    );
+  }
+
+  // 鑾峰彇鍗曚釜绗旇锟?
+  getNotebookById(id) {
+    const data = this._readData();
+    return data.notebooks.find(nb => nb.id === id);
+  }
+
+  // 鏇存柊绗旇锟?
+  updateNotebook(id, updateData) {
+    const allData = this._readData();
+    const index = allData.notebooks.findIndex(nb => nb.id === id);
+    
+    if (index !== -1) {
+      allData.notebooks[index] = {
+        ...allData.notebooks[index],
+        ...updateData,
+        updatedAt: new Date().toISOString()
+      };
+      this._writeData(allData);
+      return allData.notebooks[index];
+    }
+    
+    return null;
+  }
+
+  // 鍒犻櫎绗旇锟?
+  deleteNotebook(id) {
+    const allData = this._readData();
+    allData.notebooks = allData.notebooks.filter(nb => nb.id !== id);
+    // 鍚屾椂鍒犻櫎鐩稿叧鐨勬ā鍧楀拰妗嗘灦
+    allData.modules = allData.modules.filter(m => m.notebookId !== id);
+    allData.frameworks = allData.frameworks.filter(f => f.notebookId !== id);
+    allData.artifacts = (allData.artifacts || []).filter(a => a.notebookId !== id);
+    allData.operations = (allData.operations || []).filter(o => o.notebookId !== id);
+    allData.backendEvents = (allData.backendEvents || []).filter(e => e.notebookId !== id);
+    allData.workflowStates = (allData.workflowStates || []).filter(w => w.notebookId !== id);
+    this._writeData(allData);
+  }
+
+  // ========================================
+  // 妗嗘灦锛團rameworks锛夌浉鍏虫搷锟?
+  // ========================================
+
+  // 鍒涘缓妗嗘灦锛堟柊鐗堟湰锟?
+  createFramework(notebookId, content, mode = 'append') {
+    const allData = this._readData();
+    const notebookIndex = allData.notebooks.findIndex(nb => nb.id === notebookId);
+    if (notebookIndex === -1) {
+      throw new Error('Notebook not found');
+    }
+
+    if (mode === 'overwrite' && allData.notebooks[notebookIndex].currentFrameworkId) {
+      const updated = this.updateFramework(allData.notebooks[notebookIndex].currentFrameworkId, content);
+      allData.notebooks[notebookIndex].updatedAt = new Date().toISOString();
+      this._writeData(allData);
+      return updated;
+    }
+
+    const versions = allData.frameworks
+      .filter(f => f.notebookId === notebookId)
+      .map(f => f.version || 0);
+    const nextVersion = (versions.length ? Math.max(...versions) : 0) + 1;
+
+    const framework = {
+      id: Date.now(),
+      notebookId,
+      version: nextVersion,
+      content,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    allData.frameworks.push(framework);
+    allData.notebooks[notebookIndex].currentFrameworkId = framework.id;
+    allData.notebooks[notebookIndex].updatedAt = new Date().toISOString();
+    this._writeData(allData);
+    return framework;
+  }
+
+  // 鏇存柊妗嗘灦锛堣鐩栧唴瀹癸級
+  updateFramework(frameworkId, content) {
+    const allData = this._readData();
+    const index = allData.frameworks.findIndex(f => f.id === frameworkId);
+    if (index === -1) {
+      throw new Error('Framework not found');
+    }
+    allData.frameworks[index] = {
+      ...allData.frameworks[index],
+      content,
+      updatedAt: new Date().toISOString()
+    };
+    this._writeData(allData);
+    return allData.frameworks[index];
+  }
+
+  // 鑾峰彇妗嗘灦鍒楄〃
+  listFrameworks(notebookId) {
+    const data = this._readData();
+    return data.frameworks
+      .filter(f => f.notebookId === notebookId)
+      .sort((a, b) => (b.version || 0) - (a.version || 0));
+  }
+
+  // 鑾峰彇褰撳墠妗嗘灦
+  getCurrentFramework(notebookId) {
+    const data = this._readData();
+    const notebook = data.notebooks.find(nb => nb.id === notebookId);
+    if (!notebook) return null;
+
+    if (notebook.currentFrameworkId) {
+      return data.frameworks.find(f => f.id === notebook.currentFrameworkId) || null;
+    }
+
+    return this.listFrameworks(notebookId)[0] || null;
+  }
+
+  // 璁剧疆褰撳墠妗嗘灦
+  setCurrentFramework(notebookId, frameworkId) {
+    const allData = this._readData();
+    const notebookIndex = allData.notebooks.findIndex(nb => nb.id === notebookId);
+    if (notebookIndex === -1) {
+      throw new Error('Notebook not found');
+    }
+    const exists = allData.frameworks.find(f => f.id === frameworkId && f.notebookId === notebookId);
+    if (!exists) {
+      throw new Error('Framework not found');
+    }
+    allData.notebooks[notebookIndex].currentFrameworkId = frameworkId;
+    allData.notebooks[notebookIndex].updatedAt = new Date().toISOString();
+    this._writeData(allData);
+    return exists;
+  }
+
+  getWorkflowState(notebookId) {
+    const data = this._readData();
+    const existing = (data.workflowStates || []).find((item) => item.notebookId === notebookId);
+    if (existing) return existing;
+    return {
+      notebookId,
+      currentStage: 'framework',
+      unlockedStages: ['framework'],
+      currentArtifactRefs: {},
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  upsertWorkflowState(notebookId, patch = {}) {
+    const allData = this._readData();
+    allData.workflowStates = Array.isArray(allData.workflowStates) ? allData.workflowStates : [];
+    const index = allData.workflowStates.findIndex((item) => item.notebookId === notebookId);
+    const base = index === -1
+      ? {
+          notebookId,
+          currentStage: 'framework',
+          unlockedStages: ['framework'],
+          currentArtifactRefs: {},
+          updatedAt: new Date().toISOString()
+        }
+      : allData.workflowStates[index];
+    const next = {
+      ...base,
+      ...patch,
+      currentArtifactRefs: {
+        ...(base.currentArtifactRefs || {}),
+        ...((patch && patch.currentArtifactRefs) || {})
+      },
+      unlockedStages: Array.isArray(patch.unlockedStages)
+        ? patch.unlockedStages
+        : (Array.isArray(base.unlockedStages) ? base.unlockedStages : ['framework']),
+      updatedAt: new Date().toISOString()
+    };
+    if (index === -1) allData.workflowStates.push(next);
+    else allData.workflowStates[index] = next;
+    this._writeData(allData);
+    return next;
+  }
+
+  createArtifact(artifactData = {}) {
+    const allData = this._readData();
+    allData.artifacts = Array.isArray(allData.artifacts) ? allData.artifacts : [];
+    const now = new Date().toISOString();
+    const item = {
+      id: Date.now() + Math.floor(Math.random() * 10000),
+      notebookId: artifactData.notebookId,
+      type: artifactData.type || 'unknown',
+      stage: artifactData.stage || 'framework',
+      title: artifactData.title || artifactData.type || '未命名产物',
+      content: artifactData.content ?? null,
+      format: artifactData.format || 'json',
+      status: artifactData.status || 'generated',
+      version: Number(artifactData.version) || 1,
+      confirmed: Boolean(artifactData.confirmed),
+      parentArtifactId: artifactData.parentArtifactId || null,
+      sourceArtifactIds: Array.isArray(artifactData.sourceArtifactIds) ? artifactData.sourceArtifactIds : [],
+      storagePath: artifactData.storagePath || null,
+      previewText: artifactData.previewText || null,
+      diffSummary: artifactData.diffSummary || null,
+      reviewFlags: Array.isArray(artifactData.reviewFlags) ? artifactData.reviewFlags : [],
+      validationResults: Array.isArray(artifactData.validationResults) ? artifactData.validationResults : [],
+      sourceRefs: Array.isArray(artifactData.sourceRefs) ? artifactData.sourceRefs : [],
+      blockingIssues: Array.isArray(artifactData.blockingIssues) ? artifactData.blockingIssues : [],
+      lifecycle: artifactData.lifecycle && typeof artifactData.lifecycle === 'object'
+        ? artifactData.lifecycle
+        : {
+            generatedAt: now,
+            confirmedAt: artifactData.confirmed ? now : null
+          },
+      createdAt: now,
+      updatedAt: now
+    };
+    allData.artifacts.push(item);
+    this._writeData(allData);
+    return item;
+  }
+
+  updateArtifact(artifactId, patch = {}) {
+    const allData = this._readData();
+    allData.artifacts = Array.isArray(allData.artifacts) ? allData.artifacts : [];
+    const index = allData.artifacts.findIndex((item) => item.id === artifactId);
+    if (index === -1) {
+      throw new Error('Artifact not found');
+    }
+    allData.artifacts[index] = {
+      ...allData.artifacts[index],
+      ...patch,
+      sourceArtifactIds: Array.isArray(patch.sourceArtifactIds)
+        ? patch.sourceArtifactIds
+        : allData.artifacts[index].sourceArtifactIds || [],
+      reviewFlags: Array.isArray(patch.reviewFlags)
+        ? patch.reviewFlags
+        : allData.artifacts[index].reviewFlags || [],
+      validationResults: Array.isArray(patch.validationResults)
+        ? patch.validationResults
+        : allData.artifacts[index].validationResults || [],
+      sourceRefs: Array.isArray(patch.sourceRefs)
+        ? patch.sourceRefs
+        : allData.artifacts[index].sourceRefs || [],
+      blockingIssues: Array.isArray(patch.blockingIssues)
+        ? patch.blockingIssues
+        : allData.artifacts[index].blockingIssues || [],
+      lifecycle: patch.lifecycle && typeof patch.lifecycle === 'object'
+        ? { ...(allData.artifacts[index].lifecycle || {}), ...patch.lifecycle }
+        : {
+            ...(allData.artifacts[index].lifecycle || {}),
+            confirmedAt: patch.confirmed
+              ? (allData.artifacts[index].lifecycle?.confirmedAt || new Date().toISOString())
+              : allData.artifacts[index].lifecycle?.confirmedAt || null
+          },
+      updatedAt: new Date().toISOString()
+    };
+    this._writeData(allData);
+    return allData.artifacts[index];
+  }
+
+  listArtifacts(filters = {}) {
+    const data = this._readData();
+    const notebookId = Number(filters.notebookId) || null;
+    const type = filters.type || '';
+    const stage = filters.stage || '';
+    return (data.artifacts || [])
+      .filter((item) => {
+        if (notebookId && Number(item.notebookId) !== notebookId) return false;
+        if (type && item.type !== type) return false;
+        if (stage && item.stage !== stage) return false;
+        return true;
+      })
+      .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+  }
+
+  getLatestArtifact(notebookId, type, stage = '') {
+    return this.listArtifacts({ notebookId, type, stage })[0] || null;
+  }
+
+  createOperation(operationData = {}) {
+    const allData = this._readData();
+    allData.operations = Array.isArray(allData.operations) ? allData.operations : [];
+    const now = new Date().toISOString();
+    const item = {
+      id: Date.now() + Math.floor(Math.random() * 10000),
+      notebookId: operationData.notebookId,
+      stage: operationData.stage || 'framework',
+      action: operationData.action || 'unknown',
+      status: operationData.status || 'running',
+      summary: operationData.summary || null,
+      input: operationData.input ?? null,
+      output: operationData.output ?? null,
+      error: operationData.error || null,
+      warnings: Array.isArray(operationData.warnings) ? operationData.warnings : [],
+      outputArtifactIds: Array.isArray(operationData.outputArtifactIds) ? operationData.outputArtifactIds : [],
+      metadata: operationData.metadata && typeof operationData.metadata === 'object' ? operationData.metadata : {},
+      startedAt: operationData.startedAt || now,
+      finishedAt: operationData.finishedAt || null,
+      createdAt: now,
+      updatedAt: now
+    };
+    allData.operations.push(item);
+    this._writeData(allData);
+    return item;
+  }
+
+  updateOperation(operationId, patch = {}) {
+    const allData = this._readData();
+    allData.operations = Array.isArray(allData.operations) ? allData.operations : [];
+    const index = allData.operations.findIndex((item) => item.id === operationId);
+    if (index === -1) {
+      throw new Error('Operation not found');
+    }
+    const current = allData.operations[index];
+    allData.operations[index] = {
+      ...current,
+      ...patch,
+      warnings: Array.isArray(patch.warnings) ? patch.warnings : (current.warnings || []),
+      outputArtifactIds: Array.isArray(patch.outputArtifactIds)
+        ? patch.outputArtifactIds
+        : (current.outputArtifactIds || []),
+      metadata: patch.metadata && typeof patch.metadata === 'object'
+        ? { ...(current.metadata || {}), ...patch.metadata }
+        : (current.metadata || {}),
+      updatedAt: new Date().toISOString()
+    };
+    this._writeData(allData);
+    return allData.operations[index];
+  }
+
+  listOperations(filters = {}) {
+    const data = this._readData();
+    const notebookId = Number(filters.notebookId) || null;
+    const stage = filters.stage || '';
+    const status = filters.status || '';
+    const action = filters.action || '';
+    const limit = Number(filters.limit) || 0;
+    const items = (data.operations || [])
+      .filter((item) => {
+        if (notebookId && Number(item.notebookId) !== notebookId) return false;
+        if (stage && item.stage !== stage) return false;
+        if (status && item.status !== status) return false;
+        if (action && item.action !== action) return false;
+        return true;
+      })
+      .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+    return limit > 0 ? items.slice(0, limit) : items;
+  }
+
+  createBackendEvent(eventData = {}) {
+    const allData = this._readData();
+    allData.backendEvents = Array.isArray(allData.backendEvents) ? allData.backendEvents : [];
+    const now = new Date().toISOString();
+    const item = {
+      id: Date.now() + Math.floor(Math.random() * 10000),
+      notebookId: Number(eventData.notebookId) || null,
+      scope: eventData.scope || 'system',
+      type: eventData.type || 'unknown',
+      stage: eventData.stage || '',
+      artifactId: eventData.artifactId || null,
+      payload: eventData.payload && typeof eventData.payload === 'object' ? eventData.payload : {},
+      createdAt: now,
+      updatedAt: now
+    };
+    allData.backendEvents.push(item);
+    this._writeData(allData);
+    return item;
+  }
+
+  listBackendEvents(filters = {}) {
+    const data = this._readData();
+    const notebookId = Number(filters.notebookId) || null;
+    const type = String(filters.type || '').trim();
+    const stage = String(filters.stage || '').trim();
+    const limit = Number(filters.limit) || 0;
+    const items = (data.backendEvents || [])
+      .filter((item) => {
+        if (notebookId && Number(item.notebookId) !== notebookId) return false;
+        if (type && item.type !== type) return false;
+        if (stage && item.stage !== stage) return false;
+        return true;
+      })
+      .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+    return limit > 0 ? items.slice(0, limit) : items;
+  }
+
+  // ========================================
+  // 鏁欏杩涘害琛紙Teaching Schedule锟?
+  // ========================================
+
+  saveTeachingSchedule(notebookId, schedule) {
+    const updated = this.updateNotebook(notebookId, { teachingSchedule: schedule });
+    if (!updated) {
+      throw new Error('Notebook not found');
+    }
+    return updated.teachingSchedule;
+  }
+
+  getTeachingSchedule(notebookId) {
+    const notebook = this.getNotebookById(notebookId);
+    return notebook ? (notebook.teachingSchedule || null) : null;
+  }
+
+  // ========================================
+  // 妯″潡锛圡odules锛夌浉鍏虫搷锟?
+  // ========================================
+
+  // 鍒涘缓妯″潡
+  createModule(notebookId, moduleData) {
+    const allData = this._readData();
+    
+    const module = {
+      id: Date.now(),
+      notebookId: notebookId,
+      moduleNumber: moduleData.moduleNumber,
+      name: moduleData.name,
+      hours: moduleData.hours,
+      description: moduleData.description || null,
+      objectives: moduleData.objectives || [],
+      knowledgePoints: moduleData.knowledgePoints || [],
+      teachingMethods: moduleData.teachingMethods || null,
+      isCore: Boolean(moduleData.isCore),
+      content: moduleData.content || {},
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    
+    allData.modules.push(module);
+    this._writeData(allData);
+    
+    return module.id;
+  }
+
+  // 鑾峰彇绗旇鏈殑鎵€鏈夋ā锟?
+  getModulesByNotebook(notebookId) {
+    const data = this._readData();
+    return data.modules
+      .filter(m => m.notebookId === notebookId)
+      .sort((a, b) => a.moduleNumber - b.moduleNumber);
+  }
+
+  getModuleById(moduleId) {
+    const data = this._readData();
+    return data.modules.find((m) => m.id === moduleId) || null;
+  }
+
+  // Update module
+  updateModule(moduleId, updateData) {
+    const allData = this._readData();
+    const index = allData.modules.findIndex(m => m.id === moduleId);
+    if (index === -1) {
+      throw new Error('Module not found');
+    }
+    allData.modules[index] = {
+      ...allData.modules[index],
+      ...updateData,
+      updatedAt: new Date().toISOString()
+    };
+    this._writeData(allData);
+    return allData.modules[index];
+  }
+
+  // Delete module
+  deleteModule(moduleId) {
+    const allData = this._readData();
+    const exists = allData.modules.some(m => m.id === moduleId);
+    if (!exists) {
+      throw new Error('Module not found');
+    }
+    allData.modules = allData.modules.filter(m => m.id !== moduleId);
+    this._writeData(allData);
+  }
+
+  // Replace all modules for a notebook
+  replaceModules(notebookId, modules) {
+    const allData = this._readData();
+    const previous = allData.modules.filter(m => m.notebookId === notebookId);
+    allData.modules = allData.modules.filter(m => m.notebookId !== notebookId);
+    const now = new Date().toISOString();
+    const normalized = (modules || []).map((moduleData) => ({
+      id: Date.now() + Math.floor(Math.random() * 10000),
+      notebookId,
+      moduleNumber: moduleData.moduleNumber,
+      name: moduleData.name,
+      hours: moduleData.hours,
+      description: moduleData.description || null,
+      objectives: moduleData.objectives || [],
+      knowledgePoints: moduleData.knowledgePoints || [],
+      teachingMethods: moduleData.teachingMethods || null,
+      content: (() => {
+        const matched = previous.find((item) => {
+          const sameNumber = Number(item.moduleNumber) === Number(moduleData.moduleNumber);
+          const sameName = String(item.name || '').trim() === String(moduleData.name || '').trim();
+          return sameNumber || sameName;
+        });
+        const prevContent = matched && matched.content && typeof matched.content === 'object'
+          ? matched.content
+          : {};
+        const nextContent = moduleData.content && typeof moduleData.content === 'object'
+          ? moduleData.content
+          : {};
+        return { ...prevContent, ...nextContent };
+      })(),
+      isCore: Boolean(moduleData.isCore),
+      createdAt: now,
+      updatedAt: now
+    }));
+    allData.modules.push(...normalized);
+    this._writeData(allData);
+    return this.getModulesByNotebook(notebookId);
+  }
+
+  setModuleStructureImage(moduleId, imageData = {}) {
+    const allData = this._readData();
+    const index = allData.modules.findIndex((m) => m.id === moduleId);
+    if (index === -1) {
+      throw new Error('Module not found');
+    }
+    const prev = allData.modules[index];
+    const prevContent = prev.content && typeof prev.content === 'object' ? prev.content : {};
+    allData.modules[index] = {
+      ...prev,
+      content: {
+        ...prevContent,
+        structureImagePath: imageData.imagePath || null,
+        structureImageUrl: imageData.imageUrl || null,
+        structureImageMeta: {
+          prompt: imageData.prompt || '',
+          model: imageData.model || null,
+          resourceId: imageData.resourceId || null,
+          updatedAt: new Date().toISOString()
+        }
+      },
+      updatedAt: new Date().toISOString()
+    };
+    this._writeData(allData);
+    return allData.modules[index];
+  }
+
+  updateModuleContent(moduleId, contentPatch = {}, merge = true) {
+    const allData = this._readData();
+    const index = allData.modules.findIndex((m) => m.id === moduleId);
+    if (index === -1) {
+      throw new Error('Module not found');
+    }
+    const prev = allData.modules[index];
+    const prevContent = prev.content && typeof prev.content === 'object' ? prev.content : {};
+    allData.modules[index] = {
+      ...prev,
+      content: merge
+        ? { ...prevContent, ...(contentPatch || {}) }
+        : { ...(contentPatch || {}) },
+      updatedAt: new Date().toISOString()
+    };
+    this._writeData(allData);
+    return allData.modules[index];
+  }
+
+  // ========================================
+  // 素材资源（Resources）相关操作
+  // ========================================
+
+  listResources(filters = {}) {
+    const data = this._readData();
+    const keyword = (filters.keyword || '').toLowerCase();
+    const type = filters.type || '';
+    const notebookId = filters.notebookId ? Number(filters.notebookId) : null;
+
+    return (data.resources || [])
+      .filter((item) => {
+        if (type && item.type !== type) return false;
+        if (notebookId && Number(item.notebookId) !== notebookId) return false;
+        if (!keyword) return true;
+        const text = [
+          item.name,
+          item.originalName,
+          item.tags,
+          item.description
+        ]
+          .flat()
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return text.includes(keyword);
+      })
+      .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+  }
+
+  createResource(resourceData) {
+    const allData = this._readData();
+    const resource = {
+      id: Date.now() + Math.floor(Math.random() * 10000),
+      name: resourceData.name || resourceData.originalName || '未命名素材',
+      originalName: resourceData.originalName || resourceData.name || '未命名素材',
+      type: resourceData.type || 'other',
+      notebookId: resourceData.notebookId || null,
+      sourcePath: resourceData.sourcePath || null,
+      storagePath: resourceData.storagePath || null,
+      size: resourceData.size || 0,
+      tags: Array.isArray(resourceData.tags) ? resourceData.tags : [],
+      description: resourceData.description || '',
+      // 结构化标签字段
+      moduleRef: resourceData.moduleRef || null,
+      stage: resourceData.stage || null,
+      usage: resourceData.usage || null,
+      category: resourceData.category || null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    allData.resources = Array.isArray(allData.resources) ? allData.resources : [];
+    allData.resources.push(resource);
+    this._writeData(allData);
+    return resource;
+  }
+
+  upsertResourceByStoragePath(resourceData) {
+    const allData = this._readData();
+    allData.resources = Array.isArray(allData.resources) ? allData.resources : [];
+    const index = allData.resources.findIndex((item) => item.storagePath === resourceData.storagePath);
+    if (index === -1) {
+      const resource = {
+        id: Date.now() + Math.floor(Math.random() * 10000),
+        name: resourceData.name || resourceData.originalName || '未命名素材',
+        originalName: resourceData.originalName || resourceData.name || '未命名素材',
+        type: resourceData.type || 'other',
+        notebookId: resourceData.notebookId || null,
+        sourcePath: resourceData.sourcePath || null,
+        storagePath: resourceData.storagePath || null,
+        size: resourceData.size || 0,
+        tags: Array.isArray(resourceData.tags) ? resourceData.tags : [],
+        description: resourceData.description || '',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      allData.resources.push(resource);
+      this._writeData(allData);
+      return resource;
+    }
+    allData.resources[index] = {
+      ...allData.resources[index],
+      ...resourceData,
+      updatedAt: new Date().toISOString()
+    };
+    this._writeData(allData);
+    return allData.resources[index];
+  }
+
+  // 按 ID 获取单个资源
+  getResourceById(resourceId) {
+    const data = this._readData();
+    return (data.resources || []).find((item) => item.id === Number(resourceId)) || null;
+  }
+
+  // 更新资源字段
+  updateResource(resourceId, patch = {}) {
+    const allData = this._readData();
+    allData.resources = Array.isArray(allData.resources) ? allData.resources : [];
+    const index = allData.resources.findIndex((item) => item.id === Number(resourceId));
+    if (index === -1) throw new Error('Resource not found');
+    allData.resources[index] = {
+      ...allData.resources[index],
+      ...patch,
+      tags: Array.isArray(patch.tags) ? patch.tags : allData.resources[index].tags,
+      updatedAt: new Date().toISOString()
+    };
+    this._writeData(allData);
+    return allData.resources[index];
+  }
+
+  // 给资源追加标签（不覆盖已有）
+  addResourceTags(resourceId, newTags = []) {
+    const allData = this._readData();
+    allData.resources = Array.isArray(allData.resources) ? allData.resources : [];
+    const index = allData.resources.findIndex((item) => item.id === Number(resourceId));
+    if (index === -1) throw new Error('Resource not found');
+    const existing = Array.isArray(allData.resources[index].tags) ? allData.resources[index].tags : [];
+    const merged = [...new Set([...existing, ...newTags.filter(Boolean)])];
+    allData.resources[index].tags = merged;
+    allData.resources[index].updatedAt = new Date().toISOString();
+    this._writeData(allData);
+    return allData.resources[index];
+  }
+
+  // 按标签查询资源（多标签 AND）
+  listResourcesByTags(tags = [], filters = {}) {
+    const data = this._readData();
+    const notebookId = filters.notebookId ? Number(filters.notebookId) : null;
+    const type = filters.type || '';
+    const tagsToMatch = tags.filter(Boolean).map(t => t.toLowerCase());
+    return (data.resources || [])
+      .filter((item) => {
+        if (type && item.type !== type) return false;
+        if (notebookId && Number(item.notebookId) !== notebookId) return false;
+        if (!tagsToMatch.length) return true;
+        const itemTags = (Array.isArray(item.tags) ? item.tags : []).map(t => String(t).toLowerCase());
+        return tagsToMatch.every(t => itemTags.some(it => it.includes(t)));
+      })
+      .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+  }
+
+  // 按模块查询资源
+  listResourcesByModule(notebookId, moduleRef) {
+    return this.listResourcesByTags([`模块:${moduleRef}`], { notebookId });
+  }
+
+  // 获取笔记本下所有标签统计
+  listResourceTags(notebookId) {
+    const data = this._readData();
+    const tagCount = {};
+    (data.resources || [])
+      .filter((item) => !notebookId || Number(item.notebookId) === Number(notebookId))
+      .forEach((item) => {
+        (Array.isArray(item.tags) ? item.tags : []).forEach((tag) => {
+          tagCount[tag] = (tagCount[tag] || 0) + 1;
+        });
+      });
+    return Object.entries(tagCount)
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count);
+  }
+
+  deleteResource(resourceId) {
+    const allData = this._readData();
+    const exists = allData.resources.some((item) => item.id === Number(resourceId));
+    if (!exists) {
+      throw new Error('Resource not found');
+    }
+    allData.resources = allData.resources.filter((item) => item.id !== Number(resourceId));
+    this._writeData(allData);
+    return true;
+  }
+
+  // ========================================
+  // 璁剧疆锛圫ettings锛夌浉鍏虫搷锟?
+  // ========================================
+
+  // 淇濆瓨API瀵嗛挜
+  saveApiKey(provider, apiKey) {
+    const allData = this._readData();
+    
+    // 绠€鍗曠殑base64缂栫爜
+    const encoded = Buffer.from(apiKey).toString('base64');
+    allData.settings[`api_key_${provider}`] = encoded;
+    allData.settings[`api_key_${provider}_encrypted`] = true;
+    allData.settings[`api_key_${provider}_updated_at`] = new Date().toISOString();
+    
+    this._writeData(allData);
+  }
+
+  // 鑾峰彇API瀵嗛挜
+  getApiKey(provider) {
+    const data = this._readData();
+    const encoded = data.settings[`api_key_${provider}`];
+    
+    if (!encoded) return null;
+    
+    // 瑙ｇ爜
+    if (data.settings[`api_key_${provider}_encrypted`]) {
+      return Buffer.from(encoded, 'base64').toString('utf8');
+    }
+    
+    return encoded;
+  }
+
+  // 淇濆瓨璁剧疆
+  saveSetting(key, value) {
+    const allData = this._readData();
+    allData.settings[key] = value;
+    allData.settings[`${key}_updated_at`] = new Date().toISOString();
+    this._writeData(allData);
+  }
+
+  // 鑾峰彇璁剧疆
+  getSetting(key) {
+    const data = this._readData();
+    return data.settings[key] || null;
+  }
+
+  // ========================================
+  // 宸ュ叿鏂规硶
+  // ========================================
+
+  // 鍏抽棴鏁版嵁搴擄紙JSON鏂囦欢涓嶉渶瑕佸叧闂級
+
+  // ========================================
+  // Agent 记忆（agent_memories）Phase-5C Step 4
+  // ========================================
+
+  /**
+   * 保存一条 Agent 记忆（upsert：同 notebookId 只保留最新一条）
+   * 超出全局上限（50 条）时删除最旧的条目。
+   */
+  saveAgentMemory(entry) {
+    const MAX_MEMORIES = 50;
+    const allData = this._readData();
+    allData.agent_memories = Array.isArray(allData.agent_memories) ? allData.agent_memories : [];
+
+    // upsert：删除同 notebookId 的旧记录
+    allData.agent_memories = allData.agent_memories.filter(
+      (m) => m.notebookId !== entry.notebookId
+    );
+
+    // 全局上限：超出时删除最旧的条目
+    while (allData.agent_memories.length >= MAX_MEMORIES) {
+      allData.agent_memories.shift();
+    }
+
+    allData.agent_memories.push({ ...entry, id: Date.now() });
+    this._writeData(allData);
+  }
+
+  /**
+   * 获取所有 Agent 记忆（供 memory.js 检索使用）
+   * @returns {Array}
+   */
+  getAgentMemories() {
+    const data = this._readData();
+    return Array.isArray(data.agent_memories) ? data.agent_memories : [];
+  }
+  close() {
+  }
+
+  // 浜嬪姟锛堢畝鍖栫増锛岀洿鎺ユ墽琛岋級
+  transaction(callback) {
+    return callback();
+  }
+}
+
+module.exports = DatabaseManager;
+

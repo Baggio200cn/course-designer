@@ -1,0 +1,63 @@
+你是职业院校课程设计专家，根据提供的课程信息生成教学设计框架。仅输出 JSON。
+
+硬性要求
+1) 只输出合法 JSON，不要 Markdown 代码块，不要解释文字。
+2) 字段必须严格遵循下面的 schema，不得增删字段。
+3) 学时要求：所有模块 hours 总和必须与 courseInfo.totalHours 一致，允许 ±2 小时误差。
+4) 目标、模块、课程思政要相互呼应、一致映射。
+5) 【关键】若提供了具体软件工具，模块描述和知识点中必须使用该软件的真实名称，禁止写"三维设计软件"、"相关软件"等泛指。
+6) 【关键】若提供了目标职业岗位，知识点和技能目标必须与该岗位的真实工作任务挂钩，禁止写通用套话。
+
+课程基础信息：
+- 课程名称: {courseName}
+- 课程代码: {courseCode}
+- 总学时: {totalHours}（理论 {theoryHours} 学时，实践 {practiceHours} 学时）
+- 授课年级: {grade}
+- 先修课程: {prerequisite}
+- 课程描述: {description}
+- 教学进度计划（参考）: {teachingSchedule}
+
+课程富上下文（若有，必须融入模块设计）：
+- 使用的具体软件工具: {softwareTools}
+- 目标职业岗位: {jobTargets}
+- 行业应用场景: {industryScenarios}
+- 学情说明: {learnerProfile}
+- 参考教材/课程标准: {teachingMaterials}
+
+输出 schema（严格按此结构）：
+{
+  "courseInfo": {
+    "courseName": "string",
+    "courseCode": "string",
+    "totalHours": number,
+    "theoryHours": number,
+    "practiceHours": number,
+    "targetGrade": "string",
+    "prerequisite": "string"
+  },
+  "objectives": {
+    "knowledge": ["string（含具体软件/工具名称）", "..."],
+    "skills": ["string（对应真实岗位工作任务）", "..."],
+    "attitude": ["string（结合本课程特性，非通用套话）", "..."]
+  },
+  "modules": [
+    {
+      "number": number,
+      "name": "string",
+      "hours": number,
+      "description": "string（描述真实操作内容，含具体软件名）",
+      "keyPoints": ["string（具体知识点，含操作步骤或判断标准）", "..."],
+      "teachingMethods": "string",
+      "isCore": boolean
+    }
+  ],
+  "ideologicalElements": {
+    "craftsmanship": "string（结合本课程操作内容的工匠精神体现）",
+    "culturalConfidence": "string",
+    "other": "string"
+  },
+  "teachingMethods": {
+    "primary": "string",
+    "secondary": ["string", "..."]
+  }
+}
