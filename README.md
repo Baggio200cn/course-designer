@@ -1,8 +1,8 @@
-# 刘老师课程助手 v2版
+# 刘老师Agent2.1
 
 > **职业教育课程开发 Workflow Agent** — Electron + React + SQLite + Ark/DeepSeek API
 >
-> 当前版本：**v1.5.0**（Phase-5D 完成） | 最后更新：2026-04-25
+> 当前版本：**v2.1.0**（Phase-5D 完成） | 最后更新：2026-04-25
 
 ---
 
@@ -21,7 +21,7 @@
 
 | 项目 | 详情 |
 |------|------|
-| 版本 | v1.5.0 |
+| 版本 | v2.1.0 |
 | 阶段 | Phase-5D 完成（Agent 四阶段全自动流水线） |
 | 代码规模 | ~19,000 行 JS |
 | 下一阶段 | Phase-6：Agent 状态面板增强 + 广纺织验收准备 |
@@ -30,7 +30,7 @@
 
 ## 核心功能
 
-### 🚀 Agent 一键全流程生成（v1.5.0 新功能）
+### 🚀 Agent 一键全流程生成（v2.1.0 核心功能）
 
 在软件右侧「🤖 Agent 智能生成」面板，点击「一键生成全部阶段」，系统自动完成：
 
@@ -78,7 +78,7 @@
 |----|------|
 | 桌面容器 | Electron 28 |
 | 前端框架 | React 18 + Vite |
-| 数据库 | SQLite（better-sqlite3，本地存储） |
+| 数据库 | SQLite（本地存储，数据不上传） |
 | AI 接口 | 火山引擎 Ark API（DeepSeek-V3 + doubao-seedream-5.0） |
 | PPT 生成 | pptxgenjs |
 | Word 导出 | docx |
@@ -203,7 +203,7 @@ node scripts/e2e-framework-word.js
 
 ```bash
 npm run dist
-# 输出：dist/刘老师课程助手v2版-setup.exe
+# 输出：dist/刘老师Agent2.1-setup.exe
 ```
 
 ---
@@ -217,8 +217,6 @@ npm run dist
 | Ark API Key | 火山引擎控制台创建的 API Key |
 | 文本模型 Endpoint | DeepSeek-V3 或 doubao-pro-32k 的推理接入点 ID |
 | 图片模型 Endpoint | doubao-seedream-5.0 的推理接入点 ID |
-
-> 详细注册步骤见 `dist/老师桌面安装指南.md`
 
 ### 费用参考
 
@@ -255,12 +253,11 @@ npm run dist
 
 | 版本 | 阶段 | 核心内容 |
 |------|------|---------|
-| v1.5.0 | Phase-5D | Agent 四阶段全流水线；DB 持久化修复；实时进度轮询；PPT 双标题/路线图修复 |
-| v1.4.x | Phase-5C | Agent Orchestrator + Memory + Context-Builder 基础架构；framework + lecture 两阶段 |
-| v1.3.x | Phase-5B | 5 个课程上下文字段（softwareTools/jobTargets 等）；AI 研究建议；讲稿 AI 审核 Review Loop |
-| v1.2.x | Phase-5A | IPC 拆分完成（87 个 handler 迁移至 ipc/ 目录） |
-| v1.1.x | Phase-4 | PPT 11 种页型；Word 六列教学过程表；knowledge-cards HTML 导出 |
-| v1.0.x | Phase-1~3 | 基础框架生成、讲稿 ABC 生成、SQLite 数据库 |
+| **v2.1.0** | Phase-5D | Agent 四阶段全流水线；DB 持久化修复；实时进度轮询；PPT 双标题/路线图修复 |
+| v2.0.x | Phase-5C | Agent Orchestrator + Memory + Context-Builder；framework + lecture 两阶段 |
+| v1.9.x | Phase-5B | 5 个课程上下文字段；AI 研究建议；讲稿 AI 审核 Review Loop |
+| v1.8.x | Phase-5A | IPC 拆分完成（87 个 handler 迁移至 ipc/ 目录） |
+| v1.x | Phase-1~4 | 基础框架生成、讲稿 ABC、PPT 11 种页型、Word 六列教学过程表 |
 
 ---
 

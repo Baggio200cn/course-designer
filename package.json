@@ -1,7 +1,7 @@
 {
   "name": "ai-course-designer",
-  "version": "1.5.0",
-  "description": "刘老师课程助手 v2版 - 职业教育课程开发 Workflow Agent",
+  "version": "2.1.0",
+  "description": "刘老师Agent2.1 - 职业教育课程开发 Workflow Agent",
   "main": "src/main/index.js",
   "scripts": {
     "dev": "node scripts/dev.js",
@@ -41,7 +41,7 @@
   },
   "build": {
     "appId": "com.newvision.course-designer",
-    "productName": "刘老师课程助手v2版",
+    "productName": "刘老师Agent2.1",
     "directories": {
       "output": "dist"
     },
@@ -66,8 +66,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "刘老师课程助手v2版"
+      "shortcutName": "刘老师Agent2.1"
     },
-    "artifactName": "刘老师课程助手v2版-setup.exe"
+    "artifactName": "刘老师Agent2.1-setup.exe"
   }
 }
