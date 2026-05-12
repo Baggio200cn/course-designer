@@ -29,10 +29,15 @@ const { buildLectureContext } = require('../agent/context-builder');    // Phase
  * @param {Function} getDeps
  */
 function register(ipcMain, getDeps) {
-  /** 用当前 db 的 API key 配置创建 AI 客户端 */
-  function createAiClient(payload) {
+  /** 用当前 db 的 API key 配置创建 AI 客户端
+   *
+   * Phase-7.7 B6（2026-04-29）：加可选 purpose 参数。
+   *   - createAiClient(payload)                     → 通用 endpoint（向后兼容）
+   *   - createAiClient(payload, 'lecture_formal')   → 正式稿专用 endpoint，缺则 fallback
+   */
+  function createAiClient(payload, purpose) {
     const { db } = getDeps();
-    const config = resolveProviderConfig({ payload, db });
+    const config = resolveProviderConfig({ payload, db, purpose });
     return createAiClientByConfig(config);
   }
 
@@ -105,7 +110,8 @@ function register(ipcMain, getDeps) {
       const notebookId = Number(payload.notebookId);
       const notebook = notebookId ? db.getNotebookById(notebookId) : null;
       const modules = notebookId ? db.getModulesByNotebook(notebookId) : [];
-      const aiClient = createAiClient(payload);
+      // B6：正式稿生成走专用 endpoint（如配置）；其他 lecture 路径仍走通用
+      const aiClient = createAiClient(payload, 'lecture_formal');
       const styleRubricText = payload.styleRubricText || '';
       const courseName = payload.courseName || notebook?.name || '课程';
       const totalHours = Number(notebook?.totalHours) || Number(payload.totalHours) || 1;
@@ -120,7 +126,9 @@ function register(ipcMain, getDeps) {
         frameworkObjectives: frameworkCtxFormal.frameworkObjectives,
         frameworkTeachingMethods: frameworkCtxFormal.frameworkTeachingMethods,
         // Phase-5C：老师提供的参考资料（教案/URL 提取文本/DOCX 内容）
-        referenceContext: String(payload.referenceContext || '').slice(0, 5000)
+        referenceContext: String(payload.referenceContext || '').slice(0, 5000),
+        // Phase-8.5：注入 totalHours 给 review.service 用于课时连贯性审核
+        totalHours
       };
 
       // ── Phase-5C: Auto-Retry Loop ─────────────────────────────────────────
@@ -198,12 +206,14 @@ function register(ipcMain, getDeps) {
             attemptLog,
             finalNarrationCharCount: retryQuality.checks?.finalNarrationCharCount || 0
           },
-          // Phase-5B：审核结果
+          // Phase-5B：审核结果（Phase-8.5 扩展 subscores 4 维度）
           review: reviewMeta ? {
             score: reviewMeta.score,
             issues: reviewMeta.issues,
             summary: reviewMeta.summary,
-            revised: reviewMeta.revised_success
+            revised: reviewMeta.revised_success,
+            // Phase-8.5：素材融合深度 / 五段式 / 课时连贯性 / 版权安全 4 项子分
+            subscores: reviewMeta.subscores || null
           } : null
         }
       };

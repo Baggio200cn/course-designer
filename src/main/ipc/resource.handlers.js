@@ -47,7 +47,7 @@ function inferResourceType(filename) {
 
 /** 返回教师工作区根目录（桌面文档文件夹下的固定目录） */
 function getTeacherWorkspaceRoot() {
-  return path.join(app.getPath('documents'), '课程开发助手工作区');
+  return path.join(app.getPath('documents'), '驭课Agent工作区');
 }
 
 // ── 注册入口 ──────────────────────────────────────────────────────────────────

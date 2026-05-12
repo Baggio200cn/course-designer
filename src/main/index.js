@@ -126,7 +126,7 @@ function sanitizeWorkspaceSegment(value, fallback = '未命名课程') {
 }
 
 function getTeacherWorkspaceRoot() {
-  return path.join(app.getPath('documents'), '课程开发助手工作区');
+  return path.join(app.getPath('documents'), '驭课Agent工作区');
 }
 
 function ensureNotebookWorkspaceDirs(notebook) {
@@ -225,6 +225,8 @@ function syncFrameworkArtifacts(notebookId, options = {}) {
   if (!bundle) return null;
   const workflow = ensureWorkflowStateForNotebook(notebookId) || getDefaultWorkflowState(notebookId);
   const isConfirmed = Boolean(options.confirmed || (workflow.unlockedStages || []).includes('lecture'));
+  // Phase-6 M2.2：用户操作触发同步时加锁
+  const lockPatch = options.userInitiated === true ? { lockedByUser: true } : {};
   const quality = options.quality || {};
   const evidence = buildArtifactEvidence({
     stage: 'framework',
@@ -255,7 +257,8 @@ function syncFrameworkArtifacts(notebookId, options = {}) {
         lifecycle: {
           generatedAt: new Date().toISOString(),
           confirmedAt: isConfirmed ? new Date().toISOString() : null
-        }
+        },
+        ...lockPatch
       });
     } catch {
       jsonArtifact = null;
@@ -275,7 +278,8 @@ function syncFrameworkArtifacts(notebookId, options = {}) {
       reviewFlags: evidence.reviewFlags,
       validationResults: evidence.validationResults,
       sourceRefs: evidence.sourceRefs,
-      blockingIssues: evidence.blockingIssues
+      blockingIssues: evidence.blockingIssues,
+      ...lockPatch
     });
   }
 
@@ -297,7 +301,8 @@ function syncFrameworkArtifacts(notebookId, options = {}) {
         lifecycle: {
           generatedAt: new Date().toISOString(),
           confirmedAt: isConfirmed ? new Date().toISOString() : null
-        }
+        },
+        ...lockPatch
       });
     } catch {
       previewArtifact = null;
@@ -318,7 +323,8 @@ function syncFrameworkArtifacts(notebookId, options = {}) {
       reviewFlags: evidence.reviewFlags,
       validationResults: evidence.validationResults,
       sourceRefs: [...evidence.sourceRefs, { kind: 'artifact', ref: String(jsonArtifact.id), label: 'framework-json' }],
-      blockingIssues: evidence.blockingIssues
+      blockingIssues: evidence.blockingIssues,
+      ...lockPatch
     });
   }
 
@@ -703,6 +709,12 @@ function upsertStageArtifact(notebookId, options = {}) {
           confirmedAt: options.confirmed ? new Date().toISOString() : null
         }
   };
+  // Phase-6 M2.2：用户手动 save/confirm 时锁定（Q2 选项 C 的第二种触发场景）
+  // 仅当显式 userInitiated=true 时才设 lockedByUser=true；
+  // Agent 调用路径默认 userInitiated=false，让 db.updateArtifact 自行处理 confirmed 联动
+  if (options.userInitiated === true) {
+    patch.lockedByUser = true;
+  }
 
   let artifact = null;
   const refId = refKey ? workflow?.currentArtifactRefs?.[refKey] : null;
@@ -1042,14 +1054,20 @@ const withTimeout = (promise, ms, label) => {
 };
 
 const renderHtmlToPngBuffer = async (html, width = 1000, height = 1400) => {
+  // Phase-9 C-2 修正（2026-05-09）：
+  // 旧实现 capturePage() 不显式传 rect，Windows 上会被 BrowserWindow chrome 高度
+  // (~38px) 和 DPI 缩放截断 → 即使 HTML 真实 scrollHeight=1790，PNG 也只输出 1069。
+  // 修复策略：
+  //   1. 等 fonts.ready + 1000ms（原 300ms 不够）
+  //   2. 拿真实 contentSize 后**显式 setContentSize** 到内容尺寸
+  //   3. capturePage(rect) 显式传 {x,y,width,height} 截全 content
   const win = new BrowserWindow({
     show: false,
     width,
     height,
+    useContentSize: true,                  // 关键：width/height 指内容区，不含 chrome
     backgroundColor: '#ffffff',
-    webPreferences: {
-      sandbox: false
-    }
+    webPreferences: { sandbox: false, offscreen: false }
   });
 
   try {
@@ -1058,20 +1076,29 @@ const renderHtmlToPngBuffer = async (html, width = 1000, height = 1400) => {
       new Promise((resolve) => {
         const waitFonts = document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve();
         waitFonts.then(() => {
+          // 拉长等待至 1000ms，给图片/svg/外部资源充足渲染时间
           setTimeout(() => resolve({
             width: Math.ceil(document.documentElement.scrollWidth || document.body.scrollWidth || ${width}),
             height: Math.ceil(document.documentElement.scrollHeight || document.body.scrollHeight || ${height})
-          }), 300);
+          }), 1000);
         });
       });
-    `), 15000, 'Infocard content size evaluation');
-    const nextWidth = Math.max(width, Number(contentSize?.width) || width);
-    const nextHeight = Math.max(height, Number(contentSize?.height) || height);
-    if (nextWidth !== width || nextHeight !== height) {
-      win.setContentSize(nextWidth, nextHeight);
-      await new Promise((resolve) => setTimeout(resolve, 250));
-    }
-    const image = await withTimeout(win.webContents.capturePage(), 20000, 'Infocard capture');
+    `), 20000, 'Infocard content size evaluation');
+
+    const realW = Math.max(width, Number(contentSize?.width) || width);
+    const realH = Math.max(height, Number(contentSize?.height) || height);
+
+    // 强制把 BrowserWindow 内容区设到真实尺寸（即使初始就够，也重设以触发 viewport reflow）
+    win.setContentSize(realW, realH);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    // 显式 rect，避免 capturePage 默认截窗口可见区导致下半截丢失
+    const image = await withTimeout(
+      win.webContents.capturePage({ x: 0, y: 0, width: realW, height: realH }),
+      30000,
+      'Infocard capture'
+    );
+    console.log(`[renderHtmlToPngBuffer] requested=${width}x${height} content=${contentSize?.width}x${contentSize?.height} captured=${realW}x${realH}`);
     return image.toPNG();
   } finally {
     if (!win.isDestroyed()) win.destroy();
@@ -1121,7 +1148,7 @@ const normalizeScheduleInput = (schedule) => {
 };
 function createWindow() {
   mainWindow = new BrowserWindow({
-    title: '刘老师课程助手 v2版',
+    title: '驭课 Agent v4.0.0',
     width: 1400,
     height: 900,
     minWidth: 1200,
@@ -1278,6 +1305,10 @@ const getDeps = () => ({
   imageVersionService,
   imageGeneratorService,
   videoGeneratorService,
+  // Phase-7.7 P0-E 修复：补缺的 2 个依赖，让 agent.handlers 的 buildAgentFrameworkInfographicHelper 能正确注入
+  // 之前缺这 2 个 → capability gating 拦下 generate_framework_infographic 动作 → 信息图永远不生成
+  renderHtmlToPngBuffer,
+  inferInfocardStyle,
   // prompt group
   promptTemplateService,
   promptAdvisorService

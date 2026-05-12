@@ -1,0 +1,27 @@
+{
+  "baseline.framework": {
+    "hash": "28d7998f0907b921113691248d3bbcc3f101fd5f93365a1e96b691780e927323",
+    "chars": 944,
+    "fragmentCount": 2
+  },
+  "baseline.lecture": {
+    "hash": "b351bf348733c357fc70d16fb41d3da17e8903e99dad7384996cae888e73cb52",
+    "chars": 1796,
+    "fragmentCount": 4
+  },
+  "baseline.ppt": {
+    "hash": "b351bf348733c357fc70d16fb41d3da17e8903e99dad7384996cae888e73cb52",
+    "chars": 1796,
+    "fragmentCount": 4
+  },
+  "baseline.video": {
+    "hash": "3904d9baf0e87a6130a82138916f3dc8d3d2976486dc8b1dae23f94bf2fe6998",
+    "chars": 894,
+    "fragmentCount": 2
+  },
+  "baseline.global": {
+    "hash": "b351bf348733c357fc70d16fb41d3da17e8903e99dad7384996cae888e73cb52",
+    "chars": 1796,
+    "fragmentCount": 4
+  }
+}

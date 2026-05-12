@@ -351,7 +351,12 @@ function colorCodeToNatural(hex) {
 }
 
 // Hero 页类型集合（与 shared 文件保持一致）
-const GUIZANG_HERO_TYPES = new Set(['封面', '模块页', '路线图', '课程导入']);
+// Phase-9 修正（2026-05-10）：
+//   旧定义把 '模块页' 和 '课程导入' 也归为 Hero 分支 → 这两类页面占 PPT 的 60%+
+//   全部 return 一份"极黑磨砂纹理"的统一 prompt → 22 页千篇一律的暗黑背景图。
+//   修法：Hero 分支只保留真正适合"纯纹理过渡感"的「封面 + 路线图」2 类
+//   其他类型（含模块页、课程导入、各种内容页）走差异化的 pageConceptHints 路径
+const GUIZANG_HERO_TYPES = new Set(['封面', '路线图']);
 
 const GUIZANG_HERO_TEXTURE_MAP = {
   '#0D0D0D': '极黑磨砂材质纹理，细腻炭灰质感，接近全黑，仅有极微弱的漫反射光影层次，适合时尚杂志风夜间感',
@@ -365,54 +370,128 @@ export function buildPptPageImagePrompt({
   pageType,
   template,
   aspect,
-  quality
+  quality,
+  courseSubject,        // 课程主题（视觉元素引导，不是写文字）
+  pageTitleSemantic,    // Phase-9：页面标题作为视觉概念（不渲染为文字字符）
+  pageSummarySemantic,  // Phase-9：页面摘要作为视觉概念
+  pageKeyContent        // Phase-9：页面关键要点作为视觉提示
 }) {
   // ⚠️ 重要：本函数故意不接受 pageTitle / pageSubtitle / contentPreview 等文字参数。
   // 将中文标题/内容送入图像 prompt 会导致 AI 把这些文字"烧"进背景图。
   // 文字内容（标题、要点）由 Canvas 合成层 100% 负责，图片只负责纯视觉氛围。
+  // C8-2：courseSubject 不会被烧进图——它只是提示 AI 选择对应行业的视觉元素
+  //        （如"服装设计课程"→选服装/面料；"3D建模"→选软件界面/几何体）
 
   const safeTemplate = template || {};
 
-  // ── guizang Hero 页分路由 ────────────────────────────────────────────────
+  // ── guizang Hero 页分路由（仅限 封面 / 路线图 这种纯纹理过渡用途）─────────
   if (safeTemplate.variant === 'guizang' && GUIZANG_HERO_TYPES.has(pageType)) {
     const textureDesc = GUIZANG_HERO_TEXTURE_MAP[safeTemplate.heroBackground]
       || '深色极简纹理背景，接近全黑，微弱光影层次，沉稳克制';
+    // Phase-9 修正：封面/路线图 也注入本页主题作为细微纹理变化提示
+    //   保留"纯纹理"主基调，但让不同节课的封面有微妙视觉差异（如"5W 模型"封面带轻微辐射感
+    //   "工具操作"封面带轻微网格感等）—— 不能 22 页封面都一模一样
+    const titleHint = String(pageTitleSemantic || '').trim().slice(0, 30);
+    const heroConceptLine = titleHint
+      ? `【纹理细微差异提示】本页主题概念为「${titleHint}」，纹理可在主基调下做细微暗示性变化（如 5W 模型→隐约辐射感、工具操作→隐约网格感、流程进度→隐约横向条纹），但仍保持"暗沉抽象纯纹理零文字"的整体特性，绝不出现具体物品/文字/图案。`
+      : '';
     return [
       `极简主义抽象背景纹理：${textureDesc}。`,
+      heroConceptLine,
       `横版全幅（${aspect || '16:9'}），整体画面需足够暗沉，极低亮度，深邃克制，纯粹质感。`,
       `【绝对禁止】无任何文字符号、无任何字母数字、无人物、无具体物品识别物、无品牌LOGO、无鲜艳颜色区块。`,
       `纯视觉背景纹理，零内容信息，零文字痕迹，零可识别元素。`
-    ].join('\n');
+    ].filter(Boolean).join('\n');
   }
 
-  // ── 普通内容页场景描述（所有模板通用）────────────────────────────────────
+  // ── 普通内容页场景描述（Phase-7.7 F3：主题驱动改造）─────────────────────
+  // 之前 sceneMap 是"通用职教模板"（如"工具与材料 / 手部操作"），doubao 看到这种描述
+  // + 笔记本所在专业（如"服装相关"）→ 自动联想到服装手工/缝纫，跟课程主题脱节
+  // F3 修法：每个 sceneMap 模板嵌入 ${courseSubject} 占位，让 AI 知道"工具/材料/操作"
+  //         应该是"该课程对应的"工具/材料/操作，不是泛泛的工具
+  const subjectTag = courseSubject ? `「${String(courseSubject).slice(0, 50)}」` : '本课';
   const sceneMap = {
-    '封面':    '课程封面主视觉：专业实训工作台或展示空间的精美俯拍，工具与材料的精致陈列特写，构图大气，光影层次丰富，以物品与空间环境为主体',
-    '课程导入': '课堂开场氛围：宽敞明亮的实训室或教室全景，学习设备整齐排列，探索感与好奇心，暖光，人物如出现须为远景小比例配角',
+    '封面':    `课程封面主视觉：${subjectTag}对应的专业工作环境精美俯拍，与课程主题直接相关的工具/界面/材料的精致陈列特写，构图大气，光影层次丰富，以与主题契合的物品和环境为主体`,
+    '课程导入': `课堂开场氛围：宽敞明亮的实训空间全景，与${subjectTag}主题相关的学习设备整齐排列，探索感与好奇心，暖光，人物如出现须为远景小比例配角`,
     '路线图':  '抽象路径进程可视化：几何节点依次串联，流动的阶段感，简洁的方向感构图，无任何文字标注，纯抽象图形',
-    '模块页':  '章节开幕主视觉：单一主体强构图，视觉张力十足，画面上下留白充足，色彩饱满，以物品或抽象图形为主体',
-    '模块导入': '真实职业现场环境全景：行业工作台与专业器材，自然光线，代入感强，无人物正面特写',
-    '原理讲解': '抽象概念知识图解：几何体结构与空间关系，对称或放射构图，纯视觉场景，无任何文字标签，无人物',
-    '操作步骤': '实操工艺俯拍特写：专业工具与材料在操作台面上的精确摆放，仅展示手部操作细节（手腕以下），材料纹理细节，禁止出现人物面部',
-    '验收检查': '精致成品陈列特写：光线打亮成品细节，干净的展示台背景，以成品为绝对视觉主体，无人物面部',
-    '课堂练习': '协作实训工作坊全景：多人远景活动场景，工具材料散落有序，活跃课堂气氛，人物为远景背景配角，禁止正面人物头像',
-    '总结收束': '完成收束画面：整洁陈列的成品序列，成就感与收获感，柔和结束氛围，以成品为主体'
+    '模块页':  `章节开幕主视觉：与${subjectTag}主题相关的单一主体强构图，视觉张力十足，画面上下留白充足，色彩饱满，以契合主题的物品或抽象图形为主体`,
+    '模块导入': `真实职业现场环境全景：${subjectTag}对应的真实行业工作台与专业器材，自然光线，代入感强，无人物正面特写`,
+    '原理讲解': `${subjectTag}相关的抽象概念知识图解：与主题概念相关的几何体结构与空间关系，对称或放射构图，纯视觉场景，无任何文字标签，无人物`,
+    '操作步骤': `${subjectTag}的实操工艺俯拍特写：与课程主题对应的专业工具与材料在操作台面上的精确摆放，仅展示手部操作细节（手腕以下），材料纹理细节，禁止出现人物面部`,
+    '验收检查': `${subjectTag}的精致成品陈列特写：光线打亮成品细节，干净的展示台背景，以与主题对应的成品为绝对视觉主体，无人物面部`,
+    '课堂练习': `${subjectTag}的协作实训工作坊全景：多人远景活动场景，与主题相关的工具材料散落有序，活跃课堂气氛，人物为远景背景配角，禁止正面人物头像`,
+    '总结收束': `${subjectTag}的完成收束画面：整洁陈列的与主题对应的成品序列，成就感与收获感，柔和结束氛围，以成品为主体`
   };
 
-  const scene = sceneMap[pageType] || '现代化职业实训工作空间：专业工具与材料精致陈列，干净整洁的构图，以环境与器材为主体，无人物正面头像';
+  const scene = sceneMap[pageType] || `${subjectTag}相关的现代化职业实训工作空间：与课程主题对应的专业工具与材料精致陈列，干净整洁的构图，以环境与器材为主体，无人物正面头像`;
   const styleDesc = safeTemplate.imageStyle || '现代扁平化插图风格，色块分明，线条清晰，专业教育氛围';
   const accent = colorCodeToNatural(safeTemplate.accentColor || '#2E86DE');
   const bg = colorCodeToNatural(safeTemplate.background || '#F1F3F5');
 
+  // Phase-7.7 F1+F2（2026-04-30）：修复"配图不搭主题"——
+  // 之前的 example "如服装专业→面料/缝纫机" 让 doubao Seedream 直接照抄 example，
+  // 把"图文排版"课画成了"服装手工/缝纫"场景。
+  // 修法：① 移除具体行业 example（避免 AI 模仿 example）
+  //       ② 强约束"主题第一，专业第二"——课程名是唯一视觉主体来源
+  //       ③ 列出"误用情境"反例，明确告知什么禁止
+  const subjectGuide = courseSubject
+    ? [
+        `【课程主题视觉引导（关键约束，绝对不可在画面写出任何文字）】`,
+        `本图为「${String(courseSubject).slice(0, 80)}」课程的配图。`,
+        ``,
+        `⚠️ 主题第一，专业第二：以课程名称「${String(courseSubject).slice(0, 80)}」为视觉主体的唯一参考`,
+        `⚠️ 禁止误用：即使本课程属于某个大专业（如"服装相关"或"机械相关"），也不得因此让画面跑偏`,
+        `   错误示例：课程名是"图文排版"但画了服装制作/缝纫场景 → 错误`,
+        `   错误示例：课程名是"3D 建模"但画了机械加工车床 → 错误`,
+        `   正确做法：精确解读课程名的字面含义，选择最契合的视觉主体`,
+        `   - "图文排版/平面设计/版式" → 显示器+键盘+设计稿+排版软件界面`,
+        `   - "服装陈列/橱窗设计" → 陈列架+模特+橱窗布景`,
+        `   - "3D 建模/三维设计" → 软件操作界面+几何体+模型展示`,
+        `   - "数据分析/统计" → 数据可视化图表+表格+计算机屏幕`,
+        `   - 其他课程 → 自行精准判断对应的真实视觉元素`,
+        `⚠️ 严禁把课程名/标题/任何文字"烧"到图里——文字由 Canvas 程序化叠加层负责`
+      ].join('\n')
+    : '';
+
+  // Phase-9 关键修复（2026-05-10）：
+  //   把页面主题作为「视觉概念语义」注入，让每页 AI 拿到独特视觉提示。
+  //   严格区分两件事：
+  //     ① 主题作为画面概念（要 AI 理解 + 用对应视觉元素表达） ✅
+  //     ② 主题作为字符渲染到图里（绝对禁止） ❌
+  //   两者用大量"零文字铁律"约束分隔，AI 能稳定区分。
+  const pageConceptHints = [];
+  const titleClean = String(pageTitleSemantic || '').trim().slice(0, 40);
+  const summaryClean = String(pageSummarySemantic || '').trim().slice(0, 120);
+  const keyContentClean = String(pageKeyContent || '').trim().slice(0, 200);
+  if (titleClean || summaryClean || keyContentClean) {
+    pageConceptHints.push('');
+    pageConceptHints.push('【本页视觉概念引导（关键，决定本页与其他页的差异）】');
+    pageConceptHints.push('⚠ 以下文字仅作为"画面应该体现什么概念"的语义提示，绝对不要把这些文字字符渲染到图里：');
+    if (titleClean)      pageConceptHints.push(`  · 概念主题：${titleClean}`);
+    if (summaryClean)    pageConceptHints.push(`  · 主题展开：${summaryClean}`);
+    if (keyContentClean) pageConceptHints.push(`  · 视觉提示：${keyContentClean}`);
+    pageConceptHints.push('');
+    pageConceptHints.push('视觉转译规则（举例帮助 AI 理解，按本页概念灵活套用）：');
+    pageConceptHints.push('  - 抽象模型/原理（如"5W 模型""传播过程"）→ 用 5 个并列几何元素的概念图、连接线、放射结构');
+    pageConceptHints.push('  - 评价/标准（如"评分标准""检查清单"）→ 用打勾框、刻度尺、维度对比等抽象图形');
+    pageConceptHints.push('  - 操作/流程（如"工具演示""实操练习"）→ 用工具特写、操作台、过程序列感');
+    pageConceptHints.push('  - 案例/实例（如"参考案例""品牌分析"）→ 用展示陈列、样品对比、聚光灯特写');
+    pageConceptHints.push('  - 互动/反馈（如"互查反馈""课间过渡""场景提问"）→ 用对话气泡形抽象图、双向箭头、过渡光晕');
+    pageConceptHints.push('  - 总结/导出（如"作品提交""课后任务"）→ 用归档、整齐陈列、收束感构图');
+    pageConceptHints.push('  ⚠ 同一 pageType 但 title 不同的页面，必须给出明显不同的视觉构图，不能千篇一律');
+  }
+
   return [
     `${scene}。`,
+    subjectGuide,
+    pageConceptHints.join('\n'),
     `横版全幅构图（${aspect || '16:9'}），视觉主体集中于画面中央主要区域，四周边缘保持简洁通透。`,
     `视觉风格：${styleDesc}。`,
     `色彩方向：主色调以${accent}为强调色，整体色调与${bg}色调协调统一。`,
     `【人物构图规则】①画面以环境/物品/场景为主体，人物面积不超过画面总面积的20%；②人物如出现，必须是东亚面孔（中国学生/教师/职业人员），严禁欧美白人；③严禁正面人物头像特写、半身证件照式构图；④人物须以远景或侧身背景配角形式出现。`,
-    `【零文字铁律——绝对执行】画面内禁止出现任何形式的文字符号：禁止中文汉字、禁止拼音字母、禁止英文字母、禁止阿拉伯数字、禁止任何标签标注、禁止品牌LOGO、禁止水印、禁止技术参数标注。任何文字痕迹均不可接受。`,
+    `【零文字铁律——绝对执行】画面内禁止出现任何形式的文字符号：禁止中文汉字、禁止拼音字母、禁止英文字母、禁止阿拉伯数字、禁止任何标签标注、禁止品牌LOGO、禁止水印、禁止技术参数标注。任何文字痕迹均不可接受。上方"视觉概念引导"中的文字仅供 AI 理解概念，画面里不能出现这些字。`,
     `【风格禁区】禁止水墨画、水彩画、油画、铅笔素描、拼贴风；禁止UI界面截图、拓扑图、流程图线框；禁止模仿杂志封面版式。`
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
 
 /**
@@ -477,11 +556,19 @@ export function ensurePptImagePromptForPage(page, { courseName, template, imageA
   return {
     ...page,
     imagePrompt: buildPptPageImagePrompt({
-      // ⚠️ 故意不传 pageTitle / contentPreview：文字内容不进入图像 prompt
+      // Phase-9 修正（2026-05-10）：不传文字 ≠ 不传主题。
+      //   旧实现"故意不传 pageTitle / contentPreview"导致同一 pageType 的所有页面拿到完全相同的输入，
+      //   AI 自然给出毫无差别的"通用风格背景图"。
+      //   新做法：pageTitleSemantic / pageSummarySemantic 作为「视觉概念语义」喂给 AI，
+      //   配合强约束"理解为画面概念，绝不渲染为文字字符"，让 AI 给每页不同的视觉概念。
       pageType: page.pageType,
+      pageTitleSemantic: page.title || '',
+      pageSummarySemantic: page.summary || '',
+      pageKeyContent: page.keyContent || '',
       template,
       aspect: page.imageAspect || imageAspect,
-      quality: page.imageQuality || imageQuality
+      quality: page.imageQuality || imageQuality,
+      courseSubject: courseName,
     })
   };
 }

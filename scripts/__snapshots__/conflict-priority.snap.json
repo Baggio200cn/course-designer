@@ -1,0 +1,50 @@
+{
+  "platform_basic": {
+    "hash": "399d5b55cc1d12ca6ca55bac6ec2dd868081c96deba71963b498377df6d3e86c",
+    "resolution": "platform_safety_wins"
+  },
+  "project_basic": {
+    "hash": "ca2de308b6f548f062b28eeee072f8aab67e4785f68b05444afd70bf7c3dc269",
+    "resolution": "user_wins"
+  },
+  "memory_basic": {
+    "hash": "1cbd7e0e44db8970233669b8a6dff3816d3f10372f294e6a8becdd5626ed478f",
+    "resolution": "current_user_wins"
+  },
+  "lock_yes": {
+    "hash": "b8fbbf4a5e0845b594b1ff7add4a6a548683b91345a0b3b0940087f3ab546818",
+    "resolution": "user_edit_protected"
+  },
+  "lock_no": {
+    "hash": "39400f4f0036e189cf3f953c0bc2c2dd04952e81b8f167210378ce60a9e389b7",
+    "resolution": "agent_proceeds"
+  },
+  "quality_invalid": {
+    "hash": "6665279c392343923033016a82f707363030e01734e4ce1dd6183314fb244be3",
+    "resolution": "user_can_force_accept"
+  },
+  "quality_force": {
+    "hash": "224748b03f3e25e1f7ab4e6106dc50c7009749c329d0dfdf26e19fdff1e62161",
+    "resolution": "user_can_force_accept"
+  },
+  "contracts_no_import": {
+    "hash": "c7cc98551ea8be87167f03911a7bbbd4b6748c652fbd4bd632c12dc0ca55ba13",
+    "resolution": "contracts_wins"
+  },
+  "contracts_with_import": {
+    "hash": "bf5dc4fcdb98bd7a2a394ca7fb827317980d07fe8987b0b9e641f4acf5016f63",
+    "resolution": "provide_import_path"
+  },
+  "retry_proceed": {
+    "hash": "39400f4f0036e189cf3f953c0bc2c2dd04952e81b8f167210378ce60a9e389b7",
+    "resolution": "agent_proceeds"
+  },
+  "retry_exhausted": {
+    "hash": "7beac2d928dcf9d48401acc602fc5612038718fe957ac55365e3ba46147dfc0d",
+    "resolution": "user_stop_wins"
+  },
+  "retry_userstop": {
+    "hash": "7beac2d928dcf9d48401acc602fc5612038718fe957ac55365e3ba46147dfc0d",
+    "resolution": "user_stop_wins"
+  }
+}

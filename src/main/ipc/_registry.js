@@ -32,15 +32,21 @@ const frameworkHandlers = require('./framework.handlers');
 const courseHandlers = require('./course.handlers');
 const lectureHandlers = require('./lecture.handlers');
 const v2FrameworkHandlers = require('./v2/framework.handlers');
+const v2ScheduleHandlers = require('./v2/schedule.handlers'); // Phase-9 C-1：教学进度表
+const v2DesignHandlers = require('./v2/design.handlers');     // Phase-9 C-2：教学设计
 const v2LectureHandlers = require('./v2/lecture.handlers');
 const v2PptHandlers = require('./v2/ppt.handlers');
 const v2VideoHandlers = require('./v2/video.handlers');
+const v2MicroVideoHandlers = require('./v2/micro-video.handlers'); // Phase-9 C-3：微课视频整套方案
+const v2ReportHandlers = require('./v2/report.handlers');         // Phase-9 C-4：教学实施报告
+const v2LessonHandlers = require('./v2/lesson.handlers');         // Phase-9 课堂讲稿（多节课）
 const exportHandlers = require('./export.handlers');
 const resourceHandlers = require('./resource.handlers');
 const mediaHandlers = require('./media.handlers');
 const promptHandlers = require('./prompt.handlers');
 const systemHandlers = require('./system.handlers');
 const agentHandlers = require('./agent.handlers');         // Phase-5C: Agent
+const workbenchHandlers = require('./workbench.handlers'); // Phase-7.7 A3: 我的工作台
 
 /**
  * 注册所有已迁移的 IPC handlers
@@ -54,15 +60,21 @@ function registerAll(ipcMain, getDeps) {
   courseHandlers.register(ipcMain, getDeps);
   lectureHandlers.register(ipcMain, getDeps);
   v2FrameworkHandlers.register(ipcMain, getDeps);
+  v2ScheduleHandlers.register(ipcMain, getDeps);  // Phase-9 C-1: 教学进度表（v4.0.0 起为 stage 起点）
+  v2DesignHandlers.register(ipcMain, getDeps);    // Phase-9 C-2: 教学设计（介于 schedule 和 lecture 之间）
   v2LectureHandlers.register(ipcMain, getDeps);
   v2PptHandlers.register(ipcMain, getDeps);
   v2VideoHandlers.register(ipcMain, getDeps);
+  v2MicroVideoHandlers.register(ipcMain, getDeps);   // Phase-9 C-3: 微课视频整套方案（完整脚本+分镜+提示词+拍摄+剪辑）
+  v2ReportHandlers.register(ipcMain, getDeps);       // Phase-9 C-4: 教学实施报告（最终阶段，AI 汇总 + 老师手填）
+  v2LessonHandlers.register(ipcMain, getDeps);       // Phase-9 课堂讲稿（多节课模型，每节 ≤ 4 学时）
   exportHandlers.register(ipcMain, getDeps);
   resourceHandlers.register(ipcMain, getDeps);
   mediaHandlers.register(ipcMain, getDeps);
   promptHandlers.register(ipcMain, getDeps);
   systemHandlers.register(ipcMain, getDeps);
   agentHandlers.register(ipcMain, getDeps);              // Phase-5C: Agent
+  workbenchHandlers.register(ipcMain, getDeps);          // Phase-7.7 A3: 我的工作台
   // ...
 }
 

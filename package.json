@@ -1,7 +1,7 @@
 {
   "name": "ai-course-designer",
-  "version": "2.1.0",
-  "description": "刘老师Agent2.1 - 职业教育课程开发 Workflow Agent",
+  "version": "4.0.0",
+  "description": "驭课 Agent v4.0.0 — 职业教育课程开发 6 阶段工作流（教学进度表 → 教学设计 → 课堂讲稿 → 教学课件 → 微课视频 → 教学实施报告）",
   "main": "src/main/index.js",
   "scripts": {
     "dev": "node scripts/dev.js",
@@ -30,6 +30,7 @@
     "antd": "^5.12.8",
     "archiver": "^6.0.1",
     "axios": "^1.6.5",
+    "defuddle": "^0.18.1",
     "docx": "^8.5.0",
     "file-type": "^18.7.0",
     "lucide-react": "^0.309.0",
@@ -37,11 +38,12 @@
     "pptxgenjs": "^3.12.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-router-dom": "^6.21.1"
+    "react-router-dom": "^6.21.1",
+    "turndown": "^7.2.4"
   },
   "build": {
     "appId": "com.newvision.course-designer",
-    "productName": "刘老师Agent2.1",
+    "productName": "驭课 Agent v4.0.0",
     "directories": {
       "output": "dist"
     },
@@ -59,15 +61,15 @@
       "target": [
         "nsis"
       ],
-      "icon": "resources/icons/icon.png"
+      "icon": "resources/icons/icon.ico"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "刘老师Agent2.1"
+      "shortcutName": "驭课 Agent v4.0.0"
     },
-    "artifactName": "刘老师Agent2.1-setup.exe"
+    "artifactName": "驭课Agent-v4.0.0-setup.exe"
   }
 }

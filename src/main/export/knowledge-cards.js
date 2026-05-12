@@ -244,7 +244,7 @@ function buildHtml({ notebook, modules, style = 'professional' }) {
 </main>
 
 <footer class="page-footer">
-  刘老师课程助手 v2 · 知识点卡片导出 · 可在浏览器中 Ctrl+P 打印或截图保存
+  优课创 Agent v3.0.0 · 知识点卡片导出 · 可在浏览器中 Ctrl+P 打印或截图保存
 </footer>
 
 </body>

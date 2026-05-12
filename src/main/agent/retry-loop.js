@@ -100,10 +100,11 @@ function isAcceptable(quality, totalHours) {
   const minNarration = Math.round(2200 * totalHours);
   const narrationCount = quality.checks?.finalNarrationCharCount || 0;
 
-  // 字数低于目标 70% 以下，不可接受（给 30% 宽容度）
-  // 多段生成时每段只含 1-2 模块，单段峰值约 1300 字；4 段合并后约 6500-7000 字，
-  // 约为 8800 目标的 74-80%，80% 门槛会导致所有结果都被拒绝。
-  if (narrationCount > 0 && narrationCount < minNarration * 0.7) return false;
+  // Phase-9.5（2026-05-11）：单节课场景下 AI 实际能输出 3000-4500 字（教师讲述净字），
+  //   原 70% 阈值（4 学时课需 6160 字）几乎全部被拒绝 → 全部走 fallback。
+  //   降到 40% 阈值（4 学时课需 3520 字）让 AI 实际产出能被接受。
+  //   质量门槛主要靠 reviewAndRevise 9 维度审核，不靠字数（字数充其量是粗筛）。
+  if (narrationCount > 0 && narrationCount < minNarration * 0.4) return false;
 
   return true;
 }
@@ -160,11 +161,18 @@ async function generateWithRetry(params, agentOptions = {}) {
 
     const narrationCount = quality.checks?.finalNarrationCharCount || 0;
     const errorCount = quality.errors.length;
-    const accepted = isAcceptable(quality, totalHours);
+    // Phase-7.7 P1-B：识别"AI 生成失败走 fallback"的情况，让此类结果不被当成成功
+    const usedFallback = result?.meta?.generationMode === 'fallback';
+    if (usedFallback) {
+      // fallback 进 quality.errors 让 isAcceptable 返回 false + orchestrator 看到 quality.invalid
+      quality.errors = [...(quality.errors || []), 'AI 稿生成失败，已用 fallback 兜底（讲稿 deep 生成不可用）'];
+      quality.valid = false;
+    }
+    const accepted = isAcceptable(quality, totalHours) && !usedFallback;
 
-    const snapshot = { attempt, narrationCount, errorCount, warningCount: quality.warnings.length, accepted };
+    const snapshot = { attempt, narrationCount, errorCount: quality.errors.length, warningCount: quality.warnings.length, accepted, usedFallback };
     attemptLog.push(snapshot);
-    candidates.push({ result, quality, attempt });
+    candidates.push({ result, quality, attempt, usedFallback });
 
     if (onAttempt) {
       try { onAttempt(snapshot); } catch (_) {}
@@ -172,7 +180,8 @@ async function generateWithRetry(params, agentOptions = {}) {
 
     console.log(
       `[retry-loop] 第 ${attempt}/${maxAttempts} 次生成：` +
-      `讲述 ${narrationCount} 字，errors=${errorCount}，accepted=${accepted}`
+      `讲述 ${narrationCount} 字，errors=${quality.errors.length}，accepted=${accepted}` +
+      (usedFallback ? '（⚠️ AI 失败走 fallback）' : '')
     );
 
     // 达标，立即返回

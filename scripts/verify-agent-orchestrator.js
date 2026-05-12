@@ -23,6 +23,10 @@
 const fs = require('fs');
 const path = require('path');
 
+// Phase-6 M2.4：先在 mock 之前加载真实 conflict-policy（纯函数无副作用），
+// 这样后续 Module._load mock 时直接返回已 require 过的真实模块（避免递归）
+const conflictPolicyReal = require('../src/main/agent/conflict-policy');
+
 // ── 加载 decideNextAction 函数 ─────────────────────────────────────────────────
 
 let decideNextAction;
@@ -73,6 +77,10 @@ try {
     if (req.includes('memory')) return { saveMemory: () => {}, buildMemoryContext: () => '' };
     if (req.includes('ppt-plan-generator')) return { generatePptPlan: async () => ({ pages: [], pageCount: 0, rawPlan: {} }) };
     if (req.includes('v2-stage-helpers')) return { videoPrompt: () => '<video_brief></video_brief>' };
+    // Phase-6 M2.4：conflict-policy 已在文件顶部 require 加载，直接返回缓存的真实模块
+    if (req.includes('conflict-policy')) return conflictPolicyReal;
+    // Phase-7.6 R8：mock generation-audit（写日志，不影响逻辑）
+    if (req.includes('generation-audit')) return { recordGeneration: async () => null };
     return origLoad.apply(this, arguments);
   };
 

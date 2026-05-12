@@ -24,12 +24,13 @@ function register(ipcMain, getDeps) {
 
   ipcMain.handle('v2:saveFrameworkStage', async (event, payload = {}) => {
     const { v2Runtime } = getDeps();
-    return v2Runtime.saveFrameworkStage(payload);
+    // Phase-6 M2.2：IPC 来源即用户操作，注入 _userInitiated 让 runtime 自动加锁
+    return v2Runtime.saveFrameworkStage({ ...payload, _userInitiated: true });
   });
 
   ipcMain.handle('v2:confirmFrameworkStage', async (event, payload = {}) => {
     const { v2Runtime } = getDeps();
-    return v2Runtime.confirmFrameworkStage(payload);
+    return v2Runtime.confirmFrameworkStage({ ...payload, _userInitiated: true });
   });
 
   ipcMain.handle('v2:confirmFrameworkInfographic', async (event, payload = {}) => {

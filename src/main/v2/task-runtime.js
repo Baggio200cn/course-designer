@@ -54,6 +54,16 @@ function createTaskRuntime({ db, emitEvent }) {
         warnings: finalOperation.warnings || [],
         outputArtifactIds: finalOperation.outputArtifactIds || []
       });
+      // Phase-6 M3.1：成功 operation 持久化时自动压缩详细字段（input/output/metadata/warnings）
+      // 不影响本次 return 的 finalOperation（事件订阅者已收到原始数据）
+      if (typeof db.compressOperationDetail === 'function') {
+        try {
+          db.compressOperationDetail(operation.id, { level: 'auto' });
+        } catch (err) {
+          // 压缩失败不影响主业务
+          console.warn('[task-runtime] 日志压缩失败（非致命）:', err.message);
+        }
+      }
       return { value, operation: finalOperation };
     } catch (error) {
       const failedOperation = db.updateOperation(operation.id, {

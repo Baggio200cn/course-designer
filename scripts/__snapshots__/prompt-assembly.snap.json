@@ -1,0 +1,27 @@
+{
+  "abc.system.default": {
+    "hash": "09e7d493524027d7b2610a5766079910f02ec985051ccb0b3dedf832cc956611",
+    "chars": 991,
+    "fragmentCount": 4
+  },
+  "formal.system.single": {
+    "hash": "9374860b1bd819604e0d4fcf604093b7adff332e45b783d0c7b0ed72afd912ed",
+    "chars": 3059,
+    "fragmentCount": 9
+  },
+  "formal.system.multi.first": {
+    "hash": "7e929047fc9b956de2f9b318b476d926f8c7628099387aeaa7e3425b2bbf0a9c",
+    "chars": 3100,
+    "fragmentCount": 9
+  },
+  "formal.system.multi.middle": {
+    "hash": "1a5d098b30ec9af8db2e9b63fdb2b6455831124f7593cf8999504ec0f6603b90",
+    "chars": 3107,
+    "fragmentCount": 9
+  },
+  "formal.system.multi.last": {
+    "hash": "c7463bd62f39e031412be10c77bcadfe7ecc03664ce64930c0b7177d6cae2f84",
+    "chars": 3121,
+    "fragmentCount": 9
+  }
+}

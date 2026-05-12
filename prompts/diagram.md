@@ -10,6 +10,7 @@
 | flowchart | 教学流程图 | 操作步骤、教学过程 |
 | mindmap | 思维导图 | 知识点发散、课程全貌 |
 | timeline | 学习时间轴 | 各模块按学习顺序排列 |
+| **magazine** | **杂志信息图风格** | **多区块网格 + 渐变底色 + 数字编号 + 行动清单 + 目标横幅，适合宣讲、汇报、电子杂志、教研发布会** |
 
 ## 画布规格
 
@@ -116,6 +117,77 @@ font-family="'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif"
   {课程名称} — 教学结构图
 </text>
 ```
+
+
+## 杂志信息图风格规范（magazine 类型专用）
+
+> **特别说明**：当 `diagramType=magazine` 时，**你不需要生成 SVG**——只需要返回结构化 JSON 数据。
+> JS 端会用固定 SVG 模板拼装最终图像，确保 100% 视觉一致 + 100% 输出稳定。
+> **所以 magazine 类型下，请忽略本文件「输出要求」节的"只输出 SVG"要求，改为只输出 JSON。**
+
+### 你需要返回的 JSON 结构（严格遵守字段名）
+
+```json
+{
+  "courseSubtitle": "副标题（10-20 字，如『职业教育课程框架可视化总览』）",
+  "core": "课程核心一句话定位（25 字内，提炼课程价值/能力 + 岗位）",
+
+  "definitionAndJob": {
+    "description": "课程描述 3-4 行（每行 28 字内）",
+    "jobs": ["岗位1（6 字内）", "岗位2", "岗位3"],
+    "tools": ["工具1", "工具2", "工具3"]
+  },
+
+  "objectives": {
+    "knowledge": ["知识目标1（12 字内）", "知识目标2", "知识目标3"],
+    "skill": ["技能目标1（12 字内）", "技能目标2", "技能目标3"],
+    "emotion": ["情感目标1（12 字内）", "情感目标2"]
+  },
+
+  "methods": [
+    { "icon": "📚", "name": "案例教学法", "desc": "一句话用法（15 字内）" },
+    { "icon": "🎯", "name": "任务驱动法", "desc": "..." },
+    { "icon": "🔧", "name": "示范教学法", "desc": "..." },
+    { "icon": "🤝", "name": "小组合作法", "desc": "..." }
+  ],
+
+  "evaluation": {
+    "process": 60,
+    "summative": 40,
+    "processItems": ["课堂提问", "小组讨论", "互查反馈"],
+    "summativeItems": ["课后作业", "成果展示"]
+  },
+
+  "resources": [
+    { "icon": "📕", "type": "教材", "name": "教材名（12 字内）" },
+    { "icon": "🎨", "type": "软件工具", "name": "..." },
+    { "icon": "🌐", "type": "教学平台", "name": "..." },
+    { "icon": "💼", "type": "行业案例", "name": "..." }
+  ],
+
+  "goal": "最终目标一句话（30 字内，含具体能力 + 具体岗位/场景）"
+}
+```
+
+### 数据来源约束
+
+- `definitionAndJob.description`：基于课程描述凝练，不能编造
+- `definitionAndJob.jobs`：从课程的 jobTargets 字段取
+- `definitionAndJob.tools`：从课程的 softwareTools 字段取
+- `objectives.knowledge/skill/emotion`：从教学目标三类拆解，每类 2-3 项
+- `methods`：必须 4 项（案例 / 任务 / 示范 / 合作 是默认）
+- `evaluation.process/summative`：默认 60/40，除非框架明确不同
+- `resources`：必须 4 项（教材 / 软件工具 / 教学平台 / 行业案例 是默认）
+- `goal`：基于真实软件工具 + 岗位生成（如"掌握 InDesign/PS/Canva 三类排版工具，胜任服装品牌宣传企划等岗位"）
+- **教学模块数据由 JS 直接从数据库读，AI 不需要返回模块列表**
+
+### 输出要求（magazine 类型专用，覆盖默认）
+
+⚠️ 只输出 JSON 对象，以 `{` 开头，以 `}` 结尾
+⚠️ 不输出 SVG、不输出解释文字、不输出 markdown 代码块
+⚠️ 所有字符串字段不能为空（最少给占位词）
+⚠️ JSON 必须能被 `JSON.parse()` 正确解析（无注释、无尾逗号）
+---
 
 ## 输出要求
 

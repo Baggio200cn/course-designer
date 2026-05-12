@@ -32,6 +32,7 @@ const { exportInteractiveHtml } = require('../export/interactive-html');
 const { exportPblPack } = require('../export/pbl-pack');
 const { exportCoursePpt } = require('../export/ppt');
 const { exportKnowledgeCards } = require('../export/knowledge-cards');
+const { exportInteractiveKnowledgeCards } = require('../export/knowledge-cards-interactive');  // Phase-7.7 A3-C：互动测试卡片
 
 // ── 本地工具函数（纯函数，可直接 require，无运行时状态依赖） ────────────────
 
@@ -640,6 +641,65 @@ function register(ipcMain, getDeps) {
         storagePath: filePath,
         previewText: path.basename(filePath),
         sourceRefs: [{ kind: 'file', ref: filePath, label: 'knowledge-cards-export' }]
+      });
+
+      return {
+        data: { filePath },
+        eventArtifactId: artifact?.id || null,
+        eventPayload: { filePath }
+      };
+    });
+  });
+
+  // Phase-7.7 A3-C（2026-04-30）：互动测试卡片导出
+  // 区别于上方静态版（v2:exportKnowledgeCards）：互动版含翻卡 / 学习标记 / 自检小测 / 进度追踪
+  // 老师可在课堂用大屏展示让学生互动，或下发给学生在课后手机/电脑上自学测试
+  ipcMain.handle('v2:exportInteractiveCards', async (event, payload = {}) => {
+    const { db, exportRuntime, createTrackedArtifact } = getDeps();
+    const notebookId = Number(payload.notebookId);
+    return exportRuntime.run({
+      notebookId,
+      stage: 'framework',
+      format: 'html',
+      variant: 'interactive-cards'
+    }, async () => {
+      if (!db) throw new Error('Database not initialized');
+      const notebook = db.getNotebookById(notebookId);
+      if (!notebook) return { success: false, error: 'Notebook not found' };
+      const modules = db.getModulesByNotebook(notebookId);
+      if (!modules || modules.length === 0) {
+        return { success: false, error: '该课程暂无模块数据，请先生成教学框架' };
+      }
+      // 检查每个模块至少有一个知识点
+      const totalKp = modules.reduce((acc, m) => acc + (Array.isArray(m.knowledgePoints || m.keyPoints) ? (m.knowledgePoints || m.keyPoints).length : 0), 0);
+      if (totalKp === 0) {
+        return { success: false, error: '所有模块都没有知识点，请先在框架阶段补充知识点' };
+      }
+
+      const picked = await dialog.showSaveDialog(getWin(), {
+        title: '导出互动测试卡片（学生端）',
+        defaultPath: `${notebook.name || '课程'}-互动测试卡片.html`,
+        filters: [{ name: 'HTML 网页', extensions: ['html'] }]
+      });
+      if (picked.canceled || !picked.filePath) return { cancelled: true };
+
+      const filePath = exportInteractiveKnowledgeCards({
+        notebook,
+        modules,
+        outputPath: ensureExt(picked.filePath, 'html')
+      });
+
+      const artifact = createTrackedArtifact(notebookId, {
+        type: 'interactive_cards_export',
+        stage: 'framework',
+        title: `${notebook.name || '课程'}-互动测试卡片导出`,
+        content: { filePath },
+        format: 'html',
+        status: 'exported',
+        confirmed: true,
+        storagePath: filePath,
+        previewText: path.basename(filePath),
+        sourceRefs: [{ kind: 'file', ref: filePath, label: 'interactive-cards-export' }]
       });
 
       return {

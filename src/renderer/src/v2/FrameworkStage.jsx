@@ -32,6 +32,7 @@ export default function FrameworkStage(props) {
     diagramBusy,
     diagramResult,
     handleExportKnowledgeCards,
+    handleExportInteractiveCards,    // Phase-7.7 A3-C：互动测试卡片
     addSchedule,
     removeSchedule,
     updateSchedule,
@@ -218,10 +219,8 @@ export default function FrameworkStage(props) {
             <label className="v2-label">📊 教学结构图（SVG，精准高速，无图像费用）</label>
             <div className="v2-inline-actions" style={{ flexWrap: 'wrap', gap: 8 }}>
               {[
-                { type: 'hierarchy', label: '层次结构图' },
-                { type: 'mindmap',   label: '思维导图' },
-                { type: 'flowchart', label: '教学流程图' },
-                { type: 'timeline',  label: '学习时间轴' }
+                { type: 'mindmap',   label: '🧠 思维导图' },
+                { type: 'magazine',  label: '📰 杂志信息图' }
               ].map(({ type, label }) => (
                 <button
                   key={type}
@@ -256,39 +255,7 @@ export default function FrameworkStage(props) {
           </div>
 
           {/* B：信息图布局/风格选择器 */}
-          <div style={{ marginBottom: 16 }}>
-            <label className="v2-label">🖼 信息图设置（影响下方每个模块的"生成信息图"）</label>
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              <div>
-                <label style={{ fontSize: 12, color: '#64748B', marginRight: 6 }}>布局：</label>
-                <select
-                  value={infographicLayout}
-                  onChange={(e) => setInfographicLayout(e.target.value)}
-                  style={{ fontSize: 13, padding: '4px 8px', borderRadius: 6, border: '1px solid #E2E8F0' }}
-                >
-                  <option value="grid_cards">网格卡片（默认）</option>
-                  <option value="linear_flow">线性流程</option>
-                  <option value="hub_spoke">中心辐射</option>
-                  <option value="comparison">对比分析</option>
-                  <option value="timeline">时间轴</option>
-                </select>
-              </div>
-              <div>
-                <label style={{ fontSize: 12, color: '#64748B', marginRight: 6 }}>风格：</label>
-                <select
-                  value={infographicStyle}
-                  onChange={(e) => setInfographicStyle(e.target.value)}
-                  style={{ fontSize: 13, padding: '4px 8px', borderRadius: 6, border: '1px solid #E2E8F0' }}
-                >
-                  <option value="professional">专业正式（默认）</option>
-                  <option value="minimalist">极简清爽</option>
-                  <option value="tech_blueprint">技术蓝图</option>
-                  <option value="warm_education">温暖教育</option>
-                </select>
-              </div>
-            </div>
-            <p className="v2-field-note">选择后对所有新生成的信息图生效，已生成的不受影响。</p>
-          </div>
+          {/* Phase-8.5：原"信息图设置"全局区块已移除——所有模块信息图统一走 magazine_module 杂志风格，不再支持手动选布局/风格 */}
 
           {/* C：知识点卡片导出 */}
           <div>
@@ -304,6 +271,27 @@ export default function FrameworkStage(props) {
               </button>
             </div>
             <p className="v2-field-note">生成自包含 HTML 文件，可在浏览器 Ctrl+P 打印，或截图发给学生。</p>
+          </div>
+
+          {/* Phase-7.7 A3-C：互动测试卡片（学生端 HTML，含翻卡 + 自检小测 + 进度追踪）*/}
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed #d1d5db' }}>
+            <label className="v2-label">🎮 互动测试卡片（课堂/课后用）</label>
+            <div className="v2-inline-actions">
+              <button
+                className="v2-btn v2-btn-primary"
+                onClick={handleExportInteractiveCards}
+                disabled={busy}
+                title="导出含翻卡、学习标记、自检小测、进度追踪的互动 HTML 文件，老师可在课堂大屏展示，或发给学生在手机/电脑上自学"
+                style={{ background: '#7c3aed', borderColor: '#7c3aed' }}
+              >
+                🎮 导出互动测试卡片（学生端）
+              </button>
+            </div>
+            <p className="v2-field-note">
+              互动版含翻卡（点击查看详情）、学习标记（"我学会了"按钮）、每模块自检小测、进度追踪。
+              <br/>
+              💡 用法：① 老师课堂大屏展示带学生互动；② 课后发链接/文件给学生在手机/电脑上自学，进度本地保存（LocalStorage）。
+            </p>
           </div>
         </div>
 
@@ -350,52 +338,30 @@ export default function FrameworkStage(props) {
                   </label>
                   <div className="v2-module-infographic">
                     <div className="v2-panel-head">
-                      <span className="v2-label">模块信息图</span>
+                      <span className="v2-label">📰 模块信息图（杂志风格）</span>
                       <div className="v2-inline-actions" style={{ flexWrap: 'wrap', gap: 6 }}>
-                        {/* 布局/风格内联选择器 */}
-                        <select
-                          value={infographicLayout}
-                          onChange={(e) => setInfographicLayout(e.target.value)}
-                          style={{ fontSize: 12, padding: '3px 6px', borderRadius: 5, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer' }}
-                          title="信息图布局"
-                        >
-                          <option value="grid_cards">网格卡片</option>
-                          <option value="linear_flow">线性流程</option>
-                          <option value="hub_spoke">中心辐射</option>
-                          <option value="comparison">对比分析</option>
-                          <option value="timeline">时间轴</option>
-                        </select>
-                        <select
-                          value={infographicStyle}
-                          onChange={(e) => setInfographicStyle(e.target.value)}
-                          style={{ fontSize: 12, padding: '3px 6px', borderRadius: 5, border: '1px solid #E2E8F0', background: '#F8FAFC', cursor: 'pointer' }}
-                          title="视觉风格"
-                        >
-                          <option value="professional">专业正式</option>
-                          <option value="minimalist">极简清爽</option>
-                          <option value="tech_blueprint">技术蓝图</option>
-                          <option value="warm_education">温暖教育</option>
-                        </select>
+                        {/* Phase-8.5：删除布局/风格选择器，统一走 magazine_module 杂志风格 */}
                         <button
-                          className="v2-btn v2-btn-xs"
+                          className="v2-btn v2-btn-xs v2-btn-primary"
                           onClick={() => handleGenerateInfographic(moduleItem)}
                           disabled={infographicBusyKey === String(moduleItem.id) || infographicBusyKey === `confirm-${moduleItem.id}`}
+                          title="按杂志风格生成本模块的信息图"
                         >
-                          {infographicBusyKey === String(moduleItem.id) ? '生成中...' : confirmedImage ? '重新生成' : '生成信息图'}
+                          {infographicBusyKey === String(moduleItem.id) ? '生成中...' : confirmedImage ? '🔄 重新生成' : '🪄 生成信息图'}
                         </button>
                         <button
                           className="v2-btn v2-btn-xs"
                           onClick={() => handleConfirmInfographic(moduleItem)}
                           disabled={infographicBusyKey === String(moduleItem.id) || infographicBusyKey === `confirm-${moduleItem.id}`}
                         >
-                          {infographicBusyKey === `confirm-${moduleItem.id}` ? '确认中...' : '确认使用'}
+                          {infographicBusyKey === `confirm-${moduleItem.id}` ? '确认中...' : '✓ 确认使用'}
                         </button>
                         {previewImage ? (
                           <button
                             className="v2-btn v2-btn-xs"
                             onClick={() => api.openResource(moduleItem.content?.v2DraftInfographicWorkspaceImagePath || moduleItem.content?.v2DraftInfographicPath || confirmedImage)}
                           >
-                            打开预览图
+                            👁 打开预览
                           </button>
                         ) : null}
                         {moduleItem.content?.v2DraftInfographicHtmlPath ? (
@@ -403,7 +369,7 @@ export default function FrameworkStage(props) {
                             className="v2-btn v2-btn-xs"
                             onClick={() => api.openResource(moduleItem.content?.v2DraftInfographicHtmlPath)}
                           >
-                            打开 HTML
+                            📄 打开 HTML
                           </button>
                         ) : null}
                       </div>

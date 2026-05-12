@@ -4,6 +4,15 @@ const { detectCourseProfile, getCourseProfileLexicon } = require('./course-profi
 const { resolveFrameworkDirectives } = require('./framework-directives');
 const { normalizeLectureMarkdown } = require('./lecture-format');
 
+// Phase-6 M1.4 — Prompt 装配器（来源治理 + 顺序治理）
+// 把原硬编码的 systemPrompt 4 行散文拆为 4 个 fragment，按 SLOT_ORDER 装配
+const { buildAbcSystemFragments, buildAbcSystemPromptLegacy } = require('../agent/builders/abc.builder');
+const { assemble } = require('../agent/prompt-assembler');
+
+// Prompt 装配器开关：true 走 fragment 装配（默认）；false 回退到原 4 行硬编码 systemPrompt
+// 应急回滚：把这个常量改为 false 即可恢复改造前行为（buildAbcSystemPromptLegacy 输出与原始字节一致）
+const USE_ASSEMBLER = true;
+
 function toList(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -848,12 +857,11 @@ async function generateLectureABCDrafts({
     ].filter(Boolean).join('\n');
     try {
       const text = await aiClient.chatJson({
-        systemPrompt: [
-          '你是中职课程讲稿编写专家，擅长把教学框架转化为老师可直接授课的课堂口播讲稿。',
-          '输出规范：JSON 格式 {“a”:””,”b”:””,”c”:””}。',
-          '核心要求：每个模块的”教师讲述”必须是老师真正会说出口的话——包含具体案例、数据、提问、互动，像站在讲台上对着学生说话。',
-          '绝对禁止：不要写教学设计备注（如”学完这一段学生应该能够...”、”这一段要把XX讲成判断链...”），这些是备课笔记不是讲课稿。'
-        ].join('\n'),
+        // Phase-6 M1.4：systemPrompt 改由 prompt-assembler 装配（4 个 fragment）
+        // 关闭开关 USE_ASSEMBLER=false 可一键回退到原硬编码字符串（buildAbcSystemPromptLegacy）
+        systemPrompt: USE_ASSEMBLER
+          ? assemble(buildAbcSystemFragments())
+          : buildAbcSystemPromptLegacy(),
         userPrompt: basePrompt,
         temperature: 0.28,
         maxTokens: Math.max(8000, Math.round(8000 * (Number(totalHours) || 1)))

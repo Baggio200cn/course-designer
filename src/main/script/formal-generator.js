@@ -5,12 +5,42 @@ const { resolveFrameworkDirectives } = require('./framework-directives');
 const { normalizeLectureMarkdown } = require('./lecture-format');
 const { validateLectureStage } = require('../v2/quality');
 
+// Phase-6 M1.4 — Prompt 装配器（来源治理 + 顺序治理）
+// 把原硬编码的 segSystemPrompt 8 段拆为 fragment，按 SLOT_ORDER 装配
+const { buildFormalSystemFragments, buildFormalSystemPromptLegacy } = require('../agent/builders/formal.builder');
+const { assemble } = require('../agent/prompt-assembler');
+
+// Prompt 装配器开关：true 走 fragment 装配（默认）；false 回退到原硬编码 segSystemPrompt
+// 应急回滚：把这个常量改为 false 即可恢复改造前行为（buildFormalSystemPromptLegacy 输出与原始字节一致）
+const USE_ASSEMBLER = true;
+
 function toList(value) {
   return Array.isArray(value) ? value : [];
 }
 
 function cleanText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+// Phase-7.7 B9（2026-04-29）：兼容 markdown 标题前缀的"教师讲述/课堂动作/章节"识别
+// 必须与 quality.js 的同名 helper 保持一致——AI 实际输出格式：
+//   "### 教师讲述：" / "### 教师讲述" / "教师讲述：" 都要识别
+function _isSpokenLineMarker(line) {
+  const t = cleanText(line);
+  if (/^教师讲述[:：]/.test(t)) return true;             // 老格式
+  if (/^#{1,4}\s+教师讲述\s*[:：]?\s*$/.test(t)) return true;  // 新格式（H1-H4 标题）
+  return false;
+}
+function _isActionLineMarker(line) {
+  const t = cleanText(line);
+  if (/^课堂动作/.test(t)) return true;
+  if (/^#{1,4}\s+课堂动作/.test(t)) return true;
+  return false;
+}
+function _isSectionLineMarker(line) {
+  const t = cleanText(line);
+  // 章节用 H1/H2，不含 H3/H4——后者留给"教师讲述/课堂动作"标记
+  return /^#{1,2}\s+/.test(t);
 }
 
 function narrationCharCount(text = '') {
@@ -20,15 +50,15 @@ function narrationCharCount(text = '') {
   lines.forEach((line) => {
     const trimmed = cleanText(line);
     if (!trimmed) return;
-    if (/^##\s+/.test(trimmed)) {
+    if (_isSectionLineMarker(trimmed)) {
       mode = '';
       return;
     }
-    if (/^教师讲述[：:]/.test(trimmed)) {
+    if (_isSpokenLineMarker(trimmed)) {
       mode = 'spoken';
       return;
     }
-    if (/^课堂动作/.test(trimmed)) {
+    if (_isActionLineMarker(trimmed)) {
       mode = 'action';
       return;
     }
@@ -346,7 +376,12 @@ function buildFormalPrompt({
   courseProfile,
   frameworkDirectives,
   totalHours = 1,
-  notebookContext = {}
+  notebookContext = {},
+  // Phase-7.7 E2（2026-04-30）：分段元信息 — 让 userPrompt 知道当前是第几段
+  segmentCount = 1,
+  segIndex = 0,
+  isFirst = true,
+  isLast = true
 }) {
   const selectedDraft = String(drafts[selectedKey] || '').trim();
   const selectedLabel = `${selectedKey.toUpperCase()}稿`;
@@ -381,15 +416,51 @@ function buildFormalPrompt({
     '每个章节必须包含”教师讲述：”和”课堂动作附栏：”两栏。',
     '</structure>',
     '',
+    // ─── Phase-7.7 C4+C5+C6（2026-04-29）：framework 硬约束 ─────────────────────
+    // 防止 AI 自由发挥模块/知识点/软件版本（用户截图发现 framework 写"5要素"AI 改成"4要素"
+    // 把 2 模块拆成 3 模块、Canva 2.25 改成 6.22 等灾难级偏离）
+    '<framework_constraints>',
+    '【关键硬约束（违反则视为生成失败）】',
+    `1. **模块名**：必须严格使用上面 <structure> 列出的 ${modules.length} 个模块名（${modules.map(m => `"${m.name}"`).join('、')}），禁止合并、拆分、改名、新增、删除模块。`,
+    `2. **知识点**：必须严格使用 <modules> 段中每个 module.knowledgePoints 提供的具体知识点（如"5核心要素"就写"5核心要素"，禁止改成"4要素"或不同理论模型）。`,
+    `3. **软件名+版本**：必须严格使用 <software> 段填的软件名和版本（如填"Canva可画 2.25.x"就写"Canva可画 2.25.x"，禁止改成 6.22.0 或其他版本号）。`,
+    `4. **岗位/学时**：必须严格遵守 <jobs> 段的目标岗位、<duration> 段的总学时数。`,
+    '5. 如果 framework 模块/知识点本身有逻辑漏洞，请在讲稿中保留 framework 提供的版本，不要"改进"为不同的理论模型——这是老师的教学意图。',
+    '</framework_constraints>',
+    '',
     '<quality_requirements>',
     `<base_draft>当前已选：${selectedLabel}。A偏知识逻辑，B偏口播，C偏执行。正式稿必须继承已选方向。</base_draft>`,
     `<duration>本课程共${hours}学时，总时长${hours * 45}分钟。</duration>`,
     `<length>教师讲述 ${Math.round(2200 * hours)}-${Math.round(3000 * hours)} 字。每模块≥${perModuleNarMin}字，开场≥${Math.round(200 * hours)}字。</length>`,
+    // Phase-7.7 E1（2026-04-30）：实操章节字数门槛降低 + 保留执行型节奏
+    // 之前的 `<length>` 让所有模块字数门槛一致 → 实操章节为凑字数变成"老师啰嗦讲解"
+    // 现在：实操章节明确"布置任务+实操+检查"紧凑节奏，字数 600-1200 即可
+    selectedKey === 'c'
+      ? '<execution_pace>【C 稿继承约束】当前选 C 稿（课堂执行型），实操章节（含"实操"/"训练"/"检查"/"练习"等关键词）的教师讲述字数限制 600-1200 字，重在"老师布置→学生做→老师检查"的紧凑节奏，禁止把"老师讲解 PS/Canva 操作步骤"扩写超过 400 字（实操章节是学生动手时段，不是老师 monologue 时段）。</execution_pace>'
+      : '',
     '<transitions>全稿必须覆盖”首先””接着””因此””最后”四个推进词。</transitions>',
     '<questions>全稿≥10个提问句，每模块≥1个追问。</questions>',
     '<tone>职业院校老师可直接上课的口吻。禁止主播腔、网络流行语、夸张口号。</tone>',
     '<data_integrity>禁止编造百分比、销量、绝对化结论。</data_integrity>',
     '</quality_requirements>',
+    '',
+    // Phase-7.7 E2（2026-04-30）：分段间逻辑约束
+    // 多段调用 AI 时，每段不知道其他段存在 → 都自己写"总结收束 + 下节课预告" → 合并后重复
+    // 修法：明确告知当前段次 + 强约束非末段不写总结
+    segmentCount > 1
+      ? [
+          '<segment_rules>',
+          `【关键分段约束】本次生成是【第 ${segIndex + 1} / ${segmentCount} 课时】的内容。`,
+          isFirst && !isLast
+            ? '⚠️ 本段是第一课时（不是最后一段），绝对禁止：\n  1. 不要写"总结收束"章节\n  2. 不要写"下节课预告"或"下节课我们要学习..."\n  3. 不要写"本节课我们学习了..."这种总结性话语\n  4. 模块讲完直接停止教学动作，留开放结尾给下一段衔接。'
+            : (!isFirst && !isLast)
+              ? '⚠️ 本段是中间课时（既不是第一段也不是最后一段），绝对禁止：\n  1. 不要写"开场导入"\n  2. 不要写"总结收束"\n  3. 不要写"下节课预告"\n  4. 直接从模块内容开始，模块讲完直接停止。'
+              : (!isFirst && isLast)
+                ? '⚠️ 本段是最后一课时，要求：\n  1. 不要写"开场导入"（已在第一段写过）\n  2. 必须写"课堂练习与检查"+"总结收束"+"下节课预告"\n  3. 在总结收束后立即结束，不要附加任何内容。'
+                : '⚠️ 本段是唯一一段，正常写完整结构：开场+模块+练习+总结。',
+          '</segment_rules>'
+        ].join('\n')
+      : '',
     '',
     '<forbidden>',
     '- 提示词、要求栏、风格提醒、系统说明',
@@ -431,12 +502,28 @@ function buildFormalPrompt({
     `<modules>${JSON.stringify(modules, null, 2)}</modules>`,
     '</course>',
     '',
-    // Phase-5C：老师上传/粘贴的参考资料（教案、课标、教材摘录等）
+    // Phase-7.7 E5（2026-04-30）：素材强引用约束（之前是弱建议「请务必参考」AI 不真用）
+    //   - 实测：抓到 4500 字素材（含 Unsplash CC0 全文、Adobe 课程目录），AI 完全没引用
+    //   - 修法：从"建议"改为"硬约束 + 引用规则 + 失败重生成"
+    //   - 副作用提醒：低质量素材（搜索结果墙）会被强行引用，可能拉低自然度——
+    //                老师应在 UI 里删掉低质素材后再生成
     notebookContext.referenceContext
       ? [
           '<reference_material>',
-          '【老师提供的参考资料——请务必参考以下内容，提取真实操作步骤、专业术语、教学案例注入讲稿：】',
+          '【关键约束——老师提供的真实素材，必须深度融合到讲稿】',
+          '',
+          '【强制引用规则（违反则视为生成失败）】',
+          '1. 必须从下方素材中至少引用 **2 处具体内容**（操作步骤 / 真实术语 / 数据 / 法律条款 / 案例）',
+          '2. 引用方式：可以自然融入教师讲述，但必须用素材中的真实文字（如具体步骤、术语、数据、CC0 协议条款等），不要泛泛改写',
+          '3. 如素材包含**版权 / 授权 / 协议条款**（如 CC0、Creative Commons），必须在相应教学段落引用具体条款文字',
+          '4. 如素材包含**真实操作步骤**，必须用素材的步骤覆盖你自己脑补的简化版本',
+          '5. 如素材包含**具体术语 / 行业数据**，必须直接引用而非自己改写表述',
+          '',
+          '【素材内容（最多 5000 字）】',
           String(notebookContext.referenceContext).slice(0, 5000),
+          '【素材结束】',
+          '',
+          '【再次强调】生成后请自检：是否引用 ≥2 处素材具体内容？如果素材里有 CC0 / 版权类内容，是否在合规相关段落引用了具体文字？',
           '</reference_material>'
         ].join('\n')
       : '',
@@ -944,32 +1031,21 @@ async function generateFormalLectureScript({
         // 重置局部模块编号（从 1 开始），确保 AI 生成 "模块1" "模块2" 等局部序号
         // mergeSegmentScripts 再负责把局部序号映射回全局序号
         const localSegModules = segModules.map((m, idx) => ({ ...m, moduleNumber: idx + 1 }));
-        const segSystemPrompt = [
-          '你是中职课程正式讲稿写作专家。',
-          segmentCount > 1
-            ? `当前任务：生成${segmentCount}课时课程的第${seg + 1}课时正式讲稿${segLabel}。`
-            : '核心任务：基于已选候选讲稿，深度生成一版可直接上课使用的正式讲稿。',
-          '输出规范：JSON 对象 {"script":"Markdown格式的正式讲稿"}。',
-          segmentCount > 1
-            // 多段模式：明确每模块字数下限，防止 AI 按"400字/模块"敷衍
-            ? `质量标准：本段教师讲述总计必须达到 2200-3000 字（本段共${localSegModules.length}个模块，` +
-              `每个模块"教师讲述"不少于${Math.round(1800 / localSegModules.length)}字，` +
-              `写 3-5 句连续口播正文，不要写成摘要式短句）；` +
-              `推进词覆盖；提问≥${Math.max(3, Math.round(10 / segmentCount))}个。`
-            : `质量标准：教师讲述2200-3000字，推进词覆盖，提问≥10个。`,
-          isFirst ? '必须包含开场导入章节。' : '不需要开场导入，直接从模块内容开始。',
-          isLast ? '必须包含课堂练习与检查和总结收束章节。到总结收束的课堂动作后立即结束。' : '不需要总结收束，在最后一个模块结束后停止。',
-          '',
-          '【最重要的规则】每个模块的"教师讲述"必须是老师真正会说出口的课堂口播正文。',
-          '绝对禁止以下"教学设计备注"出现在讲稿中：',
-          '  × "学完这一段，学生应该能够针对..."',
-          '  × "这里有一个常见误区..."',
-          '  × "这一段要把XX讲成一条连续判断链..."',
-          '  × "这一部分围绕XX展开，先把当前环节要解决的课堂问题交代清楚"',
-          '  × "重点要把XX之间的关系讲清楚"',
-          '这些是备课笔记，不是讲课稿。讲稿中只写老师对学生说的话。',
-          '正确的写法：用案例引入→提问互动→讲解知识→回收总结。像真人老师一样讲课。'
-        ].filter(Boolean).join('\n');
+        // Phase-6 M1.4：segSystemPrompt 改由 prompt-assembler 装配（8 个 fragment）
+        // 关闭开关 USE_ASSEMBLER=false 可一键回退到原硬编码字符串（buildFormalSystemPromptLegacy）
+        const formalCtx = {
+          segmentCount,
+          segIndex: seg,
+          segLabel,
+          localSegModuleCount: localSegModules.length,
+          isFirst,
+          isLast,
+          // Phase-8.5：注入 totalHours 给 formal.builder 用于课时连贯性约束
+          totalHours: Number(totalHours) || 0,
+        };
+        const segSystemPrompt = USE_ASSEMBLER
+          ? assemble(buildFormalSystemFragments(formalCtx))
+          : buildFormalSystemPromptLegacy(formalCtx);
 
         // 每段只负责 1 课时内容，传 1 而非总学时，
         // 避免 prompt 要求 8800+ 字导致 JSON 被 maxTokens 截断
@@ -983,17 +1059,40 @@ async function generateFormalLectureScript({
           courseProfile,
           frameworkDirectives,
           totalHours: segTotalHours,
-          notebookContext
+          notebookContext,
+          // E2：透传分段元信息给 userPrompt，让 AI 知道当前段次
+          segmentCount, segIndex: seg, isFirst, isLast,
         });
 
         const segText = await aiClient.chatJson({
           systemPrompt: segSystemPrompt,
           userPrompt: segPrompt,
           temperature: 0.25,
-          maxTokens: 8192  // 模型上限，确保单段 2200-3000 字不被截断
+          maxTokens: 8192,  // 模型上限，确保单段 2200-3000 字不被截断
+          responseFormat: true,  // Phase-7.7 B7：启用 JSON Mode，强制模型输出严格 JSON
         });
-        const segParsed = parseJsonObject(segText) || {};
-        const segScript = String(segParsed.script || '').trim();
+        // Phase-7.7 诊断 + B8 宽容解析：
+        // 之前发现 AI 返回 {"script":"..."}（JSON 形式）但内容里含未转义双引号 → parseJsonObject 失败 → fallback
+        // 启用 JSON Mode 后火山平台保证返回严格 JSON，理论上不再失败。
+        // 但仍保留宽容解析（regex 提取 script 字段）作为兜底，万一平台没启用 JSON Mode 或返回有瑕疵
+        const segTextRaw = String(segText || '');
+        console.log(`[formal-generator] seg ${seg + 1}/${segmentCount}: AI 返回长度=${segTextRaw.length} 字，前 200 字预览：${segTextRaw.slice(0, 200).replace(/\n/g, '\\n')}`);
+        let segParsed = parseJsonObject(segText) || {};
+        let segScript = String(segParsed.script || '').trim();
+        // B8 宽容解析：JSON.parse 失败时用 regex 提取 script 字段（粗暴但对长文本鲁棒）
+        if (!segScript && segTextRaw) {
+          const fallbackMatch = segTextRaw.match(/"script"\s*:\s*"([\s\S]*?)"\s*[,}](?![\s\S]*"script")/);
+          if (fallbackMatch && fallbackMatch[1]) {
+            // 反 JSON 字符串转义（\n → 真换行，\" → "，\\ → \）
+            try {
+              segScript = JSON.parse('"' + fallbackMatch[1].replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t') + '"');
+              if (segScript) console.log(`[formal-generator] seg ${seg + 1}: 标准 JSON 解析失败，已用 regex 兜底提取（长度 ${segScript.length} 字）`);
+            } catch {
+              // regex 兜底也失败，让 segScript 保持空，走 fallback
+            }
+          }
+        }
+        console.log(`[formal-generator] seg ${seg + 1}: 解析结果 script 长度=${segScript.length} 字${segScript ? '✓' : '（解析失败/空）'}`);
         if (segScript) segmentScripts.push({ seg, modules: segModules, script: segScript, isFirst, isLast });
       }
 
@@ -1020,10 +1119,11 @@ async function generateFormalLectureScript({
           const expectedSectionCount = normalizedModules.length + 3;
           // 多段生成时放宽章节要求（可能有些模块合并了）
           const sectionThreshold = segmentCount > 1 ? Math.max(5, expectedSectionCount - 2) : expectedSectionCount;
-          console.log(`[formal-generator] post-build: narration=${narrationCount}/${Math.round(minChars * 0.6)} canonicalSections=${canonicalSections}/${sectionThreshold} errors=${quality.errors.length}`);
-          // 验收条件：AI 稿无结构错误（errors=0），且字数 ≥ 60% 目标（兜底宽容），章节数达标
-          // 字数不足仅为 warning，不进入 errors，故此处改为直接检查 narrationCount
-          const narrationAcceptable = narrationCount >= Math.round(minChars * 0.6);
+          // Phase-9.5（2026-05-11）：单节课场景下放宽到 40%（与 retry-loop.isAcceptable 同步）
+          //   4 学时课最低接受 3520 字（minChars=8800 × 40%），避免 AI 实际产出被全拒
+          const acceptThreshold = Math.round(minChars * 0.4);
+          console.log(`[formal-generator] post-build: narration=${narrationCount}/${acceptThreshold} canonicalSections=${canonicalSections}/${sectionThreshold} errors=${quality.errors.length}`);
+          const narrationAcceptable = narrationCount >= acceptThreshold;
           if (
             quality.errors.length === 0
             && narrationAcceptable

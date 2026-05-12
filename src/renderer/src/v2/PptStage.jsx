@@ -56,22 +56,36 @@ function SlidePreview({ page, template, toLocalImgSrc }) {
   }
 
   // 路线图：顶部色条 + 横向模块标签
+  // Phase-7.7 G1（2026-04-30）：之前路线图分支完全忽略 imgSrc → 即使生成了配图也不显示
+  // 修法：如有 imgSrc，作为半透明背景图层（保留色条 + chip 在前的设计）
   if (isRoadmap) {
     return (
-      <div style={{ background: bg, aspectRatio: '16/9', borderRadius: 10, border: '1px solid #d1d5db', overflow: 'hidden', fontSize: 12, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ background: accent, height: 5, width: '100%', flexShrink: 0 }} />
-        <div style={{ padding: '8px 14px', flex: 1, overflow: 'hidden' }}>
+      <div style={{ background: bg, aspectRatio: '16/9', borderRadius: 10, border: '1px solid #d1d5db', overflow: 'hidden', fontSize: 12, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+        {/* G1：路线图背景配图（半透明，保证 chip 文字可读）*/}
+        {imgSrc && (
+          <img
+            src={toLocalImgSrc(imgSrc)}
+            alt=""
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.35, zIndex: 0 }}
+          />
+        )}
+        {/* 半透明白色遮罩，保证文字对比度 */}
+        {imgSrc && (
+          <div style={{ position: 'absolute', inset: 0, background: 'rgba(255,255,255,0.55)', zIndex: 1 }} />
+        )}
+        <div style={{ background: accent, height: 5, width: '100%', flexShrink: 0, position: 'relative', zIndex: 2 }} />
+        <div style={{ padding: '8px 14px', flex: 1, overflow: 'hidden', position: 'relative', zIndex: 2 }}>
           <div style={{ color: titleColor, fontWeight: 700, fontSize: 13, marginBottom: 6 }}>{page.title || '课程路线图'}</div>
           {keyPoints.length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
               {keyPoints.map((point, i) => (
-                <div key={i} style={{ background: i === 0 ? accent : accent + '28', color: i === 0 ? '#fff' : titleColor, padding: '3px 8px', borderRadius: 10, fontSize: 8, border: `1px solid ${accent}44` }}>
+                <div key={i} style={{ background: i === 0 ? accent : accent + 'CC', color: '#fff', padding: '3px 8px', borderRadius: 10, fontSize: 8, border: `1px solid ${accent}` }}>
                   {String(point).replace(/^[-\d.]+\s*/, '').substring(0, 18)}
                 </div>
               ))}
             </div>
           )}
-          <div style={{ textAlign: 'right', color: '#9ca3af', fontSize: 7, marginTop: 6 }}>P{page.pageNumber} · {page.pageType}</div>
+          <div style={{ textAlign: 'right', color: titleColor, fontSize: 7, marginTop: 6 }}>P{page.pageNumber} · {page.pageType}</div>
         </div>
       </div>
     );

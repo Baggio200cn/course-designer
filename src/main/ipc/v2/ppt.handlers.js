@@ -35,12 +35,13 @@ function register(ipcMain, getDeps) {
 
   ipcMain.handle('v2:savePptStage', async (event, payload = {}) => {
     const { v2Runtime } = getDeps();
-    return v2Runtime.savePptStage(payload);
+    // Phase-6 M2.2：IPC 来源即用户操作，注入 _userInitiated 让 runtime 自动加锁
+    return v2Runtime.savePptStage({ ...payload, _userInitiated: true });
   });
 
   ipcMain.handle('v2:confirmPptStage', async (event, payload = {}) => {
     const { v2Runtime } = getDeps();
-    return v2Runtime.confirmPptStage(payload);
+    return v2Runtime.confirmPptStage({ ...payload, _userInitiated: true });
   });
 
   // 生成 PPT 页面候选内容（AI 调用，由 v2Runtime 管理重试和状态）
@@ -86,7 +87,10 @@ function register(ipcMain, getDeps) {
         aiClient,
         prevPages: Array.isArray(payload.prevPages) ? payload.prevPages : [],
         imageAspect: String(payload.imageAspect || '16:9'),
-        imageQuality: String(payload.imageQuality || 'low')
+        imageQuality: String(payload.imageQuality || 'low'),
+        // Phase-7.6 R5：把跨阶段讲稿章节锚点真实传给生成器（之前构建了但没用）
+        lectureSections: pptCtx.lectureSections || [],
+        lectureSectionSummary: pptCtx.lectureSectionSummary || '',
       });
 
       return {

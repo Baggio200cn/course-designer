@@ -1,192 +1,127 @@
-# 项目上下文（2026-04-25 Phase-5D 完成 · v2.1.0 发布）
+# 项目上下文（2026-05-10 · Phase-9 完成 · v4.0.0 发布）
 
-## 🎯 当前阶段：刘老师Agent2.1 v2.1.0 — Agent 四阶段全流水线已完成
-
-**战略目标：广纺织学校验收测试 → 商业推广**
+## 🎯 当前阶段：驭课 Agent v4.0.0 — Phase-9 完成
 
 ---
 
-## ✅ Phase-5A：IPC 拆分（已完成）
+## ✅ Phase-9（2026-05-09 至 05-10 完成）
 
-全部 87 个 handler 从 index.js 迁移到 `src/main/ipc/` 下 14 个文件，
-通过 `_registry.js` 统一注册。index.js 只做启动 + 注册。
+### A. 6 阶段工作流重构
+
+```
+v3.x: framework → lecture → ppt → video                 （4 阶段）
+v4.0: schedule → design → lecture → ppt → video → report （6 阶段）
+```
+
+**契约文件**：`src/main/v2/contracts.js` — H1 例外批准，从 `STAGE_ORDER_LEGACY_V3` 升级到 `STAGE_ORDER`（6 阶段）+ `STAGE_REQUIREMENTS` 新依赖链。
+
+### B. 各阶段重大改造
+
+| 阶段 | 改造点 |
+|---|---|
+| 教学进度表（C-1）| 全新 18 周 6 列表，按广州纺校样例（周次/课次/章节/内容/方式/作业次数）|
+| 教学设计（C-2）| AI 信息图新增 `design_overview` layout（6 段逻辑闭环：HERO→学情起点→三阶递进→学习路径→评价闭环→思政升华→GOAL）|
+| 课堂讲稿（C-X）| **整门课讲稿 → 多节课讲稿**（每节 ≤4 学时，理论+实践拼配，顶部 tab 管理）|
+| 教学课件（PPT）| 修复"22 页配图全相同"bug：移除 `GUIZANG_HERO_TYPES` 里的 `'模块页'/'课程导入'`，让模块页拿到差异化 prompt |
+| 微课视频（C-3）| 整套方案：脚本+分镜+即梦提示词+拍摄+剪辑（替代旧的"仅生成提示词"）|
+| 教学实施报告（C-4）| 全新阶段：AI 自动汇总前 5 阶段 + 老师手填 9 项 + **4 格式导出（Word/Markdown/HTML/PDF）**|
+
+### C. 质量链路升级（B 方案阶段 1 接入多节课）
+
+`v2:lessonGenerateFormal` 完整链路：
+1. **`generateWithRetry`**：3 次自动重试 + 质量反馈注入（formal.builder fragment 9/10：五段式 + 课时连贯）
+2. **`reviewAndRevise`**：9 维度审核（含 `referenceFusionDepth` / `fiveStepTransform` / `timelineConsistency`）+ 自动修订
+3. **反虚构数据 prompt 约束**：禁止编造销量/点赞/产品性能/达人数等数字（基于 codex 58/100 review 反馈）
+4. **素材落地结构化约束**：每条素材必须给"教师动作 + 学生提取项 + 组织讨论方式"
+
+### D. 兼容性 + UX 修复
+
+- **json_object 不支持降级**：`ark-course-client.chatJson` 检测 400 错"json_object is not supported by this model" → 自动去掉 response_format 重试
+- **PNG 渲染截断修复**：`renderHtmlToPngBuffer` 加 `useContentSize: true` + 强制 setContentSize + 显式 `capturePage(rect)` + max_tokens 4000→12000
+- **老师手搓正式稿**：粘贴文本模态 + 上传 .docx 替换 AI 版本（在 LectureStage）
+- **URL 抓取多 URL 检测**：自动剥离 `;`/`,`/空格 后内容 + SPA 站点失败给备选路径
+- **窗口标题修复**：`src/renderer/index.html` 从"AI 课程设计助手" → "驭课 Agent v4.0.0"
+- **新建笔记本 modal 重构**：按广州纺校进度表样例字段（教师/学校简称/教学部/学期/班级/教材）
+
+### E. Verify 回归
+
+| 脚本 | 通过率 |
+|---|---|
+| verify-contracts-v6.js | 27/27 |
+| verify-schedule-service.js | 27/27 |
+| verify-design-service.js | 21/21 |
+| verify-micro-video-service.js | 25/25 |
+| verify-report-service.js | 34/34 |
+| **Phase-9 累计** | **134/134** |
 
 ---
 
-## ✅ Phase-5B：上下文富化 + AI 审核（2026-04-21 完成）
+## ✅ Phase-8.5（2026-05-08 完成 · 治理 + 信息图升级）
 
-### 新增内容
-
-| 功能 | 状态 | 关键文件 |
-|------|------|---------|
-| 5 个课程上下文字段（软件/岗位/场景/学情/教材）| ✅ 完成 | db-simple.js + V2App.jsx |
-| AI 研究建议（chatJson 守卫 bug 已修）| ✅ 完成 | services/research.service.js |
-| 讲稿 AI 审核 + 自动修订（hasRichContext 触发）| ✅ 完成 | ipc/lecture.handlers.js + LectureStage.jsx |
-| Word 导出讲稿信息表 + 样式区分 | ✅ 完成 | export/word.js |
-| PPT 封面含软件/年级信息 | ✅ 完成 | export/ppt.js |
-| 信息图模板注入软件/岗位上下文 | ✅ 完成 | services/infographic-card.service.js |
-| 切换笔记本状态污染修复 | ✅ 完成 | V2App.jsx |
-| 编辑课程上下文弹窗 | ✅ 完成 | V2App.jsx |
-| framework-schema.js 用户友好错误消息 | ✅ 完成 | api/framework-schema.js |
-| 质量卡片红/黄样式 + 审核面板样式 | ✅ 完成 | v2.css |
-
-### 验证结果
-
-```
-11 个 verify 脚本：全部 ✅ OK
-```
+- CLAUDE.md 拆分（772 行 → 200 行入口 + .claude/ 子文件）
+- 杂志风信息图（magazine_module）+ verify-magazine-svg.js（7/7）
+- B 方案阶段 1：review.service 5→9 维度审核 + formal.builder fragment 8→10（五段式 + 课时连贯性）
 
 ---
 
-## ✅ Phase-5C：Agent 架构（已完成，2026-04-21）
+## ✅ Phase-8（2026-05-02 至 05-09 完成 · M0+ 网页深度抓取）
 
-**用户明确指示：连续工作直到完成，目标：广纺织学校验收测试 → 商业推广。**
-
-### 5 个实施步骤（全部完成 ✅）
-
-```
-✅ Step 1 — Auto-Retry Loop
-  文件：src/main/ipc/lecture.handlers.js + src/main/agent/retry-loop.js
-  目标：generateFormalLecture 质量不达标时自动重试 ≤3 次
-  验证：node scripts/verify-lecture-generation.js ✅
-
-✅ Step 2 — Cross-Stage Context Injection
-  文件：src/main/agent/context-builder.js
-  目标：讲稿生成时自动注入框架的 objectives + teachingMethods
-  验证：node scripts/verify-lecture-generation.js ✅
-
-✅ Step 3 — Agent Orchestrator
-  新文件：src/main/agent/orchestrator.js
-  新文件：src/main/ipc/agent.handlers.js
-  前端入口：V2App.jsx 新增「一键生成」按钮
-  验证：node scripts/verify-agent-orchestrator.js ✅
-
-✅ Step 4 — Cross-Session Memory
-  新文件：src/main/agent/memory.js
-  数据库：db-simple.js 新增 agent_memories 集合（saveAgentMemory / getAgentMemories）
-  集成：orchestrator.js 在每次 run() 时读取历史相似课程，成功后保存记忆
-  验证：node scripts/verify-agent-memory.js ✅ (18/18)
-
-✅ Step 5 — Backtracking
-  文件：src/main/agent/orchestrator.js（decideNextAction + execBacktrackFramework）
-  机制：讲稿正式稿经 2 次编排器级尝试仍不达标 → 清空讲稿 artifacts → 重生成框架 → 重走讲稿链
-  回溯后讲稿计数重置（只统计回溯后步骤），每轮最多回溯 1 次防死循环
-  UI：回溯步骤在 Agent 日志中以琥珀色左边框高亮（⤴ backtrack_framework）
-  验证：node scripts/verify-agent-orchestrator.js ✅ (12/12)
-```
-
-### Agent 架构的核心约束
-
-- Agent 决策循环有 10 分钟超时
-- 每次决策和执行记录到 task_runtime 操作日志
-- 不修改已 confirmed 的 artifact
-- 不绕过 contracts.js Stage 依赖顺序
-- LLM 调用通过 resolveProviderConfig + createAiClientByConfig 创建
+- 4 层 URL 抓取策略：httpGet → Defuddle → BrowserWindow → fallback
+- web-extractor.service.js + verify-web-extractor.js（22/22）
+- 老师面向：用真实网页素材生成讲稿/PPT 配图
 
 ---
 
-## ✅ Phase-5D：baoyu-skills 集成 + PPT 配图升级（2026-04-24）
+## ✅ Phase-7.7 / Phase-7.5（2026-04-29 完成）
 
-### Phase A — SVG 教学结构图生成（v2:generateDiagram）
-
-| 功能 | 状态 | 关键文件 |
-|------|------|---------|
-| SVG 结构图生成服务 | ✅ 完成 | src/main/services/diagram.service.js |
-| 图形生成 System Prompt | ✅ 完成 | prompts/diagram.md |
-| IPC handler 注册 | ✅ 完成 | src/main/ipc/media.handlers.js（v2:generateDiagram）|
-| 前端按钮 + 预览 | ✅ 完成 | FrameworkStage.jsx（4种图类型 + SVG内联预览）|
-| Preload API | ✅ 完成 | src/preload/index.js（generateDiagramV2）|
-
-### Phase B — 信息图 5布局 × 4风格升级（v2:getInfographicOptions）
-
-| 功能 | 状态 | 关键文件 |
-|------|------|---------|
-| 5种布局规格（LAYOUT_SPECS）| ✅ 完成 | infographic-card.service.js |
-| 4种视觉风格（STYLE_SPECS）| ✅ 完成 | infographic-card.service.js |
-| buildEnhancedPrompt() | ✅ 完成 | infographic-card.service.js |
-| v2:getInfographicOptions handler | ✅ 完成 | media.handlers.js |
-| 前端布局/风格选择器 | ✅ 完成 | FrameworkStage.jsx |
-
-### Phase C — 知识点卡片 HTML 导出（v2:exportKnowledgeCards）
-
-| 功能 | 状态 | 关键文件 |
-|------|------|---------|
-| 纯模板 HTML 生成 | ✅ 完成 | src/main/export/knowledge-cards.js |
-| IPC handler 注册 | ✅ 完成 | export.handlers.js（v2:exportKnowledgeCards）|
-| 前端导出按钮 | ✅ 完成 | FrameworkStage.jsx |
-
-### 方向三 — 教师 PPT 配图控制层（三步走）
-
-| 功能 | 状态 | 关键文件 |
-|------|------|---------|
-| Step ①：AI 规划完成标识 | ✅ 完成 | PptStage.jsx |
-| Step ②：生成封面图 + 风格锁定 | ✅ 完成 | V2App.jsx（handleGenerateCoverImage + handleConfirmCoverStyle）|
-| Step ③：批量生成 + 进度条 | ✅ 完成 | V2App.jsx（handleBatchGenerateImages）|
-| styleAnchor 注入机制 | ✅ 完成 | 所有非封面页 imagePrompt 末尾追加风格锚点字符串 |
-
-### 验证结果（2026-04-24）
-
-```
-全部 13 个 verify 脚本：均通过 ✅
-系统完整性检查 20/20：全部通过 ✅
-```
+- A3：我的工作台（跨课程统计 + 经验沉淀）
+- M7.5.1：Agent 暂停-恢复机制
+- F1+F2：PPT 配图主题修复（"图文排版"不再画成"服装手工"）
 
 ---
 
-## 📊 关键代码位置速查
+## ✅ Phase-6 Harness 治理（已完成）
 
-### 讲稿生成核心
-| 功能 | 文件 | 说明 |
-|------|------|------|
-| 三稿生成 | src/main/script/abc-generator.js | A/B/C + API prompt |
-| 正式稿合成 | src/main/script/formal-generator.js | 合成 + 扩展 + 清洗 |
-| 字数/风格校验 | src/main/v2/quality.js | validateLectureStage（纯函数） |
-| 讲稿 handler | src/main/ipc/lecture.handlers.js | 含 AI 审核逻辑 |
-
-### 新增 Phase-5B 文件
-| 功能 | 文件 | 说明 |
-|------|------|------|
-| 课程研究建议 | src/main/services/research.service.js | chatJson() 调用 |
-| 框架 Schema | src/main/api/framework-schema.js | 用户友好错误消息 |
-
-### 导出链
-| 功能 | 文件 | 说明 |
-|------|------|------|
-| 框架 Word | export/word.js | 六列教学过程表 + 讲稿样式块 |
-| PPT | export/ppt.js | 11 种页型，封面含上下文信息 |
-| 信息图 | services/infographic-card.service.js | HTML→PNG，含软件/岗位 |
-
-### 测试脚本
-| 脚本 | 用途 |
-|------|------|
-| verify-lecture-generation.js | 讲稿质量（字数/规则泄露/寒暄） |
-| e2e-lecture-with-api.js | 带 API 的讲稿端到端测试 |
-| e2e-framework-word.js | Word 导出多课程测试 |
-| e2e-ppt-export.js | PPT 导出全链路测试 |
-| verify-word-export.js | Word 导出快速验证 |
+- M1：prompt-assembler 装配体系（source-registry / fragment-wrapper）
+- M2：lockedByUser + 冲突裁决 + 上下文压缩
+- M3：操作日志压缩 + 用户强制接受路径
 
 ---
 
-## 🔀 整体路线图
+## ✅ Phase-5 Agent（已完成）
 
-```
-✅ Phase-4A 讲稿链修复
-✅ Phase-4B 框架 Word 升级
-✅ Phase-4C PPT 链重构
-✅ Phase-4D 信息图提示词升级
-✅ Phase-5A IPC 拆分（14 组 handler 文件）
-✅ Phase-5B 上下文富化 + AI 审核 + UI 修复
-✅ Phase-5C Agent 架构（5 步全部完成 2026-04-21）
-   ✅ Step1 Auto-Retry
-   ✅ Step2 Cross-Stage Context
-   ✅ Step3 Orchestrator
-   ✅ Step4 Cross-Session Memory
-   ✅ Step5 Backtracking
-✅ Phase-5D baoyu-skills 集成 + PPT 配图升级（2026-04-24）
-   ✅ Phase A SVG 教学结构图（diagram.service + prompts/diagram.md + FrameworkStage）
-   ✅ Phase B 信息图 5布局×4风格（InfographicCardService + v2:getInfographicOptions）
-   ✅ Phase C 知识点卡片 HTML 导出（knowledge-cards.js + v2:exportKnowledgeCards）
-   ✅ 方向三 PPT 教师配图控制层（封面→锁定风格→批量生成，styleAnchor 注入）
-→ 广纺织学校验收测试
-→ 商业推广
-```
+- 5A：IPC 拆分到 14 个文件
+- 5B：上下文富化（5 字段：软件/岗位/场景/学情/教材）+ AI Review Loop
+- 5C：Agent 架构（5 步：Auto-Retry / Cross-Stage / Orchestrator / Memory / Backtracking）
+- 5D：baoyu-skills 集成（SVG 教学结构图 + 知识点卡片 + PPT 配图升级）
+
+---
+
+## 🔮 下一阶段：Phase-10（待规划）
+
+待老师试用 v4.0.0 后反馈，预计聚焦：
+
+- 教学课件（PPT）22 页主题图差异化的进一步打磨
+- 多节课讲稿之间的关联性增强（如交叉引用、复习前节）
+- 实施报告 PDF 导出的中文字体优化
+- 集成测试自动化（端到端跑通 6 阶段 + 真实 AI）
+
+---
+
+## 关键决策清单（参考用）
+
+| 决策 | 时间 | 文档 |
+|---|---|---|
+| H1 例外批准（Phase-9 改 contracts.js）| 2026-05-09 | `.claude/notes/2026-05-09-phase9-h1-exception.md` |
+| 学校简称统一"广州纺校" | 2026-05-09 | `.claude/notes/2026-05-09-school-shortname-convention.md` |
+| runtime.js 不动策略 | 2026-05-09 | `.claude/notes/2026-05-09-phase9-runtime-strategy.md` |
+| Phase-9 阶段 D 前端最小可用 | 2026-05-09 | `.claude/notes/2026-05-09-phase9-stage-d-frontend.md` |
+| 老师反馈：讲稿 55→62 分 | 2026-05-08 | `.claude/notes/2026-05-08-teacher-feedback-formal-script.md` |
+
+---
+
+## 审查 + 维护
+
+- **维护人**：Baggio（项目方）
+- **代码协作**：Claude Code
+- **下次审查**：v4.0.0 老师试用反馈后（预计 1-2 周内）

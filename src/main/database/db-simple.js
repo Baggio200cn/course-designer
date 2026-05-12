@@ -2,6 +2,59 @@
 const path = require('path');
 const { app } = require('electron');
 
+// ─── Phase-6 M3.1 内部 helper：operation 压缩摘要构造 ────
+function _summarizeInput(input) {
+  if (input == null) return null;
+  // 对象类输入：仅保留对象大小提示
+  if (typeof input === 'object') {
+    try {
+      const byteSize = JSON.stringify(input).length;
+      return byteSize > 0 ? { _summary: 'compressed', byteSize } : null;
+    } catch {
+      return { _summary: 'compressed' };
+    }
+  }
+  // 原始类型直接返回
+  return input;
+}
+
+function _summarizeOutput(output) {
+  if (output == null) return null;
+  if (typeof output !== 'object') return output;
+  // 仅保留 boolean / number 字段（指标类有用）
+  const summary = {};
+  for (const [key, value] of Object.entries(output)) {
+    if (typeof value === 'boolean' || typeof value === 'number') {
+      summary[key] = value;
+    } else if (typeof value === 'string' && value.length <= 80) {
+      summary[key] = value;
+    }
+  }
+  return Object.keys(summary).length ? summary : { _summary: 'compressed' };
+}
+
+function _summarizeMetadata(metadata) {
+  if (!metadata || typeof metadata !== 'object') return {};
+  const summary = {};
+  // quality 字段含 valid/checks 是关键审计指标
+  if (metadata.quality && typeof metadata.quality === 'object') {
+    const q = metadata.quality;
+    summary.quality = {
+      valid: Boolean(q.valid),
+    };
+    if (q.checks && typeof q.checks === 'object') {
+      // 只保留数字类指标（如 finalNarrationCharCount）
+      summary.quality.checks = Object.fromEntries(
+        Object.entries(q.checks).filter(([, v]) => typeof v === 'number')
+      );
+    }
+    if (Array.isArray(q.errors) && q.errors.length) {
+      summary.quality.errorCount = q.errors.length;
+    }
+  }
+  return summary;
+}
+
 class DatabaseManager {
   constructor() {
     // 鏁版嵁鏂囦欢璺緞
@@ -28,6 +81,8 @@ class DatabaseManager {
         workflowStates: [],
         resources: [],
         agent_memories: [],          // Phase-5C Step 4: Agent 跨会话记忆
+        agent_pause_states: [],      // Phase-7.5 M7.5.1: Agent 暂停状态（每 notebook 至多 1 条）
+        generation_audit: [],         // Phase-7.6 R8: LLM 生成调用审计日志
         settings: {
           app_version: '1.0.0',
           first_run: '1'
@@ -56,6 +111,16 @@ class DatabaseManager {
       // Migration: add agent_memories for Phase-5C Step 4
       if (!Array.isArray(current.agent_memories)) {
         current.agent_memories = [];
+        changed = true;
+      }
+      // Migration: add agent_pause_states for Phase-7.5 M7.5.1
+      if (!Array.isArray(current.agent_pause_states)) {
+        current.agent_pause_states = [];
+        changed = true;
+      }
+      // Migration: add generation_audit for Phase-7.6 R8
+      if (!Array.isArray(current.generation_audit)) {
+        current.generation_audit = [];
         changed = true;
       }
       // Migration: add enriched context fields to existing notebooks (Phase-5B)
@@ -103,6 +168,12 @@ class DatabaseManager {
               generatedAt: next.createdAt || new Date().toISOString(),
               confirmedAt: next.confirmed ? (next.updatedAt || next.createdAt || new Date().toISOString()) : null
             };
+            localChanged = true;
+          }
+          // Phase-6 M2.1 迁移：为旧 artifact 添加 lockedByUser 字段
+          // 策略（Q4 选项 B）：已 confirmed 的历史数据默认锁定，保护老用户的人工成果不被新 Agent 覆盖
+          if (next.lockedByUser === undefined) {
+            next.lockedByUser = Boolean(next.confirmed);
             localChanged = true;
           }
           if (localChanged) artifactsChanged = true;
@@ -375,6 +446,11 @@ class DatabaseManager {
       status: artifactData.status || 'generated',
       version: Number(artifactData.version) || 1,
       confirmed: Boolean(artifactData.confirmed),
+      // Phase-6 M2.1：用户保护锁
+      // 默认策略：显式传入则取传入值；未传时与 confirmed 同步（confirm 自动锁，符合 Q2 选项 C）
+      lockedByUser: artifactData.lockedByUser !== undefined
+        ? Boolean(artifactData.lockedByUser)
+        : Boolean(artifactData.confirmed),
       parentArtifactId: artifactData.parentArtifactId || null,
       sourceArtifactIds: Array.isArray(artifactData.sourceArtifactIds) ? artifactData.sourceArtifactIds : [],
       storagePath: artifactData.storagePath || null,
@@ -405,9 +481,16 @@ class DatabaseManager {
     if (index === -1) {
       throw new Error('Artifact not found');
     }
+    // Phase-6 M2.1：confirm 自动锁定（Q2 选项 C 第一种触发场景）
+    // 当 patch.confirmed=true 但未显式传 lockedByUser 时，自动设为 true
+    // 保留显式传入的优先级（如调用方需要 confirm 但不锁——理论上不应出现，但 API 层不应强制）
+    const normalizedPatch = { ...patch };
+    if (patch.confirmed === true && patch.lockedByUser === undefined) {
+      normalizedPatch.lockedByUser = true;
+    }
     allData.artifacts[index] = {
       ...allData.artifacts[index],
-      ...patch,
+      ...normalizedPatch,
       sourceArtifactIds: Array.isArray(patch.sourceArtifactIds)
         ? patch.sourceArtifactIds
         : allData.artifacts[index].sourceArtifactIds || [],
@@ -435,6 +518,64 @@ class DatabaseManager {
     };
     this._writeData(allData);
     return allData.artifacts[index];
+  }
+
+  // ──────────────────────────────────────────────────────
+  //  Phase-6 M2.1：用户保护锁（lockedByUser）helper
+  // ──────────────────────────────────────────────────────
+  /**
+   * 显式设置 artifact 的用户锁状态。
+   *
+   * 调用场景：
+   *  - 用户在编辑器手动 edit 了内容（M2.2 业务层调用，传 locked=true）
+   *  - 用户主动点"重新生成"清除锁（业务层调用，传 locked=false）
+   *
+   * 注意：本方法不联动 confirmed 字段——锁与 confirm 是独立维度，
+   *      由调用方按场景决定是否需要同步设置 confirmed。
+   *
+   * @param {number} artifactId
+   * @param {boolean} locked
+   * @returns {Object|null} 更新后的 artifact，未找到返回 null
+   */
+  setArtifactLock(artifactId, locked) {
+    const allData = this._readData();
+    allData.artifacts = Array.isArray(allData.artifacts) ? allData.artifacts : [];
+    const index = allData.artifacts.findIndex((item) => item.id === artifactId);
+    if (index === -1) return null;
+    allData.artifacts[index] = {
+      ...allData.artifacts[index],
+      lockedByUser: Boolean(locked),
+      updatedAt: new Date().toISOString(),
+    };
+    this._writeData(allData);
+    return allData.artifacts[index];
+  }
+
+  /**
+   * 查询 artifact 的用户锁状态。
+   * 未找到的 artifact 返回 false（"无锁"对应"无保护"，调用方仍可读旧逻辑）。
+   *
+   * @param {number} artifactId
+   * @returns {boolean}
+   */
+  isArtifactLocked(artifactId) {
+    const data = this._readData();
+    const item = (data.artifacts || []).find((a) => a.id === artifactId);
+    return item ? Boolean(item.lockedByUser) : false;
+  }
+
+  /**
+   * 查询某个 notebook 的指定 type+stage 最新 artifact 是否被用户锁定。
+   * 用于 orchestrator 在 backtracking 前快速判断"是否会覆盖用户改动"。
+   *
+   * @param {number} notebookId
+   * @param {string} type
+   * @param {string} [stage]
+   * @returns {boolean}
+   */
+  isLatestArtifactLocked(notebookId, type, stage = '') {
+    const latest = this.getLatestArtifact(notebookId, type, stage);
+    return latest ? Boolean(latest.lockedByUser) : false;
   }
 
   listArtifacts(filters = {}) {
@@ -505,6 +646,119 @@ class DatabaseManager {
     };
     this._writeData(allData);
     return allData.operations[index];
+  }
+
+  // ──────────────────────────────────────────────────────
+  //  Phase-6 M3.1：长会话日志压缩
+  // ──────────────────────────────────────────────────────
+  /**
+   * 压缩单个 operation 的详细字段，节省长流水线下的存储与读取成本。
+   *
+   * 永远保留的核心字段（不压缩）：
+   *   id/notebookId/stage/action/status/summary
+   *   startedAt/finishedAt/createdAt/updatedAt
+   *   outputArtifactIds/error
+   *
+   * 可压缩字段（按 level 处理）：
+   *   input/output/warnings/metadata
+   *
+   * level 选项：
+   *   'auto' (默认)       — 仅当 status='completed' 且未压缩时压缩为 summary；其他状态保持原样
+   *   'success_summary'   — 强制压缩（即使 status≠completed）
+   *   'archive'           — 极致压缩，input/output/warnings 全部清空，仅留指标摘要
+   *
+   * 设计准则：
+   *  - 失败 operation 不压缩（错误堆栈、warnings 对调试至关重要）
+   *  - 已压缩的不重复处理（通过 _compressed 字段判断幂等）
+   *  - 调用方拿到的 finalOperation（来自 updateOperation 返回值）保持原样，
+   *    本方法仅修改持久化层；事件订阅者也接到原始对象
+   *
+   * @param {number} operationId
+   * @param {Object} [options]
+   * @param {string} [options.level='auto']
+   * @returns {Object|null} 压缩后的 operation；不存在返回 null
+   */
+  compressOperationDetail(operationId, options = {}) {
+    const allData = this._readData();
+    allData.operations = Array.isArray(allData.operations) ? allData.operations : [];
+    const index = allData.operations.findIndex((item) => item.id === operationId);
+    if (index === -1) return null;
+    const op = allData.operations[index];
+    const level = options.level || 'auto';
+
+    // 幂等：已压缩则跳过（auto 模式视任何已压缩状态为完成）
+    if (op._compressed) {
+      if (level === 'auto') return op;
+      if (op._compressed === level) return op;
+    }
+
+    // auto 模式仅压缩"已完成且成功"的 operation；运行中/失败保持全量
+    if (level === 'auto') {
+      if (op.status !== 'completed') return op;
+    }
+
+    const compressed = { ...op };
+    if (level === 'archive') {
+      compressed.input = null;
+      compressed.output = null;
+      compressed.warnings = [];
+      compressed.metadata = { _archived: true };
+      compressed._compressed = 'archive';
+    } else {
+      // success_summary 或 auto + completed
+      compressed.input = _summarizeInput(op.input);
+      compressed.output = _summarizeOutput(op.output);
+      compressed.warnings = Array.isArray(op.warnings) ? op.warnings.slice(0, 3) : [];
+      compressed.metadata = _summarizeMetadata(op.metadata);
+      compressed._compressed = 'success_summary';
+    }
+    compressed.updatedAt = new Date().toISOString();
+    allData.operations[index] = compressed;
+    this._writeData(allData);
+    return compressed;
+  }
+
+  /**
+   * 批量压缩某 notebook 下的历史 operation。
+   * 调用场景：一次完整 Agent run 完成后清理空间，或定期维护。
+   *
+   * 返回 { compressedCount, skippedCount, byteSavedEstimate }（字节估算基于 JSON.stringify 长度）
+   *
+   * @param {number} notebookId
+   * @param {Object} [options]
+   * @param {string} [options.level='auto']
+   * @param {string} [options.beforeIso] - ISO 时间字符串：仅压缩 createdAt < beforeIso 的 operation
+   * @param {boolean} [options.includeRunning=false] - 是否压缩 status='running' 的（默认不）
+   */
+  compactOperationsByNotebook(notebookId, options = {}) {
+    const allData = this._readData();
+    allData.operations = Array.isArray(allData.operations) ? allData.operations : [];
+    const level = options.level || 'auto';
+    const beforeIso = typeof options.beforeIso === 'string' ? options.beforeIso : null;
+    const includeRunning = Boolean(options.includeRunning);
+
+    let compressedCount = 0;
+    let skippedCount = 0;
+    let byteSavedEstimate = 0;
+
+    for (let i = 0; i < allData.operations.length; i++) {
+      const op = allData.operations[i];
+      if (Number(op.notebookId) !== Number(notebookId)) { skippedCount++; continue; }
+      if (!includeRunning && op.status === 'running') { skippedCount++; continue; }
+      if (beforeIso && (op.createdAt || '') >= beforeIso) { skippedCount++; continue; }
+      if (op._compressed === level) { skippedCount++; continue; }
+
+      const beforeBytes = JSON.stringify(op).length;
+      const result = this.compressOperationDetail(op.id, { level });
+      if (result && result._compressed) {
+        compressedCount++;
+        const afterBytes = JSON.stringify(result).length;
+        byteSavedEstimate += Math.max(0, beforeBytes - afterBytes);
+      } else {
+        skippedCount++;
+      }
+    }
+    return { compressedCount, skippedCount, byteSavedEstimate };
   }
 
   listOperations(filters = {}) {
@@ -996,6 +1250,99 @@ class DatabaseManager {
     const data = this._readData();
     return Array.isArray(data.agent_memories) ? data.agent_memories : [];
   }
+
+  // ──────────────────────────────────────────────────────
+  //  Phase-7.5 M7.5.1：Agent 暂停状态持久化
+  // ──────────────────────────────────────────────────────
+  /**
+   * 保存 Agent 暂停状态（用于失败时等待老师介入，再恢复）
+   * 同一 notebookId 至多 1 条，重复保存覆盖。
+   *
+   * @param {Object} state - { notebookId, stage, reason, details, suggestions, stepLog, agentState, pausedAt }
+   * @returns {Object} 保存后的状态
+   */
+  saveAgentPauseState(state = {}) {
+    const allData = this._readData();
+    allData.agent_pause_states = Array.isArray(allData.agent_pause_states) ? allData.agent_pause_states : [];
+    const notebookId = Number(state.notebookId);
+    if (!notebookId) throw new Error('saveAgentPauseState: notebookId 必填');
+    const entry = {
+      notebookId,
+      stage: state.stage || 'unknown',
+      reason: state.reason || '',
+      details: state.details || {},
+      suggestions: Array.isArray(state.suggestions) ? state.suggestions : [],
+      stepLog: Array.isArray(state.stepLog) ? state.stepLog : [],
+      agentState: state.agentState || {},
+      pausedAt: state.pausedAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    // 同 notebookId 替换
+    allData.agent_pause_states = allData.agent_pause_states.filter(
+      (item) => Number(item.notebookId) !== notebookId
+    );
+    allData.agent_pause_states.push(entry);
+    this._writeData(allData);
+    return entry;
+  }
+
+  /**
+   * 获取笔记本的 Agent 暂停状态。
+   * @param {number} notebookId
+   * @returns {Object|null}
+   */
+  getAgentPauseState(notebookId) {
+    const data = this._readData();
+    const id = Number(notebookId);
+    return (data.agent_pause_states || []).find((item) => Number(item.notebookId) === id) || null;
+  }
+
+  /**
+   * Phase-7.6 R8：写入生成审计日志（fire-and-forget 用）
+   * 已构造好的 entry 直接 push；单 notebook 上限淘汰由 generation-audit.service 控制
+   *
+   * @param {Object} entry - 由 buildAuditEntry 构造的标准化对象
+   * @returns {Object} 写入的 entry
+   */
+  createGenerationAudit(entry) {
+    const allData = this._readData();
+    allData.generation_audit = Array.isArray(allData.generation_audit) ? allData.generation_audit : [];
+    allData.generation_audit.push(entry);
+    // 单 notebook 上限淘汰（200 条）
+    const MAX_PER_NB = 200;
+    const sameNbCount = allData.generation_audit.filter(
+      (e) => Number(e.notebookId) === Number(entry.notebookId)
+    ).length;
+    if (sameNbCount > MAX_PER_NB) {
+      // 找到最老的 sameNbCount-MAX_PER_NB 条移除
+      const sameNbSorted = allData.generation_audit
+        .filter((e) => Number(e.notebookId) === Number(entry.notebookId))
+        .sort((a, b) => (a.createdAt || '') < (b.createdAt || '') ? -1 : 1);
+      const toRemove = new Set(sameNbSorted.slice(0, sameNbCount - MAX_PER_NB).map((e) => e.id));
+      allData.generation_audit = allData.generation_audit.filter((e) => !toRemove.has(e.id));
+    }
+    this._writeData(allData);
+    return entry;
+  }
+
+  /**
+   * 清除笔记本的 Agent 暂停状态（恢复后调用）。
+   * @param {number} notebookId
+   * @returns {boolean} 是否有移除
+   */
+  clearAgentPauseState(notebookId) {
+    const allData = this._readData();
+    allData.agent_pause_states = Array.isArray(allData.agent_pause_states) ? allData.agent_pause_states : [];
+    const id = Number(notebookId);
+    const before = allData.agent_pause_states.length;
+    allData.agent_pause_states = allData.agent_pause_states.filter(
+      (item) => Number(item.notebookId) !== id
+    );
+    const removed = allData.agent_pause_states.length < before;
+    if (removed) this._writeData(allData);
+    return removed;
+  }
+
   close() {
   }
 

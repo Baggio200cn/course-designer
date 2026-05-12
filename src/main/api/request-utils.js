@@ -60,6 +60,18 @@ function createApiError({ status, detail, requestId, retries = 0 }) {
   return error;
 }
 
+/**
+ * Phase-7.7 P0-D：识别网络层错误（SSL handshake / 超时 / DNS / 连接重置）
+ * 这些是 HTTP 状态码之外的错误，需要单独的重试 + 降级路径
+ */
+function isNetworkError(err) {
+  if (!err) return false;
+  const msg = String(err.message || err || '').toLowerCase();
+  const code = String(err.code || err.cause?.code || '').toUpperCase();
+  return /handshake|ssl|tls|econnreset|enotfound|etimedout|fetch failed|network|aborted/i.test(msg)
+    || ['ECONNRESET', 'ENOTFOUND', 'ETIMEDOUT', 'EAI_AGAIN', 'ECONNREFUSED', 'ECONNABORTED'].includes(code);
+}
+
 async function postJsonWithRetry(url, apiKey, body, options = {}) {
   const {
     retries = 2,
@@ -68,16 +80,37 @@ async function postJsonWithRetry(url, apiKey, body, options = {}) {
     backoffMs = 700
   } = options;
 
+  let lastNetworkError = null;
+
   for (let attempt = 0; attempt <= retries; attempt += 1) {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        ...headers
-      },
-      body: JSON.stringify(body)
-    });
+    let response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          ...headers
+        },
+        body: JSON.stringify(body)
+      });
+    } catch (networkErr) {
+      // Phase-7.7 P0-D：网络层错误（SSL handshake / 连接超时等）也走重试 + backoff
+      if (isNetworkError(networkErr) && attempt < retries) {
+        lastNetworkError = networkErr;
+        console.warn(`[request-utils] 网络层错误（第 ${attempt + 1}/${retries + 1} 次），${backoffMs * (attempt + 1)}ms 后重试：${String(networkErr.message || '').slice(0, 100)}`);
+        await delay(backoffMs * (attempt + 1));
+        continue;
+      }
+      // 重试耗尽 / 非网络错误 → 抛明确的网络错误（让上层识别）
+      const err = new Error(
+        `网络连接失败（已重试 ${attempt} 次）：${String(networkErr.message || networkErr).slice(0, 200)}`
+      );
+      err.code = 'NETWORK_ERROR';
+      err.cause = networkErr;
+      err.retries = attempt;
+      throw err;
+    }
 
     const raw = await response.text();
     if (response.ok) {
@@ -103,6 +136,13 @@ async function postJsonWithRetry(url, apiKey, body, options = {}) {
     });
   }
 
+  // 重试耗尽且最后一次是网络错误（理论上上面已 throw，这里是兜底）
+  if (lastNetworkError) {
+    const err = new Error(`网络连接失败（已重试 ${retries + 1} 次）：${String(lastNetworkError.message || '').slice(0, 200)}`);
+    err.code = 'NETWORK_ERROR';
+    err.cause = lastNetworkError;
+    throw err;
+  }
   throw new Error('接口请求失败：未知错误');
 }
 
@@ -114,5 +154,6 @@ function normalizeErrorMessage(error) {
 
 module.exports = {
   postJsonWithRetry,
-  normalizeErrorMessage
+  normalizeErrorMessage,
+  isNetworkError,   // P0-D: 供上层 service 识别网络错误后做"暂停"决策
 };

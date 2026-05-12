@@ -1,8 +1,15 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import FrameworkStage from './FrameworkStage';
+import FrameworkStage from './FrameworkStage';   // legacy（v3 工作流，新流程已不引用）
 import LectureStage from './LectureStage';
 import PptStage from './PptStage';
-import VideoStage from './VideoStage';
+import VideoStage from './VideoStage';            // legacy
+// Phase-9（驭课 Agent v4.0.0 / 6 阶段工作流）
+import ScheduleStage from './ScheduleStage';
+import DesignStage from './DesignStage';
+import MicroVideoStage from './MicroVideoStage';
+import ReportStage from './ReportStage';
+import WorkflowPauseModal from './WorkflowPauseModal';   // Phase-7.5 M7.5.6
+import MyWorkbench from './MyWorkbench';                 // Phase-7.7 A3
 import {
   JIMENG_URL,
   PEXO_URL,
@@ -17,43 +24,68 @@ import {
 
 const api = window.electronAPI;
 
+// Phase-9（驭课 Agent v4.0.0）：新建教学进度表表单——按广州纺校真实样例字段
+//   旧字段（课程代码 / 理论学时 / 实践学时 / 先修课程）已移除：
+//   - 学时拆分由 schedule.service 默认（理论 32 + 实训 36 + 考核 4 = 72）
+//   - 课程代码不影响任何阶段
+//   - 先修课程并入"课程描述"
 const NOTEBOOK_FORM = {
   name: '',
-  courseCode: '',
+  // 教学进度表 header 必填项（与 prompts/schedule.md 严格对齐）
+  teacher: '',
+  school: '广州纺校',
+  department: '服装科',
+  semester: '2024-2025学年 第二学期',
+  className: '',
+  textbook: '',
   totalHours: 72,
-  theoryHours: 20,
-  practiceHours: 52,
-  grade: '二年级',
-  prerequisite: '',
   description: '',
-  // 富上下文字段（Phase-5B，用于提升 AI 生成质量）
+  // 富上下文字段（用于提升 AI 生成质量，跨 6 阶段共用）
   softwareTools: '',
   jobTargets: '',
   industryScenarios: '',
   learnerProfile: '',
-  teachingMaterials: ''
 };
 
 const API_FORM = {
   ark: '',
   arkTextEndpoint: '',
+  arkLectureFormalEndpoint: '',  // B6：正式稿专用 endpoint（可选）
   arkImageEndpoint: '',
   arkVideoEndpoint: ''
 };
 
+// Phase-7.7 A3（2026-04-30）：Agent UI 入口总开关
+//
+// 经验决策：自动 Agent 模块涉及 framework + lecture + ppt + ppt_images + knowledge_cards
+// + framework_infographic + video 共 7 个子动作的协调，任意一个失败都让整个体验崩塌。
+// 多次端到端测试证明商业化主路径在"每个模块独立可用"，而非"一键全自动"。
+//
+// false（当前）：UI 隐藏所有 Agent 入口 + WorkflowPauseModal；老师只走手动工作流
+//                后端代码（orchestrator / agent.handlers / retry-loop）保留以备恢复
+// true ：恢复 Agent UI（用于内部调试或未来重新启用）
+const ENABLE_AGENT_UI = false;
+
+// Phase-9（2026-05-09）：6 阶段工作流（驭课 Agent v4.0.0）
+//   schedule → design → lecture → ppt → video（micro-video 整套方案）→ report
+//   旧 framework 阶段已移除（数据全清，不做迁移）
 const STAGES = [
-  { key: 'framework', title: '教学框架', hint: '结构化框架、确认稿与信息图' },
-  { key: 'lecture', title: '讲稿', hint: 'A/B/C 草稿与正式讲稿' },
-  { key: 'ppt', title: 'PPT', hint: '页级框架、候选图与导出' },
-  { key: 'video', title: '视频提示词', hint: '即梦 / PEXO 桥接' }
+  { key: 'schedule', title: '教学进度表', hint: '按周排课、章节、实训类目' },
+  { key: 'design',   title: '教学设计',   hint: '整门课级别 5 段教学法 + 考核权重' },
+  { key: 'lecture',  title: '课堂讲稿',   hint: 'A/B/C 草稿与正式讲稿' },
+  { key: 'ppt',      title: '教学课件',   hint: '页级框架、候选图与导出' },
+  { key: 'video',    title: '微课视频',   hint: '脚本+分镜+即梦提示词+拍摄+剪辑' },
+  { key: 'report',   title: '教学实施报告', hint: 'AI 自动汇总 + 老师手填实施成效' }
 ];
 
 const STAGE_TITLE_MAP = Object.fromEntries(STAGES.map((item) => [item.key, item.title]));
 const STAGE_PRIMARY_ARTIFACTS = {
-  framework: ['framework_json', 'framework_preview_md'],
-  lecture: ['lecture_final'],
-  ppt: ['ppt_outline'],
-  video: ['video_prompt']
+  schedule: ['schedule_table'],
+  design:   ['design_doc'],
+  lecture:  ['lecture_final'],
+  ppt:      ['ppt_outline'],
+  video:    ['video_prompt'],
+  report:   ['implementation_report']
 };
 const EVENT_TYPE_LABELS = {
   'stage.entered': '进入阶段',
@@ -941,10 +973,10 @@ function HomeView({ notebooks, onSelect, onCreateClick, onApiClick }) {
   return (
     <main className="v2-home">
       <section className="v2-home-hero">
-        <h2>V2 阶段工作台</h2>
-        <p>主入口只保留 API 配置和新建笔记本。进入笔记本后按框架、讲稿、PPT、视频提示词顺序推进。</p>
+        <h2>驭课 Agent · 6 阶段工作流</h2>
+        <p>从教学进度表起步，依次完成 教学进度表 → 教学设计 → 课堂讲稿 → 教学课件 → 微课视频 → 教学实施报告。</p>
         <div className="v2-inline-actions">
-          <button className="v2-btn v2-btn-primary" onClick={onCreateClick}>新建笔记本</button>
+          <button className="v2-btn v2-btn-primary" onClick={onCreateClick}>新建教学进度表</button>
           <button className="v2-btn v2-btn-secondary" onClick={onApiClick}>API 配置</button>
         </div>
       </section>
@@ -972,7 +1004,8 @@ export default function V2App() {
   const [notebooks, setNotebooks] = useState([]);
   const [selectedNotebookId, setSelectedNotebookId] = useState(null);
   const [selectedNotebook, setSelectedNotebook] = useState(null);
-  const [workflowState, setWorkflowState] = useState({ currentStage: 'framework', unlockedStages: ['framework'] });
+  // Phase-9：默认起点从 'framework' 改为 'schedule'
+  const [workflowState, setWorkflowState] = useState({ currentStage: 'schedule', unlockedStages: ['schedule'] });
   const [resources, setResources] = useState([]);
   const [workspace, setWorkspace] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -983,9 +1016,14 @@ export default function V2App() {
   const [researchResult, setResearchResult] = useState(null);
   const [agentBusy, setAgentBusy] = useState(false);          // Phase-5C: Agent 运行中
   const [agentLog, setAgentLog] = useState(null);             // Phase-5C: Agent 执行日志
+  const [agentPauseState, setAgentPauseState] = useState(null);   // Phase-7.5 M7.5.6: 暂停状态
+  const [agentResumeBusy, setAgentResumeBusy] = useState(false);  // Phase-7.5 M7.5.6: 恢复中
   const [referenceContext, setReferenceContext] = useState(''); // Phase-5C: 参考资料注入
   const [refFetchBusy, setRefFetchBusy] = useState(false);     // Phase-5C: URL 读取中
+  const [refFetchErrors, setRefFetchErrors] = useState([]);    // Phase-8 M0+: 失败 URL 列表化展示
+                                                                // 每项 { url, message, kind: 'timeout'|'login_wall'|'render_error'|'content_too_short' }
   const [showApi, setShowApi] = useState(false);
+  const [showWorkbench, setShowWorkbench] = useState(false);  // A3：我的工作台显示开关
   const [apiForm, setApiForm] = useState(API_FORM);
   const [assistantStatus, setAssistantStatus] = useState('请选择一个笔记本，先完成 V2 阶段冒烟。');
   const [busyKey, setBusyKey] = useState('');
@@ -998,8 +1036,9 @@ export default function V2App() {
   const [rawJsonError, setRawJsonError] = useState('');
   const [frameworkArtifacts, setFrameworkArtifacts] = useState([]);
   const [infographicBusyKey, setInfographicBusyKey] = useState('');
-  const [infographicLayout, setInfographicLayout] = useState('grid_cards');
-  const [infographicStyle, setInfographicStyle] = useState('professional');
+  // Phase-8.5：模块信息图默认走 magazine_module 杂志风格（前端 UI 已删除选择器，仅保留 state 兼容旧调用）
+  const [infographicLayout, setInfographicLayout] = useState('magazine_module');
+  const [infographicStyle, setInfographicStyle] = useState('magazine_module');
   const [diagramBusy, setDiagramBusy] = useState(false);
   const [diagramResult, setDiagramResult] = useState(null); // { svg, svgDataUri, svgPath, diagramType }
   // ── 方向三：教师配图控制层 ──────────────────────────────────────────────────
@@ -1015,19 +1054,56 @@ export default function V2App() {
   pptStateRef.current = pptState;
   const [pptArtifacts, setPptArtifacts] = useState([]);
   const [pptVersions, setPptVersions] = useState([]);
-  const [videoState, setVideoState] = useState({ promptText: '', style: '专业稳重', engine: 'jimeng' });
+  const [videoState, setVideoState] = useState({ promptText: '', style: '专业稳重', engine: 'jimeng' });  // legacy
   const [videoArtifacts, setVideoArtifacts] = useState([]);
   const [backendEvents, setBackendEvents] = useState([]);
+
+  // Phase-9（驭课 Agent v4.0.0）：6 阶段工作流的 4 个新阶段 state
+  const [scheduleState, setScheduleState] = useState({
+    school: '广州纺校', totalHours: 72, textbook: '',
+    schedule: null, jsonText: '', artifactId: null, confirmed: false,
+  });
+  const [scheduleArtifacts, setScheduleArtifacts] = useState([]);
+
+  const [designState, setDesignState] = useState({
+    design: null, jsonText: '', artifactId: null, confirmed: false,
+    // Phase-9.5：本节信息表单（生成前由老师填，生成后从 design.lessonMeta 反向同步）
+    lessonForm: { lessonNumber: 1, topic: '', chapter: '', weekRange: '', theoryHours: 2, practiceHours: 2 },
+  });
+  const [designArtifacts, setDesignArtifacts] = useState([]);
+  // Phase-9.5：所有节课设计列表 + 累计学时
+  const [designLessons, setDesignLessons] = useState([]);
+  const [designAccumulatedHours, setDesignAccumulatedHours] = useState(0);
+
+  const [microVideoState, setMicroVideoState] = useState({
+    videoTopic: '', style: '写实教学风',
+    microVideo: null, jsonText: '', artifactId: null, confirmed: false,
+  });
+
+  const [reportState, setReportState] = useState({
+    report: null, artifactId: null, confirmed: false,
+  });
+  const [reportArtifacts, setReportArtifacts] = useState([]);
+
   const [stageRuntimeMeta, setStageRuntimeMeta] = useState({
-    framework: { quality: null, operations: [] },
+    framework: { quality: null, operations: [] },  // legacy
+    schedule: { quality: null, operations: [] },
+    design: { quality: null, operations: [] },
     lecture: { quality: null, operations: [] },
     ppt: { quality: null, operations: [] },
-    video: { quality: null, operations: [] }
+    video: { quality: null, operations: [] },
+    report: { quality: null, operations: [] }
   });
   const notebookLoadSeqRef = useRef(0);
   const lectureEditRef = useRef({ notebookId: null, editedAt: 0 });
-  const currentStage = workflowState?.currentStage || selectedNotebook?.currentStage || 'framework';
-  const unlockedStages = arr(workflowState?.unlockedStages).length ? arr(workflowState.unlockedStages) : ['framework'];
+  // Phase-9：老笔记本（v3.x）的 currentStage 可能是 'framework'，新流程已没有这个阶段——静默矫正为 'schedule'
+  const rawCurrentStage = workflowState?.currentStage || selectedNotebook?.currentStage || 'schedule';
+  const STAGE_KEYS_V4 = ['schedule', 'design', 'lecture', 'ppt', 'video', 'report'];
+  const currentStage = STAGE_KEYS_V4.includes(rawCurrentStage) ? rawCurrentStage : 'schedule';
+  const rawUnlockedStages = arr(workflowState?.unlockedStages);
+  const unlockedStages = rawUnlockedStages.length
+    ? rawUnlockedStages.map((s) => s === 'framework' ? 'schedule' : s).filter((s) => STAGE_KEYS_V4.includes(s))
+    : ['schedule'];
   const busy = Boolean(busyKey);
   const currentRuntimeMeta = stageRuntimeMeta[currentStage] || { quality: null, operations: [] };
   const stageArtifacts = useMemo(() => ({
@@ -1090,12 +1166,14 @@ export default function V2App() {
   };
 
   const loadApiForm = async () => {
-    const [arkRes, textRes, imageRes, imageFallbackRes, videoRes] = await Promise.all([
+    // B6：增加 ark_endpoint_lecture_formal（正式稿专用）字段加载
+    const [arkRes, textRes, imageRes, imageFallbackRes, videoRes, lectureFormalRes] = await Promise.all([
       api.getApiKey('ark'),
       api.getApiKey('ark_endpoint_text'),
       api.getApiKey('ark_endpoint_image'),
       api.getApiKey('ark_endpoint'),
-      api.getApiKey('ark_endpoint_video_t2v')
+      api.getApiKey('ark_endpoint_video_t2v'),
+      api.getApiKey('ark_endpoint_lecture_formal'),
     ]);
     setApiForm({
       ark: arkRes?.success ? String(arkRes.data || '') : '',
@@ -1103,7 +1181,8 @@ export default function V2App() {
       arkImageEndpoint: imageRes?.success
         ? String(imageRes.data || imageFallbackRes?.data || '')
         : String(imageFallbackRes?.data || ''),
-      arkVideoEndpoint: videoRes?.success ? String(videoRes.data || '') : ''
+      arkVideoEndpoint: videoRes?.success ? String(videoRes.data || '') : '',
+      arkLectureFormalEndpoint: lectureFormalRes?.success ? String(lectureFormalRes.data || '') : '',
     });
   };
 
@@ -1128,13 +1207,19 @@ export default function V2App() {
       api.getWorkflowState(notebookId),
       api.listResources({ notebookId }),
       api.listBackendEvents ? api.listBackendEvents({ notebookId, limit: 24 }) : Promise.resolve({ success: true, data: [] }),
-      api.getFrameworkStageDataV2(notebookId),
+      api.getFrameworkStageDataV2(notebookId),  // legacy
       api.getLectureStageDataV2(notebookId),
       api.getPptStageDataV2(notebookId),
-      api.getVideoStageDataV2(notebookId)
+      api.getVideoStageDataV2(notebookId),  // legacy
+      // Phase-9 4 个新阶段
+      api.getScheduleDataV2 ? api.getScheduleDataV2(notebookId) : Promise.resolve({ success: false }),
+      api.getDesignDataV2 ? api.getDesignDataV2(notebookId) : Promise.resolve({ success: false }),
+      api.getMicroVideoDataV2 ? api.getMicroVideoDataV2(notebookId) : Promise.resolve({ success: false }),
+      api.getReportDataV2 ? api.getReportDataV2(notebookId) : Promise.resolve({ success: false }),
     ]);
     if (loadSeq !== notebookLoadSeqRef.current) return;
-    const [notebookRes, workflowRes, resourceRes, eventsRes, frameworkRes, lectureRes, pptRes, videoRes] = responses;
+    const [notebookRes, workflowRes, resourceRes, eventsRes, frameworkRes, lectureRes, pptRes, videoRes,
+      scheduleRes, designRes, microVideoRes, reportRes] = responses;
     if (!notebookRes?.success) {
       window.alert(`加载笔记本失败：${notebookRes?.error || '未知错误'}`);
       return;
@@ -1144,7 +1229,7 @@ export default function V2App() {
     setWorkflowState(
       workflowRes?.success
         ? workflowRes.data
-        : { currentStage: notebook.currentStage || 'framework', unlockedStages: ['framework'] }
+        : { currentStage: notebook.currentStage || 'schedule', unlockedStages: ['schedule'] }
     );
     setResources(resourceRes?.success ? arr(resourceRes.data) : []);
     setBackendEvents(eventsRes?.success ? arr(eventsRes.data) : []);
@@ -1213,13 +1298,80 @@ export default function V2App() {
       });
       setVideoArtifacts(arr(data.videoData?.artifacts));
     }
+
+    // Phase-9：4 个新阶段的数据回填（驭课 Agent v4.0.0）
+    if (scheduleRes?.success) {
+      const d = scheduleRes.data || {};
+      setScheduleState((prev) => ({
+        ...prev,
+        schedule: d.schedule || null,
+        jsonText: d.schedule ? JSON.stringify(d.schedule, null, 2) : '',
+        artifactId: d.artifactId || null,
+        confirmed: !!d.confirmed,
+      }));
+      // 拉取 schedule 相关 artifact 列表（含导出的 Word 文件）
+      try {
+        const listRes = await api.listArtifacts({ notebookId, stage: 'schedule' });
+        if (listRes?.success) setScheduleArtifacts(arr(listRes.data));
+      } catch (_) { /* ignore */ }
+    }
+    if (designRes?.success) {
+      const d = designRes.data || {};
+      setDesignState((prev) => ({
+        ...prev,
+        design: d.design || null,
+        jsonText: d.design ? JSON.stringify(d.design, null, 2) : '',
+        artifactId: d.artifactId || null,
+        confirmed: !!d.confirmed,
+        // 反向同步 lessonForm（如有）
+        lessonForm: d.design?.lessonMeta || prev.lessonForm,
+      }));
+      try {
+        const listRes = await api.listArtifacts({ notebookId, stage: 'design' });
+        if (listRes?.success) setDesignArtifacts(arr(listRes.data));
+      } catch (_) { /* ignore */ }
+      // Phase-9.5：拉所有节课设计 + 累计学时
+      try {
+        const lessonsRes = await api.listDesignLessonsV2?.(notebookId);
+        if (lessonsRes?.success) {
+          setDesignLessons(arr(lessonsRes.data?.lessons));
+          setDesignAccumulatedHours(Number(lessonsRes.data?.totalAccumulatedHours) || 0);
+        }
+      } catch (_) { /* ignore */ }
+    }
+    if (microVideoRes?.success) {
+      const d = microVideoRes.data || {};
+      setMicroVideoState((prev) => ({
+        ...prev,
+        microVideo: d.microVideo || null,
+        jsonText: d.microVideo ? JSON.stringify(d.microVideo, null, 2) : '',
+        artifactId: d.artifactId || null,
+        confirmed: !!d.confirmed,
+        videoTopic: d.microVideo?.videoTopic || prev.videoTopic,
+      }));
+    }
+    if (reportRes?.success) {
+      const d = reportRes.data || {};
+      setReportState({
+        report: d.report || null,
+        artifactId: d.artifactId || null,
+        confirmed: !!d.confirmed,
+      });
+    }
     // 切换笔记本时强制刷新状态栏，清除上一个笔记本的瞬态状态
-    setAssistantStatus(`已加载《${notebook.name || '课程'}》，当前位于 ${STAGE_TITLE_MAP[workflowRes?.data?.currentStage || notebook.currentStage || 'framework'] || '教学框架'} 阶段。`);
+    setAssistantStatus(`已加载《${notebook.name || '课程'}》，当前位于 ${STAGE_TITLE_MAP[workflowRes?.data?.currentStage || notebook.currentStage || 'schedule'] || '教学进度表'} 阶段。`);
     setLectureReview(null);
     setResearchResult(null);
     setResearchBusy(false);
     setAgentLog(null);       // 清除上一个课程的 agent 日志
     setReferenceContext(''); // 清除上一个课程的参考资料
+    // Phase-7.5 M7.5.6：切换笔记本时尝试加载该笔记本的 Agent 暂停状态
+    try {
+      const pauseRes = await api.agentGetPauseState(notebookId);
+      setAgentPauseState(pauseRes?.success ? (pauseRes.data || null) : null);
+    } catch {
+      setAgentPauseState(null);
+    }
   };
 
   useEffect(() => {
@@ -1370,7 +1522,7 @@ export default function V2App() {
   const handleGenerateDiagram = async (diagramType = 'hierarchy') => {
     if (!selectedNotebookId) return;
     setDiagramBusy(true);
-    setAssistantStatus(`AI 正在生成${diagramType === 'mindmap' ? '思维导图' : diagramType === 'flowchart' ? '流程图' : diagramType === 'timeline' ? '时间轴' : '知识结构图'}…`);
+    setAssistantStatus(`AI 正在生成${diagramType === 'mindmap' ? '思维导图' : diagramType === 'flowchart' ? '流程图' : diagramType === 'timeline' ? '时间轴' : diagramType === 'magazine' ? '杂志信息图（5 层结构 + 模块网格 + 行动清单 + 目标横幅）' : '知识结构图'}…`);
     try {
       const response = await api.generateDiagramV2({
         notebookId: selectedNotebookId,
@@ -1488,11 +1640,57 @@ export default function V2App() {
     }
   };
 
+  // Phase-7.7 A3-C（2026-04-30）：互动测试卡片导出（学生端 HTML，含翻卡 + 自检小测）
+  const handleExportInteractiveCards = async () => {
+    if (!selectedNotebookId) return;
+    setBusyKey('interactive-cards');
+    try {
+      const response = await api.exportInteractiveCardsV2({ notebookId: selectedNotebookId });
+      if (response?.cancelled) return;
+      if (!response?.success && !response?.data) {
+        window.alert(`导出互动测试卡片失败：${response?.error || '未知错误'}`);
+        return;
+      }
+      setAssistantStatus(`🎮 互动测试卡片已导出：${response.data?.filePath || ''}（可发给学生在浏览器打开）`);
+    } finally {
+      setBusyKey('');
+    }
+  };
+
   const persistLectureState = async (nextState, confirm = false) => {
     const method = confirm ? api.confirmLectureStageV2 : api.saveLectureStageV2;
     const response = await method({ notebookId: selectedNotebookId, ...nextState });
     if (!response?.success) {
-      window.alert(`${confirm ? '确认' : '保存'}讲稿阶段失败：${response?.error || '未知错误'}`);
+      // Phase-7.7 B16（2026-04-29）：confirm 被 quality 拒收时，给老师明确的三条出路指引。
+      // 严格按 H10：不引入 force_accept，但提供可操作的解决路径，避免老师卡死。
+      const errMsg = response?.error || '未知错误';
+      if (confirm) {
+        const guidanceLines = [
+          `❌ 讲稿质量未达标，确认失败：`,
+          ``,
+          errMsg,
+          ``,
+          `📌 请从以下三种方式中选一种解决：`,
+          ``,
+          `① 【最快】上传教案素材：`,
+          `   把已有教案/教材内容（.docx / .md / .txt）粘贴或上传到上方"教学素材辅助生成"区，`,
+          `   然后点【合成正式稿】重新生成（AI 会融合素材扩写到达标字数）。`,
+          ``,
+          `② 【手动】在编辑器里补写：`,
+          `   直接在讲稿编辑器扩写各章节的"教师讲述"段落，每章节加 100-300 字案例/讨论；`,
+          `   然后再点【确认讲稿】。`,
+          ``,
+          `③ 【调整结构】修改课程参数：`,
+          `   点上方【编辑课程上下文】，把"学时"改小一些（如 4 学时 → 2 学时），`,
+          `   字数门槛会同比降低（每学时门槛 2200 字）。`,
+          ``,
+          `提示：Agent 不会强制接受不达标讲稿——这是为了保证最终交付物可直接使用。`,
+        ];
+        window.alert(guidanceLines.join('\n'));
+        setAssistantStatus(`⚠️ 讲稿确认被拒：${errMsg.slice(0, 80)}（看弹窗里的三条出路）`);
+      } else {
+        window.alert(`保存讲稿阶段失败：${errMsg}`);
+      }
       return false;
     }
     await loadNotebookContext(selectedNotebookId);
@@ -1531,15 +1729,43 @@ export default function V2App() {
   };
 
   // ── Phase-5C 参考资料：URL 抓取（支持多 URL，用";"分隔，并行读取）──────────
+  // Phase-7.7 D3（2026-04-30）：修复 D1 的过度匹配——
+  //   D1（旧）：按行分割 → 每行当 URL → 自动补 https:// → 把中文标题/项目符号也当 URL
+  //   D3（新）：用正则从混合文本里"挖出"所有真正的 http(s):// URL，忽略其他文字
+  //   同时：识别 SPA 网站（Canva/Adobe/Unsplash/Behance 等）给老师明确警告——
+  //         这些站点 httpGet 不执行 JS，抓的是空 HTML 框架，建议手动复制内容
   const handleFetchRefUrl = async (rawInput) => {
-    if (!rawInput) return;
-    // 按分号或换行分割，去除空白，过滤空项
-    const urls = rawInput
-      .split(/[;；\n]/)
-      .map((u) => u.trim())
-      .filter((u) => u.startsWith('http'));
-    if (urls.length === 0) return;
+    if (!rawInput || !String(rawInput).trim()) {
+      window.alert('请先在输入框里粘贴 URL（学科网/职教云等传统服务端渲染网站效果好；SPA 站点建议手动复制内容）');
+      return;
+    }
+    // D3：用正则从任意文本里提取真 URL（处理 markdown / 多行 / 混合中文标题等场景）
+    // URL 只允许 ASCII 字符——明确排除中文 + 全角符号，避免把"https://Adobe官方学习"这种伪 URL 抓出来
+    const urlRegex = /https?:\/\/[a-zA-Z0-9\-._~:\/?#\[\]@!$&'()*+,;=%]+/gi;
+    const allUrls = String(rawInput).match(urlRegex) || [];
+    // 去重 + 去除末尾标点 + 过滤无 TLD 的伪 URL（必须有域名点或 localhost）
+    const isRealUrl = (u) => /^https?:\/\/[^\s/]+\.[^\s/]+/.test(u) || /^https?:\/\/localhost/.test(u);
+    const urls = [...new Set(
+      allUrls
+        .map((u) => u.replace(/[.,;:!?)）]+$/, ''))
+        .filter(isRealUrl)
+    )];
+
+    if (urls.length === 0) {
+      window.alert('未能从输入里识别出 URL。\n请直接粘贴含 https:// 或 http:// 前缀的链接。');
+      return;
+    }
+
+    // D4：现在后端已支持 BrowserWindow 渲染 SPA，不再提前警告，直接尝试抓取
+    // 但 SPA 抓取慢（每个 5-10 秒），多 URL 时给老师总耗时预估
+    const SPA_HOSTS = ['canva.com', 'canva.cn', 'adobe.com', 'unsplash.com', 'behance.net', '588ku.com'];
+    const spaUrls = urls.filter((u) => SPA_HOSTS.some((h) => u.includes(h)));
+    if (urls.length >= 3 || spaUrls.length > 0) {
+      const estSec = Math.ceil(urls.length * (spaUrls.length > 0 ? 8 : 2));
+      setAssistantStatus(`🔗 准备抓取 ${urls.length} 个 URL${spaUrls.length > 0 ? `（含 ${spaUrls.length} 个 SPA 站点，需 BrowserWindow 渲染）` : ''}，预计 ${estSec} 秒…`);
+    }
     setRefFetchBusy(true);
+    setRefFetchErrors([]);  // 清空上次失败列表
     try {
       // 并行抓取所有 URL
       const results = await Promise.allSettled(urls.map((u) => api.fetchUrlContent(u)));
@@ -1550,14 +1776,17 @@ export default function V2App() {
           texts.push(`【来源 ${i + 1}：${urls[i]}】\n${r.value.data.text}`);
         } else {
           const msg = r.status === 'fulfilled' ? r.value?.error : r.reason?.message;
-          errors.push(`URL ${i + 1}（${urls[i]}）：${msg || '读取失败'}`);
+          // Phase-8 M0+：保留 errorKind 供 UI 分类显示
+          const kind = r.status === 'fulfilled' ? r.value?.errorKind : 'unknown';
+          errors.push({ url: urls[i], message: msg || '读取失败', kind });
         }
       });
       if (texts.length > 0) {
         setReferenceContext((prev) => (prev ? prev + '\n\n' + texts.join('\n\n') : texts.join('\n\n')));
       }
       if (errors.length > 0) {
-        window.alert(`以下 URL 读取失败，请手动复制粘贴：\n${errors.join('\n')}`);
+        // 列表化展示在 modal 而不是 alert
+        setRefFetchErrors(errors);
       }
     } finally {
       setRefFetchBusy(false);
@@ -1573,18 +1802,47 @@ export default function V2App() {
     }
     setRefFetchBusy(true);
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      // 转 base64 传给主进程
-      const bytes = new Uint8Array(arrayBuffer);
-      let binary = '';
-      bytes.forEach((b) => { binary += String.fromCharCode(b); });
-      const base64 = window.btoa(binary);
-      const res = await api.readDocxContent({ base64, filename: file.name });
-      if (res?.success && res.data?.text) {
-        setReferenceContext((prev) => (prev ? prev + '\n\n' + res.data.text : res.data.text));
+      // B17（2026-04-29）：扩展支持 .md / .markdown / .txt（前端直接读文本，不走主进程 docx 解析）
+      const lowerName = String(file.name || '').toLowerCase();
+      const isPlainText = lowerName.endsWith('.md') || lowerName.endsWith('.markdown') || lowerName.endsWith('.txt');
+
+      let extractedText = '';
+      if (isPlainText) {
+        // 纯文本直接读
+        extractedText = await file.text();
+      } else if (lowerName.endsWith('.docx')) {
+        // .docx 走主进程 mammoth 解析
+        const arrayBuffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuffer);
+        let binary = '';
+        bytes.forEach((b) => { binary += String.fromCharCode(b); });
+        const base64 = window.btoa(binary);
+        const res = await api.readDocxContent({ base64, filename: file.name });
+        if (res?.success && res.data?.text) {
+          extractedText = res.data.text;
+        } else {
+          window.alert(`解析失败：${res?.error || '无法读取文档，请手动复制粘贴'}`);
+          return;
+        }
       } else {
-        window.alert(`解析失败：${res?.error || '无法读取文档，请手动复制粘贴'}`);
+        window.alert(`不支持的文件类型：${file.name}\n支持的格式：.docx / .md / .markdown / .txt\nPDF 暂未支持，请先转 .docx 或复制粘贴`);
+        return;
       }
+
+      // B17：合并到 referenceContext，但保证总长度不超过 10000 字
+      const cleanText = String(extractedText || '').trim();
+      if (!cleanText) {
+        window.alert('文件内容为空');
+        return;
+      }
+      setReferenceContext((prev) => {
+        const merged = prev ? prev + '\n\n' + cleanText : cleanText;
+        if (merged.length > 10000) {
+          window.alert(`合并后总素材超过 10000 字（${merged.length} 字），已截断。如需完整素材请先清空当前内容再上传。`);
+          return merged.slice(0, 10000);
+        }
+        return merged;
+      });
     } finally {
       setRefFetchBusy(false);
     }
@@ -1627,20 +1885,91 @@ export default function V2App() {
         targetStages: ['framework', 'lecture', 'ppt']   // Step A: 包含 PPT 阶段
       });
       if (response?.success) {
-        const { status, stepLog, summary } = response.data || {};
+        const { status, stepLog, summary, pauseInfo } = response.data || {};
         setAgentLog({ status, stepLog: stepLog || [], summary });
         const icon = status === 'success' ? '✅' : status === 'blocked' ? '⚠️' : '❌';
         setAssistantStatus(`${icon} Agent 完成：${summary || '已结束'}`);
-        // 刷新当前阶段数据
         if (selectedNotebookId) await loadNotebookContext(selectedNotebookId);
+      } else if (response?.data?.status === 'paused' || response?.data?.pauseInfo) {
+        // Phase-7.5 M7.5.6：Agent 暂停 — 弹 modal 等老师介入
+        setAgentPauseState(response.data.pauseInfo);
+        setAssistantStatus(`⏸️ Agent 暂停（${response.data.pauseInfo?.stage || '未知阶段'}）— 请在弹窗中介入`);
       } else {
-        setAssistantStatus(`❌ Agent 失败：${response?.error || '未知错误'}`);
+        // 也可能后端把 paused 当 success=false 返回
+        if (response?.data?.status === 'paused') {
+          setAgentPauseState(response.data.pauseInfo || null);
+          setAssistantStatus(`⏸️ Agent 暂停 — 请在弹窗中介入`);
+        } else {
+          setAssistantStatus(`❌ Agent 失败：${response?.error || '未知错误'}`);
+        }
       }
     } catch (err) {
       setAssistantStatus(`❌ Agent 异常：${err.message}`);
     } finally {
       clearInterval(pollInterval);
       setAgentBusy(false);
+    }
+  };
+
+  // Phase-7.5 M7.5.6 / Phase-7.7 P0-反馈3：从暂停状态恢复 Agent
+  // 第 2 个参数 refinement 用于 PPT 配图特化场景：{ imagePrompt, pageId }
+  const handleAgentResume = async (refinementHint, refinement) => {
+    if (!selectedNotebookId || agentResumeBusy) return;
+    setAgentResumeBusy(true);
+    const statusSuffix = refinement?.imagePrompt
+      ? '（用新 imagePrompt 重生成此页）'
+      : (refinementHint?.trim() ? '（含微调提示词）' : '');
+    setAssistantStatus(`🔄 Agent 恢复中${statusSuffix}…`);
+    try {
+      const response = await api.agentResume({
+        notebookId: selectedNotebookId,
+        refinementHint: refinementHint || '',
+        targetStages: ['framework', 'lecture', 'ppt'],
+        // P0-反馈3：把 PPT 页面级修改透传给后端
+        pageRefinement: refinement || null,
+      });
+      // B1 修复：和 handleAgentRun 对齐——后端 paused 时 success=false 但 data.status='paused'
+      // 先识别 paused 再走 success/failure 分支，避免误报"Agent 恢复失败"
+      const data = response?.data || {};
+      const isPaused = data.status === 'paused' || Boolean(data.pauseInfo);
+      if (isPaused) {
+        // 又一次暂停（如老师的微调没解决问题），保持 modal 打开等待再次输入
+        setAgentLog({ status: data.status, stepLog: data.stepLog || [], summary: data.summary });
+        setAgentPauseState(data.pauseInfo || null);
+        setAssistantStatus(`⏸️ Agent 再次暂停 — 请调整提示词重试`);
+      } else if (response?.success) {
+        const { status, stepLog, summary } = data;
+        setAgentLog({ status, stepLog: stepLog || [], summary });
+        setAgentPauseState(null);   // 解决了，关闭 modal
+        setAssistantStatus(`✅ Agent 恢复完成：${summary || '已结束'}`);
+        if (selectedNotebookId) await loadNotebookContext(selectedNotebookId);
+      } else {
+        setAssistantStatus(`❌ Agent 恢复失败：${response?.error || '未知错误'}`);
+      }
+    } catch (err) {
+      setAssistantStatus(`❌ Agent 恢复异常：${err.message}`);
+    } finally {
+      setAgentResumeBusy(false);
+    }
+  };
+
+  // 老师选择"跳过"或"手动接管"——清除暂停状态，关闭 modal
+  const handleAgentDismissPause = async () => {
+    if (!selectedNotebookId) return;
+    // Phase-7.7 B14（2026-04-29）：modal 关闭前先抓 pause stage，关闭后自动跳到对应 tab，
+    // 让老师无缝进入手工编辑模式（之前 modal 关掉后老师还要自己手动点左侧 tab，多一步操作）
+    const pausedStage = agentPauseState?.stage || null;
+    try {
+      await api.agentClearPauseState(selectedNotebookId);
+    } catch {}
+    setAgentPauseState(null);
+    // B14：自动切到对应 stage tab（仅当该 stage 在已解锁列表里，避免跳到锁着的 tab）
+    if (pausedStage && unlockedStages.includes(pausedStage)) {
+      setWorkflowState((prev) => ({ ...prev, currentStage: pausedStage }));
+      const stageLabel = STAGES.find((s) => s.key === pausedStage)?.title || pausedStage;
+      setAssistantStatus(`⏭️ 已跳过暂停步骤，已切换到「${stageLabel}」阶段——请在编辑器中手动完成后点【确认】`);
+    } else {
+      setAssistantStatus(`⏭️ 已跳过暂停步骤，Agent 已停止；可手动调整后再启动`);
     }
   };
   // ── End Agent ──────────────────────────────────────────────────────────────
@@ -1858,9 +2187,15 @@ export default function V2App() {
     if (!selectedNotebookId || !currentPptPage) return;
     setBusyKey('ppt-candidates');
     try {
-      // 强制清空旧 imagePrompt，重建零文字视觉 prompt（不含标题/内容，防止 AI 烧字进图）
+      // Phase-7.7 C8-1（2026-04-29）：尊重老师手工编辑的 imagePrompt
+      // 之前 `imagePrompt: ''` 强制清空——老师在 textarea 改的内容被无情覆盖回模板默认值，
+      // 用户反馈"封面配图提示词修改，结果它仍然生成原来的配图"就是这个 bug。
+      // 现在：不强制清空。ensurePptImagePromptForPage 会判断 imagePrompt 是否已有值——
+      //   - 有值（老师编辑过 或 上次生成留下的）→ 直接保留
+      //   - 空值（老师故意清空想重新自动生成）→ 自动重建零文字 prompt
+      // 老师想重新自动生成的场景：清空 textarea → 点【生成此页配图】即可。
       const normalizedPage = ensurePptImagePromptForPage(
-        { ...currentPptPage, imagePrompt: '' },
+        currentPptPage,
         {
           courseName: selectedNotebook?.name || '课程',
           template: currentTemplate,
@@ -1929,9 +2264,10 @@ export default function V2App() {
     setStyleAnchor('');
     setAssistantStatus('正在生成封面配图，请稍候…（约 15-30 秒）');
     try {
-      // 封面也强制清空旧 imagePrompt，重建零文字 prompt
+      // C8-1：封面也尊重老师编辑的 imagePrompt（去掉强制清空）
+      // 老师想重新自动生成时，清空 textarea 即可触发自动重建
       const normalizedPage = ensurePptImagePromptForPage(
-        { ...coverPage, imagePrompt: '' },
+        coverPage,
         {
           courseName: selectedNotebook?.name || '课程',
           template: currentTemplate,
@@ -2009,6 +2345,11 @@ export default function V2App() {
             imageQuality: page.imageQuality || 'low'
           }
         );
+        // Phase-9 调试：打印实际生成的 imagePrompt，方便老师诊断"图为何相似"
+        console.log(`[batch-image] P${page.pageNumber} 标题=「${page.title}」`);
+        console.log(`[batch-image] P${page.pageNumber} prompt=`, normalizedPage.imagePrompt);
+        console.log(`[batch-image] P${page.pageNumber} prompt 含"视觉概念引导":`, /本页视觉概念引导/.test(normalizedPage.imagePrompt || ''));
+        console.log(`[batch-image] P${page.pageNumber} prompt 含本页标题语义:`, (normalizedPage.imagePrompt || '').includes(String(page.title || '').slice(0, 8)));
         const response = await api.generatePptPageCandidatesV2({
           notebookId: selectedNotebookId,
           templateKey: pptState.templateKey,
@@ -2188,6 +2529,437 @@ export default function V2App() {
     }
   };
 
+  // ────────────────────────────────────────────────────────────────────
+  // Phase-9（驭课 Agent v4.0.0）：4 个新阶段的 generate / save / confirm 处理
+  // ────────────────────────────────────────────────────────────────────
+
+  // C-1：教学进度表
+  const handleGenerateSchedule = async () => {
+    if (!selectedNotebookId) return;
+    setBusyKey('schedule:generate');
+    setAssistantStatus('正在生成教学进度表...');
+    try {
+      const res = await api.generateScheduleV2({
+        notebookId: selectedNotebookId,
+        courseName: selectedNotebook?.name || '',
+        school: scheduleState.school,
+        totalHours: scheduleState.totalHours,
+        textbook: scheduleState.textbook,
+      });
+      if (!res?.success) { window.alert(`生成失败：${res?.error || '未知'}`); return; }
+      const sch = res.data.schedule;
+      setScheduleState((prev) => ({
+        ...prev,
+        schedule: sch,
+        jsonText: JSON.stringify(sch, null, 2),
+        artifactId: res.data.artifactId,
+        confirmed: false,
+      }));
+      setAssistantStatus('教学进度表已生成。');
+      await loadNotebookContext(selectedNotebookId);
+    } finally { setBusyKey(''); }
+  };
+  const handleSaveSchedule = async (state) => {
+    if (!selectedNotebookId) return;
+    let payload = state.schedule;
+    if (state.jsonText) { try { payload = JSON.parse(state.jsonText); } catch (e) {
+      window.alert('JSON 格式错误：' + e.message); return;
+    }}
+    const res = await api.saveScheduleV2({ notebookId: selectedNotebookId, artifactId: state.artifactId, schedule: payload });
+    if (!res?.success) { window.alert(`保存失败：${res?.error || '未知'}`); return; }
+    setScheduleState((prev) => ({ ...prev, schedule: payload, artifactId: res.data.artifactId }));
+    setAssistantStatus('进度表已保存。');
+  };
+  const handleConfirmSchedule = async () => {
+    if (!selectedNotebookId || !scheduleState.artifactId) return;
+    const res = await api.confirmScheduleV2({ notebookId: selectedNotebookId, artifactId: scheduleState.artifactId });
+    if (!res?.success) { window.alert(`确认失败：${res?.error || '未知'}`); return; }
+    setScheduleState((prev) => ({ ...prev, confirmed: true }));
+    setAssistantStatus('进度表已确认，教学设计阶段已解锁。');
+    await loadNotebookContext(selectedNotebookId);
+  };
+  const handleExportScheduleWord = async () => {
+    if (!selectedNotebookId) return;
+    setAssistantStatus('正在导出教学进度表 Word...');
+    const res = await api.exportScheduleWordV2({ notebookId: selectedNotebookId });
+    if (res?.cancelled) { setAssistantStatus('已取消导出。'); return; }
+    if (!res?.success) { window.alert(`导出失败：${res?.error || '未知'}`); setAssistantStatus('导出失败'); return; }
+    setAssistantStatus(`✅ 已导出：${res.data?.filePath || ''}`);
+    await loadNotebookContext(selectedNotebookId);
+  };
+
+  // C-2：教学设计（Phase-9.5：按节课）
+  const handleGenerateDesign = async (lessonForm) => {
+    if (!selectedNotebookId) return;
+    const lm = lessonForm || designState.lessonForm || {};
+    if (!lm.topic) { window.alert('请先填本节主题'); return; }
+    setBusyKey('design:generate');
+    setAssistantStatus(`正在生成第 ${lm.lessonNumber || 1} 节「${lm.topic}」教学设计...`);
+    try {
+      const res = await api.generateDesignV2({
+        notebookId: selectedNotebookId,
+        courseName: selectedNotebook?.name || '',
+        lessonMeta: {
+          lessonNumber: lm.lessonNumber,
+          topic: lm.topic,
+          chapter: lm.chapter,
+          weekRange: lm.weekRange,
+          theoryHours: lm.theoryHours,
+          practiceHours: lm.practiceHours,
+        },
+      });
+      if (!res?.success) { window.alert(`生成失败：${res?.error || '未知'}`); return; }
+      const d = res.data.design;
+      setDesignState((prev) => ({
+        ...prev,
+        design: d,
+        jsonText: JSON.stringify(d, null, 2),
+        artifactId: res.data.artifactId,
+        confirmed: false,
+        // 把 lessonMeta 反向同步回 lessonForm
+        lessonForm: { ...prev.lessonForm, ...(res.data.lessonMeta || {}) },
+      }));
+      setAssistantStatus(`✅ 第 ${lm.lessonNumber} 节教学设计已生成`);
+      await loadNotebookContext(selectedNotebookId);
+    } finally { setBusyKey(''); }
+  };
+
+  // Phase-9.5：切换节课（按 design artifactId）
+  const switchDesignLesson = async (artifactId) => {
+    if (!selectedNotebookId || !artifactId) return;
+    const res = await api.getDesignDataV2({ notebookId: selectedNotebookId, artifactId });
+    if (!res?.success) { window.alert(`切换失败：${res?.error || '未知'}`); return; }
+    const d = res.data.design;
+    setDesignState((prev) => ({
+      ...prev,
+      design: d,
+      jsonText: d ? JSON.stringify(d, null, 2) : '',
+      artifactId: res.data.artifactId,
+      confirmed: !!res.data.confirmed,
+      lessonForm: d?.lessonMeta || prev.lessonForm,
+    }));
+    setAssistantStatus(`已切换到第 ${d?.lessonMeta?.lessonNumber || '?'} 节「${d?.lessonMeta?.topic || ''}」`);
+  };
+
+  // Phase-9.5：新建一节（清空 lessonForm 让老师重新填，编号自动 +1）
+  const newDesignLesson = () => {
+    const nextLessonNumber = (designLessons.reduce((max, l) => Math.max(max, l.lessonNumber || 0), 0) || 0) + 1;
+    setDesignState({
+      design: null,
+      jsonText: '',
+      artifactId: null,
+      confirmed: false,
+      lessonForm: { lessonNumber: nextLessonNumber, topic: '', chapter: '', weekRange: '', theoryHours: 2, practiceHours: 2 },
+    });
+    setAssistantStatus(`已新建第 ${nextLessonNumber} 节，请填主题后点"生成"`);
+  };
+  const handleSaveDesign = async (state) => {
+    if (!selectedNotebookId) return;
+    let payload = state.design;
+    if (state.jsonText) { try { payload = JSON.parse(state.jsonText); } catch (e) {
+      window.alert('JSON 格式错误：' + e.message); return;
+    }}
+    const res = await api.saveDesignV2({ notebookId: selectedNotebookId, artifactId: state.artifactId, design: payload });
+    if (!res?.success) { window.alert(`保存失败：${res?.error || '未知'}`); return; }
+    setDesignState((prev) => ({ ...prev, design: payload, artifactId: res.data.artifactId }));
+    setAssistantStatus('教学设计已保存。');
+  };
+  const handleConfirmDesign = async () => {
+    if (!selectedNotebookId || !designState.artifactId) return;
+    const res = await api.confirmDesignV2({ notebookId: selectedNotebookId, artifactId: designState.artifactId });
+    if (!res?.success) { window.alert(`确认失败：${res?.error || '未知'}`); return; }
+    setDesignState((prev) => ({ ...prev, confirmed: true }));
+    setAssistantStatus('教学设计已确认，讲稿阶段已解锁。');
+    await loadNotebookContext(selectedNotebookId);
+  };
+  const handleExportDesignWord = async () => {
+    if (!selectedNotebookId) return;
+    setAssistantStatus('正在导出教学设计 Word...');
+    const res = await api.exportDesignWordV2({ notebookId: selectedNotebookId });
+    if (res?.cancelled) { setAssistantStatus('已取消导出。'); return; }
+    if (!res?.success) { window.alert(`导出失败：${res?.error || '未知'}`); setAssistantStatus('导出失败'); return; }
+    setAssistantStatus(`✅ 已导出：${res.data?.filePath || ''}`);
+    await loadNotebookContext(selectedNotebookId);
+  };
+  // Phase-9：教学设计信息图（AI 生成 PNG，复用 infographic-card.service）
+  // Phase-9.5 升级：按 layout 切换数据源
+  //   design_overview（整门课视角）→ 用所有 lessons 聚合数据
+  //   其他 6 种布局（本节视角）→ 用当前选中的 designState.design
+  const handleGenerateDesignInfographic = async ({ layout, visualStyle } = {}) => {
+    if (!selectedNotebookId) return;
+    const layoutKey = layout || 'design_overview';
+    const isCourseLevel = layoutKey === 'design_overview';
+
+    // 数据可用性检查
+    if (isCourseLevel && designLessons.length === 0) {
+      window.alert('整门课视角需要至少 1 节课设计——请先在"按节课"区生成');
+      return;
+    }
+    if (!isCourseLevel && !designState.design) {
+      window.alert('本节视角需要选中节课——请在"按节课"区点击或新建一节');
+      return;
+    }
+    setAssistantStatus(`🎨 正在调用 AI 生成${isCourseLevel ? '整门课' : '本节'}信息图（60-120 秒）...`);
+
+    const totalHours = scheduleState?.schedule?.header?.totalHours || selectedNotebook?.totalHours || 72;
+    const learnerProfile = selectedNotebook?.learnerProfile || '';
+    const jobTargets = selectedNotebook?.jobTargets || '';
+    const courseGoal = selectedNotebook?.description || '';
+
+    // ═══ 按视角拼装 content ═══
+    let content = '';
+    let topic = '';
+    let imgWidth = 1200, imgHeight = 1900;
+
+    if (isCourseLevel) {
+      // ─── 整门课视角：聚合所有 lessons 数据 ───
+      const allKnowledge = new Set();
+      const allSkill = new Set();
+      const allEmotion = new Set();
+      const allKeyPoints = new Set();
+      const allDifficulties = new Set();
+      const allMethods = new Set();
+      const allIdeology = new Set();
+
+      for (const lesson of designLessons) {
+        try {
+          // listDesignLessons 返回的是元信息，需要拉每节的完整 content
+          const lRes = await api.getDesignDataV2({ notebookId: selectedNotebookId, artifactId: lesson.artifactId });
+          if (!lRes?.success) continue;
+          const ld = lRes.data?.design || {};
+          (ld.teachingObjectives?.knowledge || []).forEach((k) => allKnowledge.add(k));
+          (ld.teachingObjectives?.skill || []).forEach((k) => allSkill.add(k));
+          (ld.teachingObjectives?.emotion || []).forEach((k) => allEmotion.add(k));
+          (ld.keyPoints || []).forEach((k) => allKeyPoints.add(k));
+          (ld.difficulties || []).forEach((k) => allDifficulties.add(k));
+          (ld.teachingMethods || []).forEach((m) => allMethods.add(m.name || ''));
+          (ld.ideologicalElements || []).forEach((k) => allIdeology.add(k));
+        } catch (_) { /* ignore single lesson failure */ }
+      }
+      const sumHours = designLessons.reduce((s, l) => s + (Number(l.totalHours) || 0), 0);
+      const lessonTopics = designLessons.map((l) => `第${l.lessonNumber}节 ${l.topic}`).join('；');
+
+      content = [
+        '⚠️ 这是【整门课教学设计的内在逻辑闭环图】，聚合所有节课的设计精华。',
+        '6 个区块表达整门课的"内在逻辑链"，每块承担一个【逻辑角色】。',
+        '⚠️ 绝对禁止使用"模块 N""模块 M01"等模块编号字样。',
+        '⚠️ 绝对禁止把 6 个区块做成 2×3 的简单网格——必须自上而下，块间有箭头/递进/呼应',
+        '',
+        '## ① HERO 价值钩子区（顶部 banner，h=200）',
+        `课程名：${selectedNotebook?.name || '本课程'}`,
+        `副标题：整门课教学设计 · 逻辑闭环图`,
+        `右上角小字（钩子）：学完后能 ${jobTargets ? `胜任「${jobTargets.split(/[、，,]/)[0]}」` : '...'}（这一句要呼应底部 GOAL）`,
+        `4 个数字徽章：${totalHours}学时 / ${allKnowledge.size + allSkill.size + allEmotion.size}条目标 / ${allMethods.size}种方法 / ${designLessons.length}节课`,
+        `（已设计 ${designLessons.length} 节，累计 ${sumHours} 学时）`,
+        '',
+        '## ② 学情起点 · 问题诊断（h=180，灰底）',
+        '【逻辑角色】：诊断入口',
+        `学情说明：${learnerProfile || '中职二年级学生，已有美术与设计基础'}`,
+        '整门课教学难点（合并所有节课）：',
+        ...Array.from(allDifficulties).slice(0, 6).map((d) => `  ⚠ ${d}`),
+        '',
+        '## ③ 教学目标 · 三阶递进（h=300，必须用箭头连接 知识→技能→素养）',
+        '【逻辑角色】：认知发展递进——3 个递进阶段（不是并列）',
+        `📚 知识目标（合集）：${Array.from(allKnowledge).slice(0, 5).join('；') || '—'}`,
+        `→ 箭头连接 →`,
+        `🛠 技能目标（合集）：${Array.from(allSkill).slice(0, 5).join('；') || '—'}`,
+        `→ 箭头连接 →`,
+        `💡 素养目标（合集）：${Array.from(allEmotion).slice(0, 5).join('；') || '—'}`,
+        `整门课重点（合集）：${Array.from(allKeyPoints).slice(0, 6).join('；') || '—'}`,
+        '',
+        '## ④ 学习路径 · 整门课节课串联（h=320）',
+        '【逻辑角色】：时间流——把所有节课串成完整路径',
+        `已设计节课列表：${lessonTopics || '（无）'}`,
+        '可视化建议：每节课一个圆环，串成一条横向链条（如有 ≤ 8 节）；超过 8 节则按章节分组',
+        '',
+        '## ⑤ 教学方法 · 全门课方法谱（h=200）',
+        '【逻辑角色】：方法体系',
+        `全部使用的教学方法（去重）：${Array.from(allMethods).slice(0, 8).join(' / ') || '—'}`,
+        '',
+        '## ⑥ 思政升华 · 整门课价值附加（h=140，红底横幅）',
+        '【逻辑角色】：附加价值',
+        `🌟 整门课思政元素：${Array.from(allIdeology).join(' / ') || '—'}`,
+        '',
+        '## 底部 GOAL · 整门课能力达成出口（h=120，深蓝底）',
+        '【逻辑角色】：能力出口——首尾呼应',
+        `🎯 学完后能：${courseGoal ? courseGoal.slice(0, 60) : '完成完整能力体系'}`,
+        `对接岗位：${jobTargets || '相关行业岗位'}`,
+      ].filter(Boolean).join('\n');
+      topic = `${selectedNotebook?.name || '本课程'}-整门课教学设计概览（${designLessons.length} 节聚合）`;
+    } else {
+      // ─── 本节视角：用当前选中的 design ───
+      const d = designState.design;
+      const obj = d.teachingObjectives || {};
+      const phases = d.inClass?.phases || [];
+      const components = d.assessment?.components || [];
+      const methods = d.teachingMethods || [];
+      const lm = d.lessonMeta || {};
+
+      content = [
+        `⚠️ 这是【第 ${lm.lessonNumber || '?'} 节「${lm.topic || ''}」】的本节教学设计信息图。`,
+        `本节学时：理论 ${lm.theoryHours || 0} + 实践 ${lm.practiceHours || 0} = ${lm.totalHours || 0} 学时`,
+        '',
+        '## ① 本节标题与定位（顶部，h=160）',
+        `主标题：第 ${lm.lessonNumber || '?'} 节 · ${lm.topic || '未命名'}`,
+        `副标题：${lm.chapter ? `章节「${lm.chapter}」` : ''} ${lm.weekRange || ''}`,
+        `学时徽章：${lm.totalHours || 0} 学时（理论 ${lm.theoryHours || 0} + 实践 ${lm.practiceHours || 0}）`,
+        '',
+        '## ② 本节教学目标（按 layout 决定可视化方式）',
+        `知识目标：${(obj.knowledge || []).join('；') || '—'}`,
+        `技能目标：${(obj.skill || []).join('；') || '—'}`,
+        `素养目标：${(obj.emotion || []).join('；') || '—'}`,
+        '',
+        '## ③ 本节重难点',
+        `重点：${(d.keyPoints || []).join('；') || '—'}`,
+        `难点：${(d.difficulties || []).join('；') || '—'}`,
+        '',
+        '## ④ 本节教学方法',
+        ...methods.slice(0, 6).map((m, i) => `  ${i + 1}. ${m.name}（适用：${m.applicable || '通用'}）`),
+        '',
+        '## ⑤ 本节 5 段法流程',
+        ...phases.map((p, i) => `  第${i + 1}段 ${p.phase} · ${p.duration || '—'}`),
+        '',
+        '## ⑥ 本节考核',
+        ...components.map((c) => `  ${c.name}：${c.weight}%`),
+        '',
+        '## ⑦ 思政元素',
+        (d.ideologicalElements || []).join('；') || '—',
+      ].filter(Boolean).join('\n');
+      topic = `${selectedNotebook?.name || '本课程'}-第${lm.lessonNumber || '?'}节·${lm.topic || ''}`;
+      // 本节视角图相对小一点（不需要 design_overview 那么大）
+      imgWidth = 1000; imgHeight = 1400;
+    }
+
+    const res = await api.generateStageInfographicV2({
+      notebookId: selectedNotebookId,
+      stage: 'design',
+      topic,
+      content,
+      layout: layoutKey,
+      visualStyle: visualStyle || 'professional',
+      width: imgWidth,
+      height: imgHeight,
+      // Phase-9.5：关联到当前 design artifact（仅本节视角时）
+      sourceDesignArtifactId: isCourseLevel ? null : designState.artifactId,
+    });
+    if (!res?.success) {
+      window.alert(`信息图生成失败：${res?.error || '未知'}`);
+      setAssistantStatus('信息图生成失败');
+      return;
+    }
+    setAssistantStatus(`✅ 信息图已生成：${res.data?.imagePath || ''}`);
+    await loadNotebookContext(selectedNotebookId);
+  };
+
+  // C-3：微课视频
+  const handleGenerateMicroVideo = async () => {
+    if (!selectedNotebookId) return;
+    setBusyKey('video:generate');
+    setAssistantStatus('正在生成微课视频整套方案...');
+    try {
+      const res = await api.generateMicroVideoV2({
+        notebookId: selectedNotebookId,
+        courseName: selectedNotebook?.name || '',
+        videoTopic: microVideoState.videoTopic,
+      });
+      if (!res?.success) { window.alert(`生成失败：${res?.error || '未知'}`); return; }
+      const mv = res.data.microVideo;
+      setMicroVideoState((prev) => ({
+        ...prev, microVideo: mv, jsonText: JSON.stringify(mv, null, 2),
+        artifactId: res.data.artifactId, confirmed: false,
+      }));
+      setAssistantStatus('微课视频方案已生成。');
+      await loadNotebookContext(selectedNotebookId);
+    } finally { setBusyKey(''); }
+  };
+  const handleSaveMicroVideo = async (state) => {
+    if (!selectedNotebookId) return;
+    let payload = state.microVideo;
+    if (state.jsonText) { try { payload = JSON.parse(state.jsonText); } catch (e) {
+      window.alert('JSON 格式错误：' + e.message); return;
+    }}
+    const res = await api.saveMicroVideoV2({ notebookId: selectedNotebookId, artifactId: state.artifactId, microVideo: payload });
+    if (!res?.success) { window.alert(`保存失败：${res?.error || '未知'}`); return; }
+    setMicroVideoState((prev) => ({ ...prev, microVideo: payload, artifactId: res.data.artifactId }));
+    setAssistantStatus('微课视频方案已保存。');
+  };
+  const handleConfirmMicroVideo = async () => {
+    if (!selectedNotebookId || !microVideoState.artifactId) return;
+    const res = await api.confirmMicroVideoV2({ notebookId: selectedNotebookId, artifactId: microVideoState.artifactId });
+    if (!res?.success) { window.alert(`确认失败：${res?.error || '未知'}`); return; }
+    setMicroVideoState((prev) => ({ ...prev, confirmed: true }));
+    setAssistantStatus('微课视频方案已确认，实施报告阶段已解锁。');
+    await loadNotebookContext(selectedNotebookId);
+  };
+  const handleCopyJimengPrompts = async () => {
+    const prompts = microVideoState.microVideo?.jimengPrompts || [];
+    if (prompts.length === 0) { window.alert('请先生成方案。'); return; }
+    const text = prompts.map((p, i) => `镜头 ${i + 1}：\n${typeof p === 'string' ? p : (p.prompt || '')}`).join('\n\n');
+    try { await navigator.clipboard.writeText(text); setAssistantStatus(`已复制 ${prompts.length} 条即梦提示词。`); }
+    catch { window.alert('复制失败。'); }
+  };
+
+  // C-4：教学实施报告
+  const handleGenerateReport = async () => {
+    if (!selectedNotebookId) return;
+    setBusyKey('report:generate');
+    setAssistantStatus('正在汇总前 5 阶段产物，生成实施报告...');
+    try {
+      const res = await api.generateReportV2({
+        notebookId: selectedNotebookId,
+        courseName: selectedNotebook?.name || '',
+      });
+      if (!res?.success) { window.alert(`生成失败：${res?.error || '未知'}`); return; }
+      setReportState({ report: res.data.report, artifactId: res.data.artifactId, confirmed: false });
+      setAssistantStatus('实施报告已生成，请补填实施成效与反思改进。');
+      await loadNotebookContext(selectedNotebookId);
+    } finally { setBusyKey(''); }
+  };
+  const handleSaveReport = async (state) => {
+    if (!selectedNotebookId || !state.report) return;
+    const res = await api.saveReportV2({ notebookId: selectedNotebookId, artifactId: state.artifactId, report: state.report });
+    if (!res?.success) { window.alert(`保存失败：${res?.error || '未知'}`); return; }
+    setReportState((prev) => ({ ...prev, artifactId: res.data.artifactId }));
+    setAssistantStatus('实施报告（含手填内容）已保存。');
+  };
+  const handleConfirmReport = async () => {
+    if (!selectedNotebookId || !reportState.artifactId) return;
+    const res = await api.confirmReportV2({ notebookId: selectedNotebookId, artifactId: reportState.artifactId });
+    if (!res?.success) { window.alert(`确认失败：${res?.error || '未知'}`); return; }
+    setReportState((prev) => ({ ...prev, confirmed: true }));
+    setAssistantStatus('实施报告已确认归档。本课程的 6 阶段工作流完成。');
+    await loadNotebookContext(selectedNotebookId);
+  };
+  // Phase-9 报告 4 格式导出
+  const handleExportReport = async (format) => {
+    if (!selectedNotebookId) return;
+    const apiMap = {
+      word: 'reportExportWordV2',
+      markdown: 'reportExportMarkdownV2',
+      html: 'reportExportHtmlV2',
+      pdf: 'reportExportPdfV2',
+    };
+    const fnName = apiMap[format];
+    if (!fnName || typeof api[fnName] !== 'function') {
+      window.alert(`❌ 未知导出格式或 API 未加载：${format}\n请完整重启 Electron`);
+      return;
+    }
+    setAssistantStatus(`正在导出 ${format.toUpperCase()} 格式...`);
+    try {
+      const res = await api[fnName]({ notebookId: selectedNotebookId });
+      if (res?.cancelled) { setAssistantStatus('已取消'); return; }
+      if (!res?.success) {
+        window.alert(`导出失败：${res?.error || '未知'}`);
+        setAssistantStatus(`导出失败：${res?.error || '未知'}`);
+        return;
+      }
+      setAssistantStatus(`✅ 已导出：${res.data?.filePath || ''}`);
+      await loadNotebookContext(selectedNotebookId);
+    } catch (e) {
+      window.alert(`💥 异常：${e.message}`);
+    }
+  };
+
   // 打开"编辑课程上下文"弹窗，预填当前笔记本的字段
   const openEditCtx = () => {
     if (!selectedNotebook) return;
@@ -2289,6 +3061,8 @@ export default function V2App() {
     await Promise.all([
       api.saveApiKey('ark', apiForm.ark.trim()),
       api.saveApiKey('ark_endpoint_text', apiForm.arkTextEndpoint.trim()),
+      // B6：正式稿专用 endpoint（可选；空字符串也保存以便清空）
+      api.saveApiKey('ark_endpoint_lecture_formal', (apiForm.arkLectureFormalEndpoint || '').trim()),
       api.saveApiKey('ark_endpoint_image', apiForm.arkImageEndpoint.trim()),
       api.saveApiKey('ark_endpoint', apiForm.arkImageEndpoint.trim()),
       api.saveApiKey('ark_endpoint_video_t2v', apiForm.arkVideoEndpoint.trim())
@@ -2353,10 +3127,12 @@ export default function V2App() {
   return (
     <div className="v2-shell">
       <header className="v2-topbar">
-        <h1>刘老师<span className="v2-title-agent">agent</span> V2.1</h1>
+        <h1>驭课 <span className="v2-title-agent">Agent</span> <span className="v2-title-version">v4.0.0</span></h1>
         <div className="v2-topbar-actions">
-          <button className="v2-btn v2-btn-secondary" onClick={() => { loadApiForm(); setShowApi(true); }}>API 配置</button>
-          <button className="v2-btn v2-btn-primary" onClick={() => setShowCreate(true)}>新建笔记本</button>
+          {/* Phase-7.7 A3：「我的工作台」入口 */}
+          <button className="v2-btn v2-btn-secondary" onClick={() => setShowWorkbench(true)} title="跨课程统计：你已开发的所有课程进度概览 + 经验沉淀">📊 我的工作台</button>
+          <button className="v2-btn v2-btn-secondary" onClick={() => { loadApiForm(); setShowApi(true); }} title="配置 AI 模型 API Key（豆包 / Ark）">API 配置</button>
+          <button className="v2-btn v2-btn-primary" onClick={() => setShowCreate(true)}>新建教学进度表</button>
         </div>
       </header>
 
@@ -2509,17 +3285,27 @@ export default function V2App() {
                     <div className="v2-block-alert-desc">
                       请修复上方错误后继续，或使用 Agent 自动重新生成。
                     </div>
-                    <div className="v2-block-alert-actions">
-                      <button className="v2-btn-agent-danger" onClick={handleAgentRun} disabled={agentBusy || busy}>
-                        {agentBusy ? '⏳ 运行中…' : '🤖 Agent 一键生成'}
-                      </button>
-                    </div>
+                    {ENABLE_AGENT_UI && (
+                      <div className="v2-block-alert-actions">
+                        <button className="v2-btn-agent-danger" onClick={handleAgentRun} disabled={agentBusy || busy}>
+                          {agentBusy ? '⏳ 运行中…' : '🤖 Agent 一键生成'}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
             </section>
 
             {/* ── 工作区双栏：运行时 + Agent 面板 ── */}
+            {/*
+             * Phase-9.5 决策（2026-05-11）：
+             * lecture 阶段也隐藏老 runtime 面板——v4.0.0 多节课模式下旧 validateLectureStage 用
+             * notebook.totalHours = 72 校验，会错误提示"72 学时建议 158400-216000 字"。
+             * 多节课的质量校验已由 reviewAndRevise（9 维度审核）+ retry-loop 各节独立处理。
+             * 仅 PPT 阶段保留旧 runtime（仍是整门课级别）。
+             */}
+            {(currentStage === 'ppt') ? (
             <div className="v2-workspace-grid">
               {/* 左栏：阶段运行时 */}
               <section className="v2-runtime-summary">
@@ -2621,72 +3407,84 @@ export default function V2App() {
                 </div>
               </section>
 
-              {/* 右栏：Agent 智能生成面板 */}
-              <div className="v2-agent-panel">
-                <div className="v2-agent-panel-head">
-                  <span className="v2-agent-panel-icon">🤖</span>
-                  <div>
-                    <div className="v2-agent-panel-title">Agent 智能生成</div>
-                    <div className="v2-agent-panel-sub">自动完成框架 + 讲稿 + PPT 的全流程生成</div>
-                  </div>
-                </div>
-
-                {/* 覆盖阶段 chips */}
-                <div className="v2-agent-scope-row">
-                  <span className="v2-chip v2-chip-agent">📐 教学框架</span>
-                  <span className="v2-chip v2-chip-agent">📝 课程讲稿</span>
-                  <span className="v2-chip v2-chip-agent">🖼️ PPT 规划</span>
-                </div>
-
-                {/* 运行按钮 */}
-                <button
-                  className="v2-btn-agent v2-btn-agent-full"
-                  onClick={handleAgentRun}
-                  disabled={agentBusy || busy}
-                >
-                  {agentBusy ? '⏳ 运行中，请稍候…' : '🚀 一键生成全部阶段'}
-                </button>
-
-                {/* 当前状态提示 */}
-                {assistantStatus && (
-                  <div className="v2-agent-status-row">
-                    <span className="v2-agent-status-dot" />
-                    <span className="v2-agent-status-text">{assistantStatus}</span>
-                  </div>
-                )}
-
-                {/* Agent 执行日志 */}
-                {agentLog && (
-                  <div className="v2-agent-log-wrap">
-                    <div className={`v2-agent-log-banner ${agentLog.status === 'success' ? 'ok' : agentLog.status === 'blocked' ? 'warn' : 'error'}`}>
-                      <span className="v2-agent-log-status">
-                        {agentLog.status === 'success' ? '✅ 成功' : agentLog.status === 'blocked' ? '⚠️ 阻塞' : '❌ 失败'}
-                      </span>
-                      <span className="v2-agent-log-summary">{agentLog.summary}</span>
+              {/* 右栏：Agent 智能生成面板（A3：用 ENABLE_AGENT_UI 总开关包住，false 时隐藏整个面板）*/}
+              {ENABLE_AGENT_UI && (
+                <div className="v2-agent-panel">
+                  <div className="v2-agent-panel-head">
+                    <span className="v2-agent-panel-icon">🤖</span>
+                    <div>
+                      <div className="v2-agent-panel-title">Agent 智能生成</div>
+                      <div className="v2-agent-panel-sub">自动完成框架 + 讲稿 + PPT 的全流程生成</div>
                     </div>
-                    <ol className="v2-agent-step-log">
-                      {(agentLog.stepLog || []).map((step, i) => (
-                        <li
-                          key={i}
-                          className={`v2-agent-step ${step.isBacktrack ? 'backtrack' : step.result === 'ok' ? 'ok' : step.result === 'error' ? 'error' : 'warn'}`}
-                        >
-                          {step.isBacktrack && <span>⤴ </span>}
-                          <span className="v2-agent-step-action">{step.action}</span>
-                          <span className="v2-agent-step-reason">{step.reason}</span>
-                          {step.qualityScore != null && (
-                            <span className="v2-agent-step-meta">Q{step.qualityScore}</span>
-                          )}
-                        </li>
-                      ))}
-                    </ol>
                   </div>
-                )}
 
-                {!agentLog && !agentBusy && (
-                  <p className="v2-hint v2-agent-hint">点击上方按钮，Agent 将自动规划并依次完成各个生成阶段。</p>
-                )}
-              </div>
+                  {/* 覆盖阶段 chips */}
+                  <div className="v2-agent-scope-row">
+                    <span className="v2-chip v2-chip-agent">📐 教学框架</span>
+                    <span className="v2-chip v2-chip-agent">📝 课程讲稿</span>
+                    <span className="v2-chip v2-chip-agent">🖼️ PPT 规划</span>
+                  </div>
+
+                  {/* 运行按钮：根据已 confirmed 阶段动态调整文案，让老师明白支持"续跑" */}
+                  <button
+                    className="v2-btn-agent v2-btn-agent-full"
+                    onClick={handleAgentRun}
+                    disabled={agentBusy || busy}
+                  >
+                    {agentBusy
+                      ? '⏳ 运行中，请稍候…'
+                      : (unlockedStages.length > 1
+                          ? `🔄 续跑剩余阶段（已完成 ${unlockedStages.length - 1}/3）`
+                          : '🚀 一键生成全部阶段')}
+                  </button>
+
+                  {/* B15：加说明文字，让老师明白 Agent 会自动跳过已确认的阶段 */}
+                  <p className="v2-field-note" style={{ marginTop: 6, fontSize: 12, color: '#666' }}>
+                    💡 Agent 会自动跳过已确认的阶段，从中断处继续。手工编辑后点【确认】即可加入"已完成"队列。
+                  </p>
+
+                  {/* 当前状态提示 */}
+                  {assistantStatus && (
+                    <div className="v2-agent-status-row">
+                      <span className="v2-agent-status-dot" />
+                      <span className="v2-agent-status-text">{assistantStatus}</span>
+                    </div>
+                  )}
+
+                  {/* Agent 执行日志 */}
+                  {agentLog && (
+                    <div className="v2-agent-log-wrap">
+                      <div className={`v2-agent-log-banner ${agentLog.status === 'success' ? 'ok' : agentLog.status === 'blocked' ? 'warn' : 'error'}`}>
+                        <span className="v2-agent-log-status">
+                          {agentLog.status === 'success' ? '✅ 成功' : agentLog.status === 'blocked' ? '⚠️ 阻塞' : '❌ 失败'}
+                        </span>
+                        <span className="v2-agent-log-summary">{agentLog.summary}</span>
+                      </div>
+                      <ol className="v2-agent-step-log">
+                        {(agentLog.stepLog || []).map((step, i) => (
+                          <li
+                            key={i}
+                            className={`v2-agent-step ${step.isBacktrack ? 'backtrack' : step.result === 'ok' ? 'ok' : step.result === 'error' ? 'error' : 'warn'}`}
+                          >
+                            {step.isBacktrack && <span>⤴ </span>}
+                            <span className="v2-agent-step-action">{step.action}</span>
+                            <span className="v2-agent-step-reason">{step.reason}</span>
+                            {step.qualityScore != null && (
+                              <span className="v2-agent-step-meta">Q{step.qualityScore}</span>
+                            )}
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
+
+                  {!agentLog && !agentBusy && (
+                    <p className="v2-hint v2-agent-hint">点击上方按钮，Agent 将自动规划并依次完成各个生成阶段。</p>
+                  )}
+                </div>
+              )}
             </div>
+            ) : null}
 
             {currentStage === 'framework' ? (
               <FrameworkStage
@@ -2719,6 +3517,7 @@ export default function V2App() {
                 diagramBusy={diagramBusy}
                 diagramResult={diagramResult}
                 handleExportKnowledgeCards={handleExportKnowledgeCards}
+                handleExportInteractiveCards={handleExportInteractiveCards}
                 addSchedule={() => setEditorData((prev) => ({ ...prev, schedule: [...prev.schedule, { id: `schedule-${Date.now()}`, week: prev.schedule.length + 1, topic: '', hours: 2, methods: '', assignment: '' }] }))}
                 removeSchedule={(index) => setEditorData((prev) => ({ ...prev, schedule: prev.schedule.filter((_, i) => i !== index) }))}
                 updateSchedule={(index, patch) => setEditorData((prev) => ({ ...prev, schedule: prev.schedule.map((item, i) => i === index ? { ...item, ...patch } : item) }))}
@@ -2746,27 +3545,18 @@ export default function V2App() {
 
             {currentStage === 'lecture' ? (
               <LectureStage
-                lectureState={lectureState}
-                setLectureState={updateLectureStateFromUser}
+                selectedNotebookId={selectedNotebookId}
+                api={api}
                 assistantStatus={assistantStatus}
+                setAssistantStatus={setAssistantStatus}
                 busy={busy}
-                selectedDraftText={selectedDraftText}
-                handleGenerateLectureDrafts={handleGenerateLectureDrafts}
-                saveLectureStage={handleSaveLectureStage}
-                handleGenerateFormalLecture={handleGenerateFormalLecture}
-                handleConfirmLecture={handleConfirmLecture}
-                handleExportLecture={handleExportLecture}
+                courseName={selectedNotebook?.name || ''}
+                totalCourseHours={Number(selectedNotebook?.totalHours) || 72}
+                scheduleData={scheduleState?.schedule || null}
+                designData={designState?.design || null}
                 artifacts={lectureArtifacts}
                 dt={dt}
-                api={api}
                 shorten={shorten}
-                lectureReview={lectureReview}
-                referenceContext={referenceContext}
-                onReferenceContextChange={setReferenceContext}
-                onFetchRefUrl={handleFetchRefUrl}
-                onDocxUpload={handleDocxUpload}
-                refFetchBusy={refFetchBusy}
-                courseName={selectedNotebook?.name || ''}
               />
             ) : null}
 
@@ -2802,21 +3592,94 @@ export default function V2App() {
               />
             ) : null}
 
+            {/* Phase-9 阶段 video：替换为 MicroVideoStage（整套方案） */}
             {currentStage === 'video' ? (
-              <VideoStage
-                videoState={videoState}
-                setVideoState={setVideoState}
+              <MicroVideoStage
+                microVideoState={microVideoState}
+                setMicroVideoState={setMicroVideoState}
                 assistantStatus={assistantStatus}
                 busy={busy}
-                handleGenerateVideoPrompt={handleGenerateVideoPrompt}
-                handleSaveVideoStage={saveVideoStage}
-                handleCopyVideoPrompt={handleCopyVideoPrompt}
+                handleGenerateMicroVideo={handleGenerateMicroVideo}
+                handleSaveMicroVideo={handleSaveMicroVideo}
+                handleConfirmMicroVideo={handleConfirmMicroVideo}
                 handleOpenJimeng={handleOpenJimeng}
-                handleOpenPexo={handleOpenPexo}
-                handleCopyPexoInfo={handleCopyPexoInfo}
+                handleCopyJimengPrompts={handleCopyJimengPrompts}
                 artifacts={videoArtifacts}
                 dt={dt}
                 api={api}
+                courseName={selectedNotebook?.name}
+              />
+            ) : null}
+
+            {/* Phase-9：起点阶段 schedule */}
+            {currentStage === 'schedule' ? (
+              <ScheduleStage
+                scheduleState={scheduleState}
+                setScheduleState={setScheduleState}
+                assistantStatus={assistantStatus}
+                busy={busy}
+                handleGenerateSchedule={handleGenerateSchedule}
+                handleSaveSchedule={handleSaveSchedule}
+                handleConfirmSchedule={handleConfirmSchedule}
+                handleExportScheduleWord={handleExportScheduleWord}
+                artifacts={scheduleArtifacts}
+                dt={dt}
+                api={api}
+                courseName={selectedNotebook?.name}
+              />
+            ) : null}
+
+            {/* Phase-9：design */}
+            {currentStage === 'design' ? (
+              <DesignStage
+                designState={designState}
+                setDesignState={setDesignState}
+                assistantStatus={assistantStatus}
+                busy={busy}
+                handleGenerateDesign={handleGenerateDesign}
+                handleSaveDesign={handleSaveDesign}
+                handleConfirmDesign={handleConfirmDesign}
+                handleExportDesignWord={handleExportDesignWord}
+                handleGenerateDesignInfographic={handleGenerateDesignInfographic}
+                scheduleData={scheduleState?.schedule}
+                lessons={designLessons}
+                currentLessonId={designState.artifactId}
+                onSwitchLesson={switchDesignLesson}
+                onNewLesson={newDesignLesson}
+                courseTotalHours={selectedNotebook?.totalHours || 72}
+                totalAccumulatedHours={designAccumulatedHours}
+                handleConfirmInfographic={async (artifactId) => {
+                  const r = await api.confirmStageInfographicV2({ notebookId: selectedNotebookId, artifactId });
+                  if (r?.success) {
+                    setAssistantStatus('✅ 已标记为最终版（导出 Word 将用这张）');
+                    await loadNotebookContext(selectedNotebookId);
+                  } else {
+                    window.alert(`标记失败：${r?.error || '未知'}`);
+                  }
+                }}
+                toLocalImgSrc={toLocalImgSrc}
+                artifacts={designArtifacts}
+                dt={dt}
+                api={api}
+                courseName={selectedNotebook?.name}
+              />
+            ) : null}
+
+            {/* Phase-9：最终阶段 report */}
+            {currentStage === 'report' ? (
+              <ReportStage
+                reportState={reportState}
+                setReportState={setReportState}
+                assistantStatus={assistantStatus}
+                busy={busy}
+                handleGenerateReport={handleGenerateReport}
+                handleSaveReport={handleSaveReport}
+                handleConfirmReport={handleConfirmReport}
+                handleExportReport={handleExportReport}
+                artifacts={reportArtifacts}
+                dt={dt}
+                api={api}
+                courseName={selectedNotebook?.name}
               />
             ) : null}
           </main>
@@ -2827,23 +3690,55 @@ export default function V2App() {
         <div className="v2-modal-mask">
           <div className="v2-modal">
             <div className="v2-panel-head">
-              <h3>新建笔记本</h3>
+              <h3>新建教学进度表</h3>
               <button className="v2-btn v2-btn-xs" onClick={() => setShowCreate(false)}>关闭</button>
             </div>
-            <div className="v2-grid-two">
-              <div><label className="v2-label">课程名称</label><input value={createForm.name} onChange={(e) => setCreateForm((prev) => ({ ...prev, name: e.target.value }))} /></div>
-              <div><label className="v2-label">课程代码</label><input value={createForm.courseCode} onChange={(e) => setCreateForm((prev) => ({ ...prev, courseCode: e.target.value }))} /></div>
-              <div><label className="v2-label">授课对象</label><input value={createForm.grade} onChange={(e) => setCreateForm((prev) => ({ ...prev, grade: e.target.value }))} /></div>
-              <div><label className="v2-label">先修课程</label><input value={createForm.prerequisite} onChange={(e) => setCreateForm((prev) => ({ ...prev, prerequisite: e.target.value }))} /></div>
-              <div><label className="v2-label">总学时</label><input type="number" value={createForm.totalHours} onChange={(e) => setCreateForm((prev) => ({ ...prev, totalHours: Number(e.target.value) || 0 }))} /></div>
-              <div><label className="v2-label">理论学时</label><input type="number" value={createForm.theoryHours} onChange={(e) => setCreateForm((prev) => ({ ...prev, theoryHours: Number(e.target.value) || 0 }))} /></div>
-              <div><label className="v2-label">实践学时</label><input type="number" value={createForm.practiceHours} onChange={(e) => setCreateForm((prev) => ({ ...prev, practiceHours: Number(e.target.value) || 0 }))} /></div>
+            <div className="v2-status-box">
+              <span>说明</span>
+              <strong>填完这一份，AI 会按周排课生成 18 周教学进度表，作为后续 5 个阶段（教学设计 / 课堂讲稿 / 教学课件 / 微课视频 / 教学实施报告）的统一骨架。字段直接对齐广州纺校真实样例。</strong>
             </div>
-            <label className="v2-label">课程描述</label>
-            <textarea rows={3} value={createForm.description} onChange={(e) => setCreateForm((prev) => ({ ...prev, description: e.target.value }))} placeholder="简要描述本课程的定位、内容范围和能力培养目标" />
+
+            <div className="v2-section-divider"><span>① 进度表表头（必填）</span></div>
+            <div className="v2-grid-two">
+              <div>
+                <label className="v2-label">课程名称<span className="v2-label-hint">如：服装产品传播</span></label>
+                <input value={createForm.name} onChange={(e) => setCreateForm((prev) => ({ ...prev, name: e.target.value }))} />
+              </div>
+              <div>
+                <label className="v2-label">任课教师</label>
+                <input value={createForm.teacher} onChange={(e) => setCreateForm((prev) => ({ ...prev, teacher: e.target.value }))} placeholder="如：李老师" />
+              </div>
+              <div>
+                <label className="v2-label">学校简称</label>
+                <input value={createForm.school} onChange={(e) => setCreateForm((prev) => ({ ...prev, school: e.target.value }))} placeholder="广州纺校" />
+              </div>
+              <div>
+                <label className="v2-label">教学部</label>
+                <input value={createForm.department} onChange={(e) => setCreateForm((prev) => ({ ...prev, department: e.target.value }))} placeholder="如：服装科" />
+              </div>
+              <div>
+                <label className="v2-label">学期</label>
+                <input value={createForm.semester} onChange={(e) => setCreateForm((prev) => ({ ...prev, semester: e.target.value }))} placeholder="如：2024-2025学年 第二学期" />
+              </div>
+              <div>
+                <label className="v2-label">授课班级</label>
+                <input value={createForm.className} onChange={(e) => setCreateForm((prev) => ({ ...prev, className: e.target.value }))} placeholder="如：23流行资讯" />
+              </div>
+              <div>
+                <label className="v2-label">教材<span className="v2-label-hint">填写后 AI 会按教材体系编排</span></label>
+                <input value={createForm.textbook} onChange={(e) => setCreateForm((prev) => ({ ...prev, textbook: e.target.value }))} placeholder="如：《时尚传播学》" />
+              </div>
+              <div>
+                <label className="v2-label">总学时<span className="v2-label-hint">默认 72（理论 32 + 实训 36 + 考核 4）</span></label>
+                <input type="number" value={createForm.totalHours} onChange={(e) => setCreateForm((prev) => ({ ...prev, totalHours: Number(e.target.value) || 72 }))} />
+              </div>
+            </div>
+
+            <label className="v2-label">课程描述<span className="v2-label-hint">本课程定位、内容范围、能力培养目标</span></label>
+            <textarea rows={3} value={createForm.description} onChange={(e) => setCreateForm((prev) => ({ ...prev, description: e.target.value }))} placeholder="简要描述本课程的定位、内容范围和能力培养目标（也可写先修课程要求）" />
 
             <div className="v2-section-divider">
-              <span>课程特征（填写越详细，AI 生成质量越高）</span>
+              <span>② 课程特征（填写越详细，6 阶段 AI 生成质量越高）</span>
             </div>
 
             {/* AI 建议入口 */}
@@ -2941,13 +3836,13 @@ export default function V2App() {
               </div>
               <div>
                 <label className="v2-label">
-                  参考教材 / 课程标准
-                  <span className="v2-label-hint">AI 生成框架时优先对齐该标准</span>
+                  课程标准（可选）
+                  <span className="v2-label-hint">AI 生成 6 阶段产物时优先对齐该标准（教材已在上方填）</span>
                 </label>
                 <input
                   value={createForm.teachingMaterials}
                   onChange={(e) => setCreateForm((prev) => ({ ...prev, teachingMaterials: e.target.value }))}
-                  placeholder="如：《服装陈列设计》（第2版）、中职服装设计课程标准2022"
+                  placeholder="如：中职服装设计课程标准 2022"
                 />
               </div>
             </div>
@@ -2964,7 +3859,7 @@ export default function V2App() {
             />
 
             <div className="v2-inline-actions">
-              <button className="v2-btn v2-btn-primary" onClick={createNotebook}>创建</button>
+              <button className="v2-btn v2-btn-primary" onClick={createNotebook}>创建并进入教学进度表阶段</button>
             </div>
           </div>
         </div>
@@ -3060,11 +3955,22 @@ export default function V2App() {
               onChange={(e) => setApiForm((prev) => ({ ...prev, ark: e.target.value }))}
             />
             <label className="v2-label">2. 文本类 Endpoint</label>
-            <p className="v2-field-note">用于教学框架、讲稿、PPT 文案、信息图文案等文本生成任务。一般填写 `ep-...` 形式的文本模型端点。</p>
+            <p className="v2-field-note">用于教学框架、讲稿草稿、PPT 文案、信息图文案、Vision 审核等文本生成任务。一般填写 `ep-...` 形式的多模态文本模型端点（如 doubao-seed-2.0-pro）。</p>
             <input
               value={apiForm.arkTextEndpoint}
               placeholder="例如：ep-xxxxxxxx-text"
               onChange={(e) => setApiForm((prev) => ({ ...prev, arkTextEndpoint: e.target.value }))}
+            />
+            <label className="v2-label">2.1 正式稿专用 Endpoint <span style={{ fontWeight: 'normal', color: '#888' }}>(可选)</span></label>
+            <p className="v2-field-note">
+              专门用于<strong>正式讲演稿生成</strong>这一项任务。建议填写更快/更便宜的非 reasoning 文本模型（如 <code>doubao-1.5-pro-32k</code>），避免 reasoning model 推理过慢或触发 burst 限流。
+              <br/>
+              <strong>留空时</strong>：所有文本任务（含正式稿）共用上方「2. 文本类 Endpoint」。
+            </p>
+            <input
+              value={apiForm.arkLectureFormalEndpoint || ''}
+              placeholder="可选，例如：ep-xxxxxxxx（doubao-1.5-pro 等）"
+              onChange={(e) => setApiForm((prev) => ({ ...prev, arkLectureFormalEndpoint: e.target.value }))}
             />
             <label className="v2-label">3. 图片生成 Endpoint</label>
             <p className="v2-field-note">用于信息图、PPT 配图候选图等图片生成任务。一般填写支持图像生成的 `ep-...` 端点。</p>
@@ -3086,6 +3992,143 @@ export default function V2App() {
           </div>
         </div>
       ) : null}
+
+      {/* Phase-7.5 M7.5.6：Agent 暂停 — 老师介入面板（A3：用 ENABLE_AGENT_UI 包住）*/}
+      {ENABLE_AGENT_UI && (
+        <WorkflowPauseModal
+          pauseState={agentPauseState}
+          onResume={handleAgentResume}
+          onDismiss={handleAgentDismissPause}
+          busy={agentResumeBusy}
+        />
+      )}
+
+      {/* Phase-7.7 A3：我的工作台 */}
+      {showWorkbench && (
+        <MyWorkbench
+          api={api}
+          onClose={() => setShowWorkbench(false)}
+          onOpenNotebook={(notebookId) => {
+            setSelectedNotebookId(notebookId);
+            setShowWorkbench(false);
+          }}
+        />
+      )}
+
+      {/* Phase-8 M0+：URL 抓取失败列表（替代原 alert）*/}
+      {refFetchErrors.length > 0 && (
+        <div className="v2-modal" onClick={() => setRefFetchErrors([])}>
+          <div className="v2-modal-content" style={{ maxWidth: 720 }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 12px', color: '#b45309' }}>
+              ⚠️ {refFetchErrors.length} 个 URL 读取失败
+            </h3>
+            <p style={{ margin: '0 0 16px', color: '#475569', fontSize: 14 }}>
+              下方每个 URL 都给出了具体应对建议。点「🌐 在浏览器打开」可直接打开页面手动复制内容。
+            </p>
+            <div style={{ maxHeight: 420, overflowY: 'auto', paddingRight: 8 }}>
+              {refFetchErrors.map((err, idx) => {
+                const kindBadge = {
+                  timeout: { label: '⏱ 加载超时', color: '#b45309', bg: '#fef3c7' },
+                  login_wall: { label: '🔒 需登录', color: '#b91c1c', bg: '#fee2e2' },
+                  render_error: { label: '🚫 渲染失败', color: '#b91c1c', bg: '#fee2e2' },
+                  content_too_short: { label: '📭 内容过少', color: '#1e40af', bg: '#dbeafe' },
+                  unknown: { label: '❓ 未知', color: '#475569', bg: '#f1f5f9' },
+                }[err.kind || 'unknown'] || { label: '❓ 未知', color: '#475569', bg: '#f1f5f9' };
+
+                return (
+                  <div
+                    key={idx}
+                    style={{
+                      border: '1px solid #e2e8f0',
+                      borderRadius: 8,
+                      padding: 14,
+                      marginBottom: 10,
+                      background: '#fff',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                      <span
+                        style={{
+                          background: kindBadge.bg,
+                          color: kindBadge.color,
+                          padding: '2px 10px',
+                          borderRadius: 12,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {kindBadge.label}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 13,
+                          color: '#1e293b',
+                          fontFamily: 'Consolas, monospace',
+                          wordBreak: 'break-all',
+                          flex: 1,
+                        }}
+                      >
+                        {err.url}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 13,
+                        color: '#475569',
+                        lineHeight: 1.7,
+                        whiteSpace: 'pre-wrap',
+                        marginBottom: 10,
+                        paddingLeft: 4,
+                      }}
+                    >
+                      {err.message}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        className="v2-btn v2-btn-xs"
+                        onClick={() => api.openExternalUrl(err.url)}
+                        title="在系统默认浏览器中打开此页面"
+                      >
+                        🌐 在浏览器打开
+                      </button>
+                      <button
+                        className="v2-btn v2-btn-xs"
+                        onClick={() => {
+                          navigator.clipboard.writeText(err.url).then(
+                            () => setAssistantStatus('URL 已复制到剪贴板'),
+                            () => window.alert('复制失败，请手动选中复制')
+                          );
+                        }}
+                      >
+                        📋 复制 URL
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="v2-inline-actions" style={{ marginTop: 16, justifyContent: 'flex-end' }}>
+              <button
+                className="v2-btn v2-btn-xs"
+                onClick={() => {
+                  // 一键把所有错误 URL 复制成纯文本
+                  const text = refFetchErrors.map((e) => `${e.url}：${e.message}`).join('\n\n');
+                  navigator.clipboard.writeText(text).then(
+                    () => setAssistantStatus('错误信息已复制（可发回项目组反馈）'),
+                    () => window.alert('复制失败')
+                  );
+                }}
+              >
+                📋 复制全部错误信息
+              </button>
+              <button className="v2-btn v2-btn-primary" onClick={() => setRefFetchErrors([])}>
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

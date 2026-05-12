@@ -91,26 +91,54 @@ function normalizeFrameworkContent(content, courseInfo = {}) {
     teachingMethods: module.teachingMethods || '',
     isCore: toBoolean(module.isCore ?? module.core)
   }));
-  const targetTotalHours = toNumber(content.courseInfo?.totalHours ?? courseInfo.totalHours, 0);
+
+  // ─── Phase-7.7 B12-A + B13（2026-04-29）─────────────────────────
+  // 修复"AI 编造的 totalHours 优先于用户输入"导致用户填 2 学时却得到 6.5 学时的灾难级 bug。
+  //
+  // 旧代码：`content.courseInfo?.totalHours ?? courseInfo.totalHours`
+  //   `??` 是 nullish coalescing：AI 输出非 null/undefined 时优先采纳 AI 值，
+  //   只有 AI 给 null 时才回 fallback 用户输入。AI 几乎一定输出某个值（自由编造），
+  //   结果用户的 totalHours 被永久覆盖。
+  //
+  // 新策略（B12-A）：用户输入优先，仅当用户填了 0/空时才借 AI 输出做兜底。
+  // 兜底（B13）：返回的 framework.courseInfo.totalHours 强制 = 用户输入值（不再透传 AI 编造值）。
+  // 半学时支持（B12-B）：Math.max(1, ...) → Math.max(0.5, ...)，让 4 模块 × 0.5 = 2 学时成立。
+  const userTotalHours = toNumber(courseInfo.totalHours, 0);
+  const aiTotalHours = toNumber(content.courseInfo?.totalHours, 0);
+  const targetTotalHours = userTotalHours > 0 ? userTotalHours : aiTotalHours;
+
+  const userTheoryHours = toNumber(courseInfo.theoryHours, 0);
+  const userPracticeHours = toNumber(courseInfo.practiceHours, 0);
+  // 理论/实践学时同样采用"用户优先"策略
+  const finalTheoryHours = userTheoryHours > 0 || userTotalHours > 0
+    ? userTheoryHours
+    : toNumber(content.courseInfo?.theoryHours, 0);
+  const finalPracticeHours = userPracticeHours > 0 || userTotalHours > 0
+    ? userPracticeHours
+    : toNumber(content.courseInfo?.practiceHours, 0);
+
   const currentTotalHours = modules.reduce((sum, item) => sum + toNumber(item.hours, 0), 0);
   if (targetTotalHours > 0 && modules.length > 0 && currentTotalHours > 0) {
     if (modules.length === 1) {
       modules[0].hours = targetTotalHours;
-    } else if (Math.abs(currentTotalHours - targetTotalHours) > 1) {
+    } else if (Math.abs(currentTotalHours - targetTotalHours) > 0.5) {
+      // B12-B：放宽到 0.5（半学时）阈值，避免 2 学时 + 4 模块时缩放挂死
       let assigned = 0;
       for (let i = 0; i < modules.length; i += 1) {
         if (i === modules.length - 1) {
-          modules[i].hours = Math.max(1, targetTotalHours - assigned);
+          // 最后一个模块用减法兜底（防累积误差）
+          modules[i].hours = Math.max(0.5, Math.round((targetTotalHours - assigned) * 2) / 2);
         } else {
-          const scaled = Math.round((toNumber(modules[i].hours, 0) / currentTotalHours) * targetTotalHours);
-          modules[i].hours = Math.max(1, scaled);
+          const scaled = Math.round((toNumber(modules[i].hours, 0) / currentTotalHours) * targetTotalHours * 2) / 2;
+          modules[i].hours = Math.max(0.5, scaled);
           assigned += modules[i].hours;
         }
       }
+      // 修正累加偏差，最终强制 ∑modules.hours = targetTotalHours
       const fixedSum = modules.reduce((sum, item) => sum + toNumber(item.hours, 0), 0);
-      if (fixedSum !== targetTotalHours) {
+      if (Math.abs(fixedSum - targetTotalHours) > 0.001) {
         modules[modules.length - 1].hours = Math.max(
-          1,
+          0.5,
           toNumber(modules[modules.length - 1].hours, 0) + (targetTotalHours - fixedSum)
         );
       }
@@ -120,9 +148,11 @@ function normalizeFrameworkContent(content, courseInfo = {}) {
     courseInfo: {
       courseName: content.courseInfo?.courseName || courseInfo.name || '',
       courseCode: content.courseInfo?.courseCode || courseInfo.courseCode || '',
-      totalHours: toNumber(content.courseInfo?.totalHours ?? courseInfo.totalHours, 0),
-      theoryHours: toNumber(content.courseInfo?.theoryHours ?? courseInfo.theoryHours, 0),
-      practiceHours: toNumber(content.courseInfo?.practiceHours ?? courseInfo.practiceHours, 0),
+      // B13：强制使用上面计算好的 targetTotalHours / finalTheoryHours / finalPracticeHours
+      // 这样无论 AI 输出什么值，最终 framework 的学时数永远 = 用户输入
+      totalHours: targetTotalHours,
+      theoryHours: finalTheoryHours,
+      practiceHours: finalPracticeHours,
       targetGrade: content.courseInfo?.targetGrade || courseInfo.grade || '',
       prerequisite: content.courseInfo?.prerequisite || courseInfo.prerequisite || ''
     },
@@ -193,8 +223,12 @@ function validateFrameworkContent(content, courseInfo = {}) {
       reviewReasons.push('部分模块知识要点缺失，框架完整性需要人工补强。');
     }
     const sumHours = content.modules.reduce((sum, module) => sum + toNumber(module.hours, 0), 0);
-    const targetHours = toNumber(content.courseInfo?.totalHours ?? courseInfo.totalHours, 0);
-    if (targetHours > 0 && Math.abs(sumHours - targetHours) > 2) {
+    // B12-A：validate 阶段也按"用户输入优先"——若 normalize 已强制覆盖，
+    // content.courseInfo.totalHours 就是用户值；仍保留对 courseInfo.totalHours 的 fallback。
+    const targetHours = toNumber(courseInfo.totalHours, 0)
+      || toNumber(content.courseInfo?.totalHours, 0);
+    if (targetHours > 0 && Math.abs(sumHours - targetHours) > Math.max(0.5, targetHours * 0.1)) {
+      // 阈值改为 max(0.5, 10%)，对 2 学时课程容忍 0.5 偏差，对 72 学时课程容忍 7.2
       warnings.push(`模块总学时(${sumHours})与课程总学时(${targetHours})差异较大`);
       reviewReasons.push('模块学时与课程总学时差异较大，建议人工复核教学安排。');
     }

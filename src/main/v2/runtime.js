@@ -4,6 +4,8 @@ const {
   validatePptStage,
   validateVideoStage
 } = require('./quality');
+// Phase-6 M3.2：质量失败时用户强制接受裁决
+const { resolveConflict, CONFLICT_TYPE } = require('../agent/conflict-policy');
 
 function createV2Runtime(deps = {}) {
   const {
@@ -133,6 +135,7 @@ function createV2Runtime(deps = {}) {
     },
 
     saveFrameworkStage(payload = {}) {
+      const userInitiated = payload._userInitiated === true;  // Phase-6 M2.2
       return respond(async () => {
         const notebookId = Number(payload.notebookId);
         const { value, operation } = await taskRuntime.runStageAction({
@@ -180,7 +183,8 @@ function createV2Runtime(deps = {}) {
           };
           syncFrameworkArtifacts(notebookId, {
             quality,
-            reviewReasons: quality.reviewReasons
+            reviewReasons: quality.reviewReasons,
+            userInitiated  // Phase-6 M2.2 透传
           });
           return {
             output: { workflowStage: 'framework', valid: validation.valid },
@@ -199,17 +203,20 @@ function createV2Runtime(deps = {}) {
     },
 
     confirmFrameworkStage(payload = {}) {
+      const userInitiated = payload._userInitiated === true;  // Phase-6 M2.2
+      const userForceAccept = payload.userForceAccept === true;  // Phase-6 M3.2
       return respond(async () => {
         const notebookId = Number(payload.notebookId);
         const { value, operation } = await taskRuntime.runStageAction({
           notebookId,
           stage: 'framework',
           action: 'confirm',
-          summary: '确认教学框架阶段'
+          summary: userForceAccept ? '确认教学框架阶段（用户强制接受）' : '确认教学框架阶段'
         }, async () => {
           const notebook = ensureNotebookWorkspaceState(db.getNotebookById(notebookId));
           if (!notebook) throw new Error('Notebook not found');
           let quality = { stage: 'framework', valid: true, errors: [], warnings: [] };
+          let frameworkForceAccepted = false;
 
           if (payload.framework || payload.modules || payload.schedule) {
             const normalizedFramework = normalizeFrameworkContent(
@@ -225,7 +232,14 @@ function createV2Runtime(deps = {}) {
               reviewNeeded: Boolean(validation.reviewNeeded),
               reviewReasons: validation.reviewReasons || []
             };
-            if (!validation.valid) throw new Error(validation.errors.join('; '));
+            // Phase-6 M3.2：用 conflict-policy 裁决质量失败 vs 用户强制接受
+            const conflictDecision = resolveConflict(CONFLICT_TYPE.QUALITY_VS_USER_ACCEPT, {
+              quality, userForceAccept,
+            });
+            if (conflictDecision.blocksAgent) {
+              throw new Error(validation.errors.join('; '));
+            }
+            frameworkForceAccepted = !validation.valid && userForceAccept;
             const current = db.getCurrentFramework(notebookId);
             if (current?.id) db.updateFramework(current.id, normalizedFramework);
             else db.createFramework(notebookId, normalizedFramework, 'append');
@@ -242,7 +256,8 @@ function createV2Runtime(deps = {}) {
             unlockLecture: true,
             nextStage: 'lecture',
             quality,
-            reviewReasons: quality.reviewReasons
+            reviewReasons: quality.reviewReasons,
+            userInitiated  // Phase-6 M2.2 透传
           });
           patchCourseProject(notebookId, {
             dirty: false,
@@ -250,16 +265,47 @@ function createV2Runtime(deps = {}) {
             dirtyAt: new Date().toISOString()
           });
 
+          // Phase-7.7 A3（2026-04-30）：手动 confirm framework 时写 memory
+          // 把框架的教学目标 + 教学方法摘要保存，下次相似课程的 prompt 自动注入
+          try {
+            const memory = require('../agent/memory');
+            const fwContent = (db.getCurrentFramework(notebookId)?.content) || {};
+            const objectives = fwContent.objectives || {};
+            const objSummary = [
+              ...(Array.isArray(objectives.knowledge) ? objectives.knowledge.slice(0, 3) : []),
+              ...(Array.isArray(objectives.skills) ? objectives.skills.slice(0, 3) : []),
+              ...(Array.isArray(objectives.attitude) ? objectives.attitude.slice(0, 2) : []),
+            ].filter(Boolean).join('；');
+            const methods = fwContent.teachingMethods || {};
+            const methodSummary = [methods.primary || '', ...(Array.isArray(methods.secondary) ? methods.secondary : [])]
+              .filter(Boolean).join('、');
+            memory.saveMemory(db, notebookId, {
+              frameworkObjectives: objSummary.slice(0, 500),
+              frameworkTeachingMethods: methodSummary.slice(0, 200),
+              lectureCharCount: 0,  // 此阶段未生成讲稿，confirmLectureStage 时会更新
+              styleHints: '',
+            });
+          } catch (memErr) {
+            console.warn('[runtime.confirmFramework] saveMemory 失败（非致命）:', memErr.message);
+          }
+
+          // Phase-6 M3.2：强制接受时附加警告 + 审计标记
+          const finalWarnings = frameworkForceAccepted
+            ? [...(quality.warnings || []), `[force-accepted] 用户在质量未达标的情况下强制接受：${quality.errors.join('；')}`]
+            : (quality.warnings || []);
+
           return {
-            output: { unlockedStage: 'lecture' },
-            warnings: quality.warnings || [],
+            output: { unlockedStage: 'lecture', forceAccepted: frameworkForceAccepted },
+            warnings: finalWarnings,
             outputArtifactIds: Object.values(syncResult?.artifacts || {}).map((item) => item?.id).filter(Boolean),
-            metadata: { quality },
+            metadata: { quality, forceAccepted: frameworkForceAccepted },
             value: {
               success: true,
               data: attachRuntimeMeta(buildFrameworkStageBundle(notebookId), notebookId, 'framework', quality),
               artifacts: syncResult?.artifacts || {},
-              quality
+              quality,
+              forceAccepted: frameworkForceAccepted,
+              warnings: finalWarnings
             }
           };
         });
@@ -352,6 +398,7 @@ function createV2Runtime(deps = {}) {
     },
 
     saveLectureStage(payload = {}) {
+      const userInitiated = payload._userInitiated === true;  // Phase-6 M2.2
       return respond(async () => {
         const notebookId = Number(payload.notebookId);
         const { value, operation } = await taskRuntime.runStageAction({
@@ -383,7 +430,8 @@ function createV2Runtime(deps = {}) {
             confirmed: false,
             previewText: draftsPreview,
             quality,
-            reviewReasons: quality.reviewReasons
+            reviewReasons: quality.reviewReasons,
+            userInitiated  // Phase-6 M2.2
           });
           const finalArtifact = upsertStageArtifact(notebookId, {
             refKey: 'lectureFinalId',
@@ -402,7 +450,8 @@ function createV2Runtime(deps = {}) {
             sourceArtifactIds: draftsArtifact?.id ? [draftsArtifact.id] : [],
             quality,
             reviewReasons: quality.reviewReasons,
-            sourceRefs: draftsArtifact?.id ? [{ kind: 'artifact', ref: String(draftsArtifact.id), label: 'lecture-drafts' }] : []
+            sourceRefs: draftsArtifact?.id ? [{ kind: 'artifact', ref: String(draftsArtifact.id), label: 'lecture-drafts' }] : [],
+            userInitiated  // Phase-6 M2.2
           });
 
           patchCourseProject(notebookId, {
@@ -429,19 +478,30 @@ function createV2Runtime(deps = {}) {
     },
 
     confirmLectureStage(payload = {}) {
+      const userInitiated = payload._userInitiated === true;  // Phase-6 M2.2
+      const userForceAccept = payload.userForceAccept === true;  // Phase-6 M3.2
       return respond(async () => {
         const notebookId = Number(payload.notebookId);
         const { value, operation } = await taskRuntime.runStageAction({
           notebookId,
           stage: 'lecture',
           action: 'confirm',
-          summary: '确认讲稿阶段'
+          summary: userForceAccept ? '确认讲稿阶段（用户强制接受）' : '确认讲稿阶段'
         }, async () => {
           const notebook = ensureNotebookWorkspaceState(db.getNotebookById(notebookId));
           if (!notebook) throw new Error('Notebook not found');
           const normalized = normalizeLectureStagePayload(payload);
           const quality = validateLectureStage(normalized, { requireFinal: true, totalHours: Number(notebook.totalHours) || 1 });
-          if (!quality.valid) throw new Error(quality.errors.join('; '));
+          // Phase-6 M3.2：质量失败时用 conflict-policy 裁决
+          const conflictDecision = resolveConflict(CONFLICT_TYPE.QUALITY_VS_USER_ACCEPT, {
+            quality, userForceAccept,
+          });
+          if (conflictDecision.blocksAgent) {
+            // 用户未选择强制接受 → 保持原抛错行为
+            throw new Error(quality.errors.join('; '));
+          }
+          // 标记是否为"强制接受"路径（写入 metadata 用于审计）
+          const isForceAccepted = !quality.valid && userForceAccept;
           const draftsPreview = ['a', 'b', 'c']
             .map((key) => `${key}:${String(normalized.drafts[key] || '').slice(0, 16)}`)
             .join(' ');
@@ -461,7 +521,8 @@ function createV2Runtime(deps = {}) {
             confirmed: true,
             previewText: draftsPreview,
             quality,
-            reviewReasons: quality.reviewReasons
+            reviewReasons: quality.reviewReasons,
+            userInitiated  // Phase-6 M2.2
           });
           const finalArtifact = upsertStageArtifact(notebookId, {
             refKey: 'lectureFinalId',
@@ -480,7 +541,8 @@ function createV2Runtime(deps = {}) {
             sourceArtifactIds: draftsArtifact?.id ? [draftsArtifact.id] : [],
             quality,
             reviewReasons: quality.reviewReasons,
-            sourceRefs: draftsArtifact?.id ? [{ kind: 'artifact', ref: String(draftsArtifact.id), label: 'lecture-drafts' }] : []
+            sourceRefs: draftsArtifact?.id ? [{ kind: 'artifact', ref: String(draftsArtifact.id), label: 'lecture-drafts' }] : [],
+            userInitiated  // Phase-6 M2.2
           });
           db.upsertWorkflowState(notebookId, {
             currentArtifactRefs: {
@@ -495,16 +557,42 @@ function createV2Runtime(deps = {}) {
             dirtyAt: new Date().toISOString()
           });
 
+          // Phase-7.7 A3（2026-04-30）：手动 confirm 讲稿时自动写 memory
+          // 老师感受到"系统越用越懂我的课程"——下次新建相似主题课程时，
+          // memory.buildMemoryContext 会把本次成功案例作为 few-shot 注入 prompt。
+          // 失败不阻塞 confirm（memory 是辅助能力，缺失也不影响主流程）。
+          try {
+            const memory = require('../agent/memory');
+            const finalScriptText = String(normalized.finalScript || '');
+            const narrationCharCount = (finalScriptText.match(/教师讲述[:：][\s\S]*?(?=##|课堂动作|$)/g) || [])
+              .reduce((sum, block) => sum + block.replace(/[\s\W]/g, '').length, 0);
+            memory.saveMemory(db, notebookId, {
+              frameworkObjectives: '',  // 框架目标在 confirmFrameworkStage 已写
+              frameworkTeachingMethods: '',
+              lectureCharCount: narrationCharCount || finalScriptText.length,
+              styleHints: normalized.instruction || '',
+            });
+          } catch (memErr) {
+            console.warn('[runtime.confirmLecture] saveMemory 失败（非致命）:', memErr.message);
+          }
+
+          // Phase-6 M3.2：强制接受时附加警告 + 审计标记
+          const finalWarnings = isForceAccepted
+            ? [...(quality.warnings || []), `[force-accepted] 用户在质量未达标的情况下强制接受：${quality.errors.join('；')}`]
+            : (quality.warnings || []);
+
           return {
-            output: { unlockedStage: 'ppt' },
-            warnings: quality.warnings,
+            output: { unlockedStage: 'ppt', forceAccepted: isForceAccepted },
+            warnings: finalWarnings,
             outputArtifactIds: [draftsArtifact?.id, finalArtifact?.id].filter(Boolean),
-            metadata: { quality },
+            metadata: { quality, forceAccepted: isForceAccepted, conflictDecision: conflictDecision.resolution },
             value: {
               success: true,
               data: attachRuntimeMeta(buildLectureStageBundle(notebookId), notebookId, 'lecture', quality),
               artifacts: { lectureDrafts: draftsArtifact, lectureFinal: finalArtifact },
-              quality
+              quality,
+              forceAccepted: isForceAccepted,
+              warnings: finalWarnings
             }
           };
         });
@@ -525,6 +613,7 @@ function createV2Runtime(deps = {}) {
     },
 
     savePptStage(payload = {}) {
+      const userInitiated = payload._userInitiated === true;  // Phase-6 M2.2
       return respond(async () => {
         const notebookId = Number(payload.notebookId);
         const { value, operation } = await taskRuntime.runStageAction({
@@ -549,7 +638,8 @@ function createV2Runtime(deps = {}) {
             confirmed: false,
             previewText: normalized.pptOutline.slice(0, 120),
             quality,
-            reviewReasons: quality.reviewReasons
+            reviewReasons: quality.reviewReasons,
+            userInitiated  // Phase-6 M2.2
           });
           const pageArtifacts = upsertPptPageImageArtifacts(notebookId, normalized.pptPages, {
             status: 'edited',
@@ -582,19 +672,32 @@ function createV2Runtime(deps = {}) {
     },
 
     confirmPptStage(payload = {}) {
+      const userInitiated = payload._userInitiated === true;  // Phase-6 M2.2
+      const userForceAccept = payload.userForceAccept === true;  // Phase-6 M3.2
       return respond(async () => {
         const notebookId = Number(payload.notebookId);
         const { value, operation } = await taskRuntime.runStageAction({
           notebookId,
           stage: 'ppt',
           action: 'confirm',
-          summary: '确认 PPT 阶段'
+          summary: userForceAccept ? '确认 PPT 阶段（用户强制接受）' : '确认 PPT 阶段'
         }, async () => {
           const notebook = ensureNotebookWorkspaceState(db.getNotebookById(notebookId));
           if (!notebook) throw new Error('Notebook not found');
           const normalized = normalizePptStagePayload(payload);
-          const quality = validatePptStage(normalized, { requirePages: true });
-          if (!quality.valid) throw new Error(quality.errors.join('; '));
+          // Phase-7.7 P1-C：PPT confirm 时把 totalHours 传给 quality 让它校验页数门槛
+          const quality = validatePptStage(normalized, {
+            requirePages: true,
+            totalHours: Number(notebook.totalHours) || 1,
+          });
+          // Phase-6 M3.2：用 conflict-policy 裁决
+          const conflictDecision = resolveConflict(CONFLICT_TYPE.QUALITY_VS_USER_ACCEPT, {
+            quality, userForceAccept,
+          });
+          if (conflictDecision.blocksAgent) {
+            throw new Error(quality.errors.join('; '));
+          }
+          const pptForceAccepted = !quality.valid && userForceAccept;
 
           const outlineArtifact = upsertStageArtifact(notebookId, {
             refKey: 'pptOutlineId',
@@ -607,7 +710,8 @@ function createV2Runtime(deps = {}) {
             confirmed: true,
             previewText: normalized.pptOutline.slice(0, 120),
             quality,
-            reviewReasons: quality.reviewReasons
+            reviewReasons: quality.reviewReasons,
+            userInitiated  // Phase-6 M2.2
           });
           const pageArtifacts = upsertPptPageImageArtifacts(notebookId, normalized.pptPages, {
             status: 'confirmed',
@@ -627,16 +731,23 @@ function createV2Runtime(deps = {}) {
             dirtyAt: new Date().toISOString()
           });
 
+          // Phase-6 M3.2：强制接受时附加警告 + 审计标记
+          const finalWarnings = pptForceAccepted
+            ? [...(quality.warnings || []), `[force-accepted] 用户在质量未达标的情况下强制接受：${quality.errors.join('；')}`]
+            : (quality.warnings || []);
+
           return {
-            output: { unlockedStage: 'video', pageCount: normalized.pptPages.length },
-            warnings: quality.warnings,
+            output: { unlockedStage: 'video', pageCount: normalized.pptPages.length, forceAccepted: pptForceAccepted },
+            warnings: finalWarnings,
             outputArtifactIds: [outlineArtifact?.id, ...pageArtifacts.map((item) => item?.id)].filter(Boolean),
-            metadata: { quality },
+            metadata: { quality, forceAccepted: pptForceAccepted },
             value: {
               success: true,
               data: attachRuntimeMeta(buildPptStageBundle(notebookId), notebookId, 'ppt', quality),
               artifacts: { pptOutline: outlineArtifact, pageImages: pageArtifacts },
-              quality
+              quality,
+              forceAccepted: pptForceAccepted,
+              warnings: finalWarnings
             }
           };
         });
@@ -800,6 +911,7 @@ function createV2Runtime(deps = {}) {
     },
 
     saveVideoStage(payload = {}) {
+      const userInitiated = payload._userInitiated === true;  // Phase-6 M2.2
       return respond(async () => {
         const notebookId = Number(payload.notebookId);
         const { value, operation } = await taskRuntime.runStageAction({
@@ -823,7 +935,8 @@ function createV2Runtime(deps = {}) {
             confirmed: false,
             previewText: normalized.promptText.slice(0, 120),
             quality,
-            reviewReasons: quality.reviewReasons
+            reviewReasons: quality.reviewReasons,
+            userInitiated  // Phase-6 M2.2
           });
           patchCourseProject(notebookId, {
             dirty: true,

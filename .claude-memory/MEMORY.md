@@ -1,8 +1,38 @@
-# MEMORY.md — 刘老师课程助手 v2 长期记忆索引
+# MEMORY.md — 驭课 Agent 长期记忆索引
 
 > **使用规则**：每次新会话开始时，先读本文件，了解项目历史坑点和关键决策，再开始工作。
 > **更新规则**：每完成一个阶段，在本文件记录新的学到的内容和决策。
-> **最后更新**：2026-04-24（baoyu-skills 集成 Phase A/B/C + PPT 配图方向三全部完成，全部 13 verify 脚本 ✅）
+> **最后更新**：2026-05-10（v4.0.0 Phase-9 完成，6 阶段工作流落地，134/134 verify ✅）
+
+---
+
+## 〇、当前阶段速览（2026-05-10）
+
+| 项 | 详情 |
+|---|---|
+| 当前版本 | **v4.0.0**（驭课 Agent，前身"刘老师 Agent 2.x" 已废弃）|
+| 当前阶段 | **Phase-9 完成**（6 阶段工作流重构 + 多节课讲稿 + AI 信息图 + 4 格式报告导出）|
+| 累计 verify | 134/134（5 个 Phase-9 新脚本，含 contracts-v6 / schedule / design / micro-video / report）|
+| 下一阶段 | 等老师试用反馈 → Phase-10 体验打磨 |
+
+---
+
+## 〇·二、Phase-9 必看陷阱清单（2026-05-10 新增）
+
+详细见 `.claude/notes/2026-05-10-phase9-technical-lessons.md` + `.claude/phases/phase-9.md`
+
+10 条核心经验：
+
+1. **函数同名多副本要 grep 全局** — `renderHtmlToPngBuffer` 在 3 处独立定义
+2. **preload + main 改动必须完整重启 Electron** — HMR 不重载这两层
+3. **AI endpoint 调用必带 fallback** — doubao `ep-m-...` 不支持 json_object
+4. **capturePage 截断 bug** — 必须 useContentSize + setContentSize + 显式 rect
+5. **prompt 反例清单 > 正面约束** — 给 AI 5 条"❌ 反例"比说"不要做 X"有效 10 倍
+6. **真实日志诊断 1 分钟 vs 截图猜 30 分钟** — 第一次失败立刻加 console.log
+7. **看到"故意不做 X"注释要怀疑** — 可能是矫枉过正
+8. **H1 例外必须有 verify 兜底** — Phase-9 改 contracts.js 写 verify-contracts-v6.js
+9. **db 方法名先 grep 确认** — 防御性 if 容易掩盖拼写错误
+10. **每个长操作给 UI 反馈** — 老师不会原谅"60 秒静默"
 
 ---
 
@@ -107,7 +137,6 @@ Electron 主进程全部 CommonJS，引入 TS 需要 ts-node 或 tsc，增加构
   → framework-schema.js 用户友好错误消息
 
 ✅ Phase-5C：真正的 Agent 架构（2026-04-21 全部完成）
-  → 战略目标：广纺织学校验收 → 商业推广
   → Step1 ✅ Auto-Retry Loop — retry-loop.js，≤3 次内部重试 + 质量反馈注入
   → Step2 ✅ Cross-Stage Context — context-builder.js，框架目标/方法注入讲稿 Prompt
   → Step3 ✅ Agent Orchestrator — orchestrator.js + agent.handlers.js + V2App UI

@@ -48,19 +48,40 @@ function fillPromptTemplate(template, data) {
 }
 
 function getDefaultFrameworkPrompt() {
-  return `You are a course design expert. Generate a teaching framework for the course:
-- Course name: {courseName}
-- Course code: {courseCode}
-- Total hours: {totalHours} (theory {theoryHours}, practice {practiceHours})
-- Target grade: {grade}
-- Prerequisite: {prerequisite}
+  // Phase-7.7 B12-C（2026-04-29）：强化 framework prompt，命令性约束 totalHours。
+  // 之前的英文极简版让 AI 自由编 totalHours / module.hours，导致用户填 2 学时却得到 6.5 学时。
+  // 加：① 中文规则（更强的语境约束）② 命令式语言（CRITICAL/必须/禁止）③ 模块加总=总学时的硬约束
+  //     ④ 模块数量与学时的合理对应规则。
+  return `你是一名职业教育课程设计专家，为以下课程生成教学框架（输出为 JSON）：
 
-Return JSON only with:
-1) courseInfo
-2) objectives (knowledge/skills/attitude)
-3) modules (name, hours, key points, core)
-4) ideologicalElements
-5) teachingMethods`;
+【课程基本信息（必须严格遵守）】
+- 课程名称：{courseName}
+- 课程代码：{courseCode}
+- **总学时：{totalHours}（理论 {theoryHours}，实践 {practiceHours}）**
+- 授课对象：{grade}
+- 先修课程：{prerequisite}
+
+⚠️ **关键硬约束（违反则输出无效）：**
+1. **modules 数组里所有 module.hours 加总必须严格等于 {totalHours}**，不得多出半学时也不得少。
+2. **每个 module.hours 最少 0.5 学时**（允许半学时模块）。
+3. **module 数量必须与 {totalHours} 合理对应**：
+   - {totalHours} ≤ 2 学时：1-2 个模块
+   - 2 < {totalHours} ≤ 8：2-4 个模块
+   - 8 < {totalHours} ≤ 32：4-6 个模块
+   - {totalHours} > 32：6-8 个模块
+4. courseInfo.totalHours **必须等于 {totalHours}**，不得自由编造（如 6.5 等不在用户输入里的值）。
+5. 禁止把模块加总当 totalHours 写回（旧 bug）；总学时永远以用户输入为准。
+
+【输出 JSON 结构】
+{
+  "courseInfo": { "courseName", "courseCode", "totalHours", "theoryHours", "practiceHours", "targetGrade", "prerequisite" },
+  "objectives": { "knowledge": [...], "skills": [...], "attitude": [...] },
+  "modules": [{ "number", "name", "hours", "description", "keyPoints": [...], "isCore": true }],
+  "ideologicalElements": [...],
+  "teachingMethods": { "primary", "secondary": [...] }
+}
+
+只返回纯 JSON 对象，不要 markdown 代码块包裹，不要解释文字。`;
 }
 
 class ArkAPI {

@@ -35,7 +35,8 @@ function register(ipcMain, getDeps) {
 
   ipcMain.handle('v2:saveVideoStage', async (event, payload = {}) => {
     const { v2Runtime } = getDeps();
-    return v2Runtime.saveVideoStage(payload);
+    // Phase-6 M2.2：IPC 来源即用户操作，注入 _userInitiated 让 runtime 自动加锁
+    return v2Runtime.saveVideoStage({ ...payload, _userInitiated: true });
   });
 
   // 获取当前所有 stage 的可用操作列表（用于前端渲染操作按钮）

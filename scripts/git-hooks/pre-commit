@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+#
+# pre-commit hook — 优课创 Agent 项目
+#
+# 自动检查 H 约束违反，阻断违规 commit
+# 安装：node scripts/install-git-hooks.js
+#
+# 跳过本次检查：git commit --no-verify（不推荐，但有时调试用）
+
+set -e
+
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+HARD_FAIL=0
+WARNINGS=0
+
+err() { echo -e "${RED}❌ $1${NC}"; HARD_FAIL=$((HARD_FAIL+1)); }
+warn() { echo -e "${YELLOW}⚠️  $1${NC}"; WARNINGS=$((WARNINGS+1)); }
+info() { echo -e "${GREEN}✓ $1${NC}"; }
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "pre-commit hook：检查 H 约束违反 + 文件归属"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# 拿到 staged 文件列表
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR)
+DELETED=$(git diff --cached --name-only --diff-filter=D)
+
+# ── H1：禁止修改 contracts.js / publication-contracts.js ──
+if echo "$STAGED" | grep -qE 'src/main/v2/contracts\.js$|src/main/v2/publication-contracts\.js$'; then
+  err "H1 违反：禁止修改 contracts.js（Stage 依赖链命脉）"
+  echo "   详见 .claude/hard-constraints.md H1"
+  echo "   如确需修改，请先和用户讨论再 git commit --no-verify"
+fi
+
+# ── H2：禁止在 index.js 添加 ipcMain.handle ──
+if echo "$STAGED" | grep -q 'src/main/index\.js$'; then
+  ADDED_HANDLES=$(git diff --cached src/main/index.js | grep -E '^\+\s*ipcMain\.(handle|on)' || true)
+  if [ -n "$ADDED_HANDLES" ]; then
+    err "H2 违反：禁止在 index.js 添加 ipcMain.handle / ipcMain.on"
+    echo "   新 handler 必须写到 src/main/ipc/*.handlers.js，通过 _registry.js 注册"
+    echo "   详见 .claude/hard-constraints.md H2"
+  fi
+fi
+
+# ── H4：禁止删除 verify-*.js / e2e-*.js ──
+if echo "$DELETED" | grep -qE 'scripts/(verify|e2e)-.*\.js$'; then
+  err "H4 违反：禁止删除 verify / e2e 脚本（回归防护网）"
+  echo "$DELETED" | grep -E 'scripts/(verify|e2e)-.*\.js$' | sed 's/^/   - /'
+  echo "   详见 .claude/hard-constraints.md H4"
+fi
+
+# ── H8：检查 package.json 新增 dependency ──
+if echo "$STAGED" | grep -q '^package\.json$'; then
+  NEW_DEPS=$(git diff --cached package.json | grep -E '^\+\s*"[^"]+":\s*"[\^~]?[0-9]' | grep -v '"version"' | grep -v '"productName"' | grep -v '"name"' | grep -v '"description"' || true)
+  if [ -n "$NEW_DEPS" ]; then
+    warn "H8 提醒：检测到 package.json 新增依赖项"
+    echo "$NEW_DEPS" | head -5 | sed 's/^/   /'
+    echo "   确认已和用户确认过用途、包大小、替代方案"
+    echo "   详见 .claude/hard-constraints.md H8"
+  fi
+fi
+
+# ── 文件归属：禁止根目录新增业务 .md（除 4 个入口文件）──
+ROOT_MD_NEW=$(echo "$STAGED" | grep -E '^[^/]+\.md$' | grep -vE '^(CLAUDE|CONTEXT|README|LICENSE|CHANGELOG)\.md$' || true)
+if [ -n "$ROOT_MD_NEW" ]; then
+  err "文件归属违反：根目录禁止放业务 .md 文件"
+  echo "$ROOT_MD_NEW" | sed 's/^/   - /'
+  echo "   应该归到 .claude/notes/ 或 .claude/phases/ 或 reports/ 或 dist/"
+  echo "   详见 .claude/file-placement-guide.md"
+fi
+
+# ── CLAUDE.md 行数检查（≤ 200 行规则）──
+if echo "$STAGED" | grep -q '^CLAUDE\.md$'; then
+  LINE_COUNT=$(wc -l < CLAUDE.md)
+  if [ "$LINE_COUNT" -gt 200 ]; then
+    warn "CLAUDE.md 已 ${LINE_COUNT} 行（> 200 行限制）"
+    echo "   入口页规则：CLAUDE.md ≤ 200 行，新内容默认归到 .claude/"
+    echo "   详见 CLAUDE.md 顶部说明"
+  fi
+fi
+
+# ── hard-constraints.md 修改提醒 ──
+if echo "$STAGED" | grep -q '^\.claude/hard-constraints\.md$'; then
+  warn "检测到修改 .claude/hard-constraints.md（H 约束本身）"
+  echo "   确认是否：①新增 H 约束需经 candidates/ 升级 ②修改/删除需 Baggio 批准"
+fi
+
+# ── 总结 ──
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+if [ "$HARD_FAIL" -gt 0 ]; then
+  echo -e "${RED}❌ 阻断 commit：${HARD_FAIL} 个 H 约束硬违反${NC}"
+  echo "   修复后再 commit；或确认例外情况后用：git commit --no-verify"
+  exit 1
+fi
+
+if [ "$WARNINGS" -gt 0 ]; then
+  echo -e "${YELLOW}⚠️  ${WARNINGS} 个警告（非阻断），commit 继续${NC}"
+fi
+
+info "pre-commit 检查通过"
+exit 0

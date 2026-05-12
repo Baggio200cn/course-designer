@@ -2770,3 +2770,149 @@ textarea, input, select {
     grid-template-rows: auto 1fr;
   }
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+   v3.0.0 老师友好优化层（2026-04-30）
+   原则：不改原 CSS 结构，仅追加更易读、更舒服的样式
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* 全局基础：字号 +1px、行高 +0.05、字间距优化（中老年老师阅读更轻松）*/
+.v2-shell {
+  font-size: 15px;          /* 原默认 14px */
+  line-height: 1.65;        /* 原 1.55 */
+  letter-spacing: 0.01em;   /* 中文略松 */
+}
+
+/* 顶部标识：版本号醒目但不喧宾夺主 */
+.v2-topbar h1 {
+  font-size: 26px;          /* 原 24px */
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+.v2-title-agent {
+  font-style: italic;
+  color: var(--v2-accent, #15803d);
+  font-weight: 800;
+}
+.v2-title-version {
+  font-size: 14px;
+  color: #6b7280;
+  font-weight: 500;
+  margin-left: 4px;
+  vertical-align: middle;
+  background: rgba(21, 128, 61, 0.08);
+  padding: 2px 8px;
+  border-radius: 12px;
+  letter-spacing: 0.02em;
+}
+
+/* 顶部按钮统一更明显（老师容易找到入口）*/
+.v2-topbar-actions .v2-btn {
+  font-size: 14px;
+  padding: 8px 16px;
+  font-weight: 600;
+}
+
+/* 阶段卡片字号 + 行间距 */
+.v2-stage-item {
+  font-size: 14.5px;
+  line-height: 1.55;
+}
+.v2-stage-item.active {
+  font-weight: 700;
+}
+
+/* 重要按钮（绿色主按钮）字号加大 + hover 反馈 */
+.v2-btn.v2-btn-primary {
+  font-size: 14.5px;
+  padding: 9px 20px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+.v2-btn.v2-btn-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(21, 128, 61, 0.25);
+}
+
+/* 字段说明文字（v2-field-note）增加可读性 */
+.v2-field-note {
+  font-size: 13px;
+  line-height: 1.7;
+  color: #4b5563;
+}
+
+/* 标题层级更清晰 */
+.v2-panel h3, .v2-block-alert-title {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+/* 输入框边框加深、聚焦色更醒目（老师容易看到当前编辑哪个）*/
+.v2-shell input[type="text"],
+.v2-shell input[type="number"],
+.v2-shell textarea,
+.v2-shell select {
+  border: 1.5px solid #cbd5e1;
+  font-size: 14.5px;
+  line-height: 1.6;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.v2-shell input[type="text"]:focus,
+.v2-shell input[type="number"]:focus,
+.v2-shell textarea:focus,
+.v2-shell select:focus {
+  border-color: #16a34a;
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.15);
+  outline: none;
+}
+
+/* 笔记本列表条目字号 */
+.v2-sidebar .v2-stage-item {
+  font-size: 13.5px;
+}
+
+/* 课程信息卡（顶部）字段更易读 */
+.v2-course-head {
+  font-size: 15px;
+}
+
+/* PPT/讲稿编辑器 textarea 高度更友好 */
+.v2-shell textarea {
+  min-height: 80px;
+}
+
+/* "我的工作台"按钮特殊高亮（新功能引导）*/
+.v2-topbar-actions .v2-btn.v2-btn-secondary:first-child {
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.08), rgba(124, 58, 237, 0.02));
+  border-color: rgba(124, 58, 237, 0.35);
+  color: #6d28d9;
+}
+.v2-topbar-actions .v2-btn.v2-btn-secondary:first-child:hover {
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.16), rgba(124, 58, 237, 0.06));
+  border-color: rgba(124, 58, 237, 0.55);
+}
+
+/* 状态栏文字加大（老师容易看到 Agent 当前状态）*/
+.v2-agent-status-text {
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+/* 阶段卡片当前阻塞提示更醒目 */
+.v2-block-alert-title {
+  font-size: 15.5px;
+  color: #b45309;
+}
+.v2-block-alert-desc {
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* 让笔记本列表的"全日制中等职业学校..."等长文字换行不破坏 */
+.v2-stage-item .v2-stage-detail {
+  font-size: 12.5px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+

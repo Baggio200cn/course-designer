@@ -1,0 +1,20 @@
+{
+  "short": {
+    "hash": "c521bef624a05c2213e832620ebe143c5e9f8e3172ab3613e2fbb1582fdfc06b",
+    "moduleTitleCount": 1,
+    "keyTermCount": 0,
+    "compressionRatio": 0.6
+  },
+  "medium": {
+    "hash": "19c1e6ae9a29873c9209be0651c20d8bc391352cf3f7e77176b479cba0c5fa9b",
+    "moduleTitleCount": 4,
+    "keyTermCount": 2,
+    "compressionRatio": 0.572
+  },
+  "long": {
+    "hash": "acf9b841f3ab942a23cbacc7cd647e9ac5041d5313a7e2bf35153f4226bb76b7",
+    "moduleTitleCount": 1,
+    "keyTermCount": 17,
+    "compressionRatio": 0.08
+  }
+}

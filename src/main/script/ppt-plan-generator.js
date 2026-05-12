@@ -23,6 +23,14 @@
 const fs = require('fs');
 const path = require('path');
 
+// Phase-7.6 R7：走统一 prompt 装配器（H12）
+const { buildPptPlanSystemFragments, buildPptPlanSystemPromptLegacy } = require('../agent/builders/ppt-plan.builder');
+const { assembleWithBaseline } = require('../agent/prompt-assembler');
+
+// Prompt 装配器开关：true 走 fragment 装配（默认）；false 回退到 prompts/ppt-plan.md 原文
+// 应急回滚：把这个常量改为 false
+const USE_ASSEMBLER = true;
+
 const PPT_FIXED_IMAGE_MODEL = 'seedream';
 const PROMPT_DIR = path.join(__dirname, '../../../prompts');
 
@@ -42,18 +50,36 @@ function loadPrompt(name) {
  * @param {string} resolvedId - 已由调用方保证唯一的 id
  * @returns {Object} 标准 page 对象
  */
-function mergeAiPageWithPrev(aiPage, index, prevPage, imageAspect, imageQuality, resolvedId) {
+function mergeAiPageWithPrev(aiPage, index, prevPage, imageAspect, imageQuality, resolvedId, courseContext) {
   const prev = prevPage || {};
   const keyContent = Array.isArray(aiPage.keyContent)
     ? aiPage.keyContent
     : String(aiPage.keyContent || '').split(/\n/).filter(Boolean);
 
+  const needImage = typeof aiPage.needImage === 'boolean' ? aiPage.needImage : true;
+  const pageType = String(aiPage.pageType || '内容页');
+  const title = String(aiPage.title || `第${index + 1}页`).slice(0, 24);
+
+  // Phase-7.6 R4：强制为 needImage 页面生成 imagePrompt
+  // 优先级：AI 输出 > 上一版保留 > 自动构造 fallback
+  // 不允许 needImage=true 但 imagePrompt 为空——会让深度配图流水线静默跳过
+  let imagePrompt = String(aiPage.imagePrompt || prev.imagePrompt || '').trim();
+  if (needImage && !imagePrompt) {
+    imagePrompt = _buildFallbackImagePrompt({
+      pageType, title,
+      subtitle: String(aiPage.subtitle || ''),
+      keyContent,
+      courseName: courseContext?.courseName || '',
+      sourceSection: String(aiPage.sourceSection || ''),
+    });
+  }
+
   return {
     id: resolvedId || `ppt-plan-${index + 1}`,
     pageKey: prev.pageKey || `plan-${index + 1}`,
     pageNumber: index + 1,
-    pageType: String(aiPage.pageType || '内容页'),
-    title: String(aiPage.title || `第${index + 1}页`).slice(0, 24),
+    pageType,
+    title,
     subtitle: String(aiPage.subtitle || prev.subtitle || ''),
     summary: keyContent.slice(0, 2).join('；') || '',
     speakerNotes: String(aiPage.speakerNotes || prev.speakerNotes || ''),
@@ -63,14 +89,76 @@ function mergeAiPageWithPrev(aiPage, index, prevPage, imageAspect, imageQuality,
     visual: '辅助理解的课堂视觉图',
     layout: '标题 + 信息块',
     moduleId: prev.moduleId || '',
-    needImage: typeof aiPage.needImage === 'boolean' ? aiPage.needImage : true,
+    needImage,
     imageModel: prev.imageModel || PPT_FIXED_IMAGE_MODEL,
     imageAspect: prev.imageAspect || imageAspect || '16:9',
     imageQuality: prev.imageQuality || imageQuality || 'low',
-    imagePrompt: prev.imagePrompt || '',
+    imagePrompt,
     imagePath: prev.imagePath || '',
     imageUrl: prev.imageUrl || ''
   };
+}
+
+/**
+ * Phase-7.6 R5：构造讲稿章节锚点段，让 AI 把每页 PPT 显式对应到讲稿章节
+ *
+ * 输出格式（注入到 userPrompt）：
+ *   ## 讲稿章节锚点
+ *   PPT 每页必须明确标注对应的讲稿章节（用 sourceSection 字段）：
+ *   - 章节1：开场导入（关键点：xx、xx）
+ *   - 章节2：模块1 xxx（关键点：xx）
+ *   - ...
+ *
+ * 缺数据时返回空字符串（不强行注入空内容，避免 prompt 噪音）
+ */
+function _buildSectionAnchorBlock(lectureSections, lectureSectionSummary) {
+  if (Array.isArray(lectureSections) && lectureSections.length > 0) {
+    const lines = lectureSections.slice(0, 12).map((s, i) => {
+      const heading = String(s.heading || '').trim() || `章节${i + 1}`;
+      const keyPoints = Array.isArray(s.keyPoints) && s.keyPoints.length
+        ? `（关键点：${s.keyPoints.slice(0, 2).join('、')}）`
+        : '';
+      return `- ${heading}${keyPoints}`;
+    });
+    return [
+      `## 讲稿章节锚点（PPT 页面必须对应）`,
+      `PPT 每页的 sourceSection 字段必须严格对应下列讲稿章节之一，不允许虚构或偏题：`,
+      ...lines,
+    ].join('\n');
+  }
+  if (typeof lectureSectionSummary === 'string' && lectureSectionSummary.length > 10) {
+    return [
+      `## 讲稿章节锚点`,
+      `PPT 页面 sourceSection 必须对应下列章节：`,
+      lectureSectionSummary,
+    ].join('\n');
+  }
+  return '';   // 缺数据时不注入，避免空标题噪音
+}
+
+/**
+ * Phase-7.6 R4：当 AI 没生成 imagePrompt 时的 fallback 构造器
+ * 基于页面元数据 + 课程上下文构造合理的图片 prompt
+ */
+function _buildFallbackImagePrompt({ pageType, title, subtitle, keyContent, courseName, sourceSection }) {
+  const parts = [];
+  // 类型化前缀
+  if (pageType.includes('封面') || pageType.includes('cover')) {
+    parts.push(`${courseName || '课程'}封面图`);
+  } else if (pageType.includes('总结') || pageType.includes('summary')) {
+    parts.push(`${courseName || '课程'}总结概念图`);
+  } else if (pageType.includes('路线图') || pageType.includes('roadmap')) {
+    parts.push(`${courseName || '课程'}模块路线图，分阶段展示`);
+  } else {
+    parts.push(`教学场景图：${title}`);
+  }
+  if (subtitle) parts.push(`，副标题"${subtitle}"`);
+  if (Array.isArray(keyContent) && keyContent.length > 0) {
+    parts.push(`，关键内容：${keyContent.slice(0, 2).join('、')}`);
+  }
+  if (sourceSection) parts.push(`，对应讲稿章节"${sourceSection}"`);
+  parts.push('，专业教学风格，配色协调，构图清晰，避免堆砌文字');
+  return parts.join('');
 }
 
 /**
@@ -101,7 +189,10 @@ async function generatePptPlan(params) {
     aiClient,
     prevPages = [],
     imageAspect = '16:9',
-    imageQuality = 'low'
+    imageQuality = 'low',
+    // Phase-7.6 R5：跨阶段上下文（来自 buildPptContext，包含讲稿章节摘要）
+    lectureSections = [],          // [{ heading, keyPoints }, ...]
+    lectureSectionSummary = '',     // 紧凑字符串版本
   } = params;
 
   if (!aiClient || typeof aiClient.chatJson !== 'function') {
@@ -111,13 +202,26 @@ async function generatePptPlan(params) {
     throw new Error('讲稿内容为空，无法生成 PPT 规划');
   }
 
-  // 加载 ppt-plan prompt
-  const systemPrompt = loadPrompt('ppt-plan');
+  // Phase-7.6 R7：走统一 prompt 装配器（H12）
+  // 关闭 USE_ASSEMBLER 可一键回退到 loadPrompt('ppt-plan') 原文
+  const systemPrompt = USE_ASSEMBLER
+    ? assembleWithBaseline(
+        buildPptPlanSystemFragments({
+          totalHours,
+          hasLectureSections: Array.isArray(lectureSections) && lectureSections.length > 0,
+        }),
+        { stage: 'ppt' }
+      )
+    : buildPptPlanSystemPromptLegacy();
 
   // 构建用户消息：包含讲稿和课程基本信息
   const modulesSummary = Array.isArray(modules) && modules.length
     ? modules.map((m, i) => `模块${i + 1}：${m.name || ''}（${(m.knowledgePoints || []).length}个知识点）`).join('；')
     : '（无模块信息）';
+
+  // Phase-7.6 R5：构造讲稿章节锚点段
+  // 优先使用 lectureSections（结构化），其次 lectureSectionSummary（字符串）
+  const sectionAnchorBlock = _buildSectionAnchorBlock(lectureSections, lectureSectionSummary);
 
   const userPrompt = [
     `## 课程信息`,
@@ -125,16 +229,23 @@ async function generatePptPlan(params) {
     `- 课时数：${totalHours} 学时`,
     `- 教学模块：${modulesSummary}`,
     '',
+    sectionAnchorBlock,                // R5：注入讲稿章节锚点（PPT 页面必须对应到具体章节）
+    '',
     `## 正式讲稿`,
     String(lectureScript).slice(0, 12000) // 防止超 token
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 
   // 调用 AI，要求返回 JSON
+  // Phase-7.7 D3（2026-04-30）：maxTokens 6000 → 16000
+  // 终端日志显示 14 页规划 JSON 被截断（截断位置 5321），6000 token 装不下：
+  //   每页约 200-300 token（含 speakerNotes 80-120 字）× 14 页 ≈ 4000-4500 token
+  //   再加上模板说明、示例 → 单段 6000 容易越界
+  // 16000 token 给足缓冲，且非 reasoning model（doubao-1.5-pro）成本可控。
   const rawText = await aiClient.chatJson({
     systemPrompt,
     userPrompt,
     temperature: 0.3,
-    maxTokens: 6000
+    maxTokens: 16000
   });
 
   // 解析 JSON（含截断自动修复）
@@ -202,7 +313,7 @@ async function generatePptPlan(params) {
     }
     usedIds.add(candidateId);
 
-    return mergeAiPageWithPrev(aiPage, index, prev, imageAspect, imageQuality, candidateId);
+    return mergeAiPageWithPrev(aiPage, index, prev, imageAspect, imageQuality, candidateId, { courseName });
   });
 
   console.log(`[ppt-plan-generator] 生成 ${pages.length} 页 PPT 规划（课时=${totalHours}，目标=${totalHours <= 1 ? '8-12' : totalHours <= 2 ? '14-18' : '22-30'}页）`);
