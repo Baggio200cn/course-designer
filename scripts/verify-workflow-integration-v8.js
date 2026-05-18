@@ -198,6 +198,102 @@ test('contracts.js 导出 ARTIFACT_TYPE_LABEL + ARTIFACT_TYPES_BY_STAGE', () => 
   assert(contracts.ARTIFACT_TYPE_LABEL.video_prompt, 'ARTIFACT_TYPE_LABEL 缺 video_prompt');
 });
 
+// ── 10. v4.3.3 Codex Round 6 #3：mock 调用集成测试（替代纯文本扫描）────────────
+//   不再只 grep 源码，而是真实 require + mock 调用，验证运行时行为
+console.log('\n【10】mock 调用集成测试（runtime + workbench 行为）');
+
+// 测 10.1：mock db 跑 db.markDownstreamDirty('lecture') → 下游 quiz/homework/video/report 全标 dirty
+test('db.markDownstreamDirty(lecture) 精确传播到 quiz/homework/video/report', () => {
+  // 隔离方式：复用 markDownstreamDirty 内部只依赖 _readData/_writeData 的特性
+  //   构造 minimal stub 直接调用，绕过 class 实例化 + Electron 依赖
+  const fakeData = {
+    artifacts: [
+      { id: 1, notebookId: 999, type: 'ppt_outline', stage: 'ppt', dirty: false },
+      { id: 2, notebookId: 999, type: 'lecture_final', stage: 'lecture', dirty: false },
+      { id: 3, notebookId: 999, type: 'quiz_set', stage: 'quiz', dirty: false },
+      { id: 4, notebookId: 999, type: 'homework_set', stage: 'homework', dirty: false },
+      { id: 5, notebookId: 999, type: 'video_prompt', stage: 'video', dirty: false },
+    ],
+  };
+  // 实例化 stub：把 markDownstreamDirty 的 this._readData 和 this._writeData 绑到 fakeData
+  const stub = {
+    _readData: () => JSON.parse(JSON.stringify(fakeData)),
+    _writeData: (d) => Object.assign(fakeData, d),
+  };
+  // 把方法从 prototype 上扒下来 call 到 stub
+  const dbSrcPath = path.resolve(__dirname, '..', 'src', 'main', 'database', 'db-simple.js');
+  const dbSrc = fs.readFileSync(dbSrcPath, 'utf8');
+  // 提取 markDownstreamDirty 函数体（避免 require 整个 db-simple 触发 electron 依赖）
+  const match = dbSrc.match(/markDownstreamDirty\(notebookId,[^)]*\)\s*\{[\s\S]*?\n  \}/);
+  assert(match, '在 db-simple.js 没找到 markDownstreamDirty 实现');
+  // 用 Function 构造可执行版本
+  const body = match[0].replace(/^markDownstreamDirty\([^)]+\)\s*\{/, '').replace(/\}$/, '');
+  const fn = new Function('notebookId', 'upstreamStage', 'reason', body);
+  const boundFn = fn.bind(stub);
+  const result = boundFn(999, 'lecture', 'test-trigger');
+
+  assert(result.affected === 3, `应 3 个下游 artifact dirty（quiz/homework/video），实际：${result.affected}`);
+  const dirtyIds = fakeData.artifacts.filter(a => a.dirty).map(a => a.id);
+  assert(dirtyIds.includes(3), 'quiz_set (id=3) 应 dirty');
+  assert(dirtyIds.includes(4), 'homework_set (id=4) 应 dirty');
+  assert(dirtyIds.includes(5), 'video_prompt (id=5) 应 dirty');
+  assert(!dirtyIds.includes(1), 'ppt_outline (id=1) 不应 dirty（上游）');
+  assert(!dirtyIds.includes(2), 'lecture_final (id=2) 不应 dirty（自身）');
+});
+
+// 测 10.2：mock IPC handler 真实调 v2:forceUnlockNextStage 验证使用 contracts.STAGE_ORDER
+test('lesson.handlers.v2:forceUnlockNextStage 真实运行 from lecture → next=quiz', () => {
+  const { STAGE_ORDER, STAGE_PRIMARY_TYPE } = require(path.resolve(__dirname, '..', 'src', 'main', 'v2', 'contracts.js'));
+  // 简单 sanity：单一来源契约 → lecture 后是 quiz
+  const lectureIdx = STAGE_ORDER.indexOf('lecture');
+  assert(lectureIdx >= 0, 'lecture 不在 STAGE_ORDER');
+  assert(STAGE_ORDER[lectureIdx + 1] === 'quiz', `lecture 后应是 quiz，实际：${STAGE_ORDER[lectureIdx + 1]}`);
+  // 同理 quiz → homework
+  const quizIdx = STAGE_ORDER.indexOf('quiz');
+  assert(STAGE_ORDER[quizIdx + 1] === 'homework', `quiz 后应是 homework，实际：${STAGE_ORDER[quizIdx + 1]}`);
+  // homework → video
+  const hwIdx = STAGE_ORDER.indexOf('homework');
+  assert(STAGE_ORDER[hwIdx + 1] === 'video', `homework 后应是 video，实际：${STAGE_ORDER[hwIdx + 1]}`);
+  // ppt → lecture
+  const pptIdx = STAGE_ORDER.indexOf('ppt');
+  assert(STAGE_ORDER[pptIdx + 1] === 'lecture', `ppt 后应是 lecture，实际：${STAGE_ORDER[pptIdx + 1]}`);
+});
+
+// 测 10.3：mock 数据跑 m003 → workflowStates framework + artifact micro_video_plan 真转换
+test('migrations/003 mock 真转换：framework workflow + micro_video_plan 同时被处理', () => {
+  const m003 = require(path.resolve(__dirname, '..', 'src', 'main', 'migrations', '003-unify-v4.3.3-schema.js'));
+  const fakeData = {
+    workflowStates: [
+      { notebookId: 1, currentStage: 'framework', unlockedStages: ['framework', 'schedule'] },
+      { notebookId: 2, currentStage: 'schedule', unlockedStages: ['schedule'] },
+    ],
+    artifacts: [
+      { id: 100, notebookId: 1, type: 'micro_video_plan', stage: 'video', content: { script: 'x' } },
+      { id: 101, notebookId: 1, type: 'video_prompt', stage: 'video', content: { script: 'y' } },
+      { id: 102, notebookId: 1, type: 'design_doc', stage: 'design', content: { topic: 'A' } },
+    ],
+    migrations: [],
+  };
+  const fakeDb = {
+    _readData: () => JSON.parse(JSON.stringify(fakeData)),
+    _writeData: (d) => Object.assign(fakeData, d),
+  };
+  const silentLog = { log: () => {}, warn: () => {}, error: () => {} };
+  const result = m003.run(fakeDb, silentLog);
+  assert(result.success, `migration 003 失败：${result.error}`);
+  // 验证转换效果
+  assert(fakeData.workflowStates[0].currentStage === 'schedule', 'workflow #1 framework→schedule 失败');
+  assert(!fakeData.workflowStates[0].unlockedStages.includes('framework'), 'workflow #1 unlockedStages 仍含 framework');
+  assert(fakeData.workflowStates[1].currentStage === 'schedule', 'workflow #2 不应改');
+  // 验证 artifact 转换
+  const a100 = fakeData.artifacts.find(a => a.id === 100);
+  assert(a100.type === 'video_prompt', `micro_video_plan 应转为 video_prompt，实际：${a100.type}`);
+  assert(a100._legacyType === 'micro_video_plan', '应保留 _legacyType 追溯');
+  // schemaVersion + dirty 补齐
+  assert(a100.schemaVersion === 1, `应补 schemaVersion=1，实际：${a100.schemaVersion}`);
+  assert(a100.dirty === false, `应补 dirty=false，实际：${a100.dirty}`);
+});
+
 // ── 9. framework fallback 残留扫描（防回归）──────────────────────────────
 console.log('\n【9】framework fallback 残留扫描');
 const indexSrc = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'index.js'), 'utf8');

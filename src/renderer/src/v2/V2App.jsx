@@ -987,8 +987,8 @@ function HomeView({ notebooks, onSelect, onCreateClick, onApiClick }) {
   return (
     <main className="v2-home">
       <section className="v2-home-hero">
-        <h2>驭课 Agent · 7 阶段工作流</h2>
-        <p>从教学进度表起步，依次完成 教学进度表 → 教学设计 → 教学课件 → 课堂讲稿 → 课堂互动+作业 → 微课视频 → 教学实施报告（v4.3.3 新工作流）。</p>
+        <h2>驭课 Agent · 8 阶段工作流</h2>
+        <p>从教学进度表起步，依次完成 教学进度表 → 教学设计 → 教学课件 → 课堂讲稿 → 在线测验 → 课后作业 → 微课视频 → 教学实施报告（v4.3.3 新工作流）。</p>
         <div className="v2-inline-actions">
           <button className="v2-btn v2-btn-primary" onClick={onCreateClick}>新建教学进度表</button>
           <button className="v2-btn v2-btn-secondary" onClick={onApiClick}>API 配置</button>
@@ -1148,12 +1148,20 @@ export default function V2App() {
     : ['schedule'];
   const busy = Boolean(busyKey);
   const currentRuntimeMeta = stageRuntimeMeta[currentStage] || { quality: null, operations: [] };
+  // v4.3.3 Codex Round 6 #2：补齐 8 阶段聚合（之前缺 schedule/design/quiz/homework/report
+  //   → 阶段卡片 confirmedCount 漏算，尤其 report 确认后会卡在"处理中"不显示"已完成"）
+  //   quiz/homework 没有独立 state（按需 IPC list 拉），暂用空数组占位，stageCards 自身从 artifacts 查
   const stageArtifacts = useMemo(() => ({
-    framework: frameworkArtifacts,
-    lecture: lectureArtifacts,
+    framework: frameworkArtifacts,       // legacy 兼容
+    schedule: scheduleArtifacts,
+    design: designArtifacts,
     ppt: pptArtifacts,
-    video: videoArtifacts
-  }), [frameworkArtifacts, lectureArtifacts, pptArtifacts, videoArtifacts]);
+    lecture: lectureArtifacts,
+    quiz: [],                             // v4.3.3 新增 · stageCards 内部会从 artifacts 取 quiz_set
+    homework: [],                         // v4.3.3 新增
+    video: videoArtifacts,
+    report: reportArtifacts,
+  }), [frameworkArtifacts, scheduleArtifacts, designArtifacts, pptArtifacts, lectureArtifacts, videoArtifacts, reportArtifacts]);
   const stageCards = useMemo(() => (
     STAGES.map((item) => ({
       ...item,
@@ -2988,7 +2996,7 @@ export default function V2App() {
     const res = await api.confirmReportV2({ notebookId: selectedNotebookId, artifactId: reportState.artifactId });
     if (!res?.success) { window.alert(`确认失败：${res?.error || '未知'}`); return; }
     setReportState((prev) => ({ ...prev, confirmed: true }));
-    setAssistantStatus('实施报告已确认归档。本课程的 6 阶段工作流完成。');
+    setAssistantStatus('实施报告已确认归档。本课程的 8 阶段工作流完成。');
     await loadNotebookContext(selectedNotebookId);
   };
   // Phase-9 报告 4 格式导出

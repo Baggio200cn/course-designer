@@ -46,11 +46,26 @@ if echo "$STAGED" | grep -q 'src/main/index\.js$'; then
   fi
 fi
 
-# ── H4：禁止删除 verify-*.js / e2e-*.js ──
-if echo "$DELETED" | grep -qE 'scripts/(verify|e2e)-.*\.js$'; then
-  err "H4 违反：禁止删除 verify / e2e 脚本（回归防护网）"
-  echo "$DELETED" | grep -E 'scripts/(verify|e2e)-.*\.js$' | sed 's/^/   - /'
-  echo "   详见 .claude/hard-constraints.md H4"
+# ── H4：禁止无迁移删除 verify-*.js / e2e-*.js ──
+#   v4.3.3 Codex Round 6 #4（2026-05-18）：允许移动到 scripts/legacy/，但禁止真正删除
+#   策略：检查 DELETED 中的脚本名是否在 ADDED 的 scripts/legacy/ 下出现（即视为迁移）
+if echo "$DELETED" | grep -qE 'scripts/(verify|e2e|stress-test|smoke)-.*\.js$'; then
+  DEL_SCRIPTS=$(echo "$DELETED" | grep -E 'scripts/(verify|e2e|stress-test|smoke)-.*\.js$')
+  ADDED_LEGACY=$(echo "$STAGED" | grep -E 'scripts/legacy/' || true)
+  UNMIGRATED=""
+  for script_path in $DEL_SCRIPTS; do
+    script_name=$(basename "$script_path")
+    # 检查同名是否在 legacy/ 下被新增
+    if ! echo "$ADDED_LEGACY" | grep -q "scripts/legacy/$script_name"; then
+      UNMIGRATED="$UNMIGRATED  - $script_path\n"
+    fi
+  done
+  if [ -n "$UNMIGRATED" ]; then
+    err "H4 违反：删除 verify/e2e/stress/smoke 脚本未配套迁移到 scripts/legacy/"
+    echo -e "$UNMIGRATED" | sed 's/^/   /'
+    echo "   策略：要么把脚本 git mv 到 scripts/legacy/，要么取消删除"
+    echo "   详见 .claude/hard-constraints.md H4 + scripts/legacy/README.md"
+  fi
 fi
 
 # ── H8：检查 package.json 新增 dependency ──
