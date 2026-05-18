@@ -268,6 +268,11 @@ function register(ipcMain, getDeps) {
         confirmedAt: new Date().toISOString(),
       });
 
+      // v4.3.3 Codex #5：上游 design 改 → 下游 ppt 起整链标 dirty
+      if (typeof db.markDownstreamDirty === 'function') {
+        try { db.markDownstreamDirty(notebookId, 'design', 'design-confirmed'); } catch (_) {}
+      }
+
       return {
         success: true,
         data: { notebookId, artifactId, confirmed: true },

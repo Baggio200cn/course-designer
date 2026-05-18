@@ -442,9 +442,10 @@ class DatabaseManager {
     const index = allData.workflowStates.findIndex((item) => item.notebookId === notebookId);
     const base = index === -1
       ? {
+          // v4.3.3 Codex #4：framework 已彻底退役，新 workflow 从 schedule 起步
           notebookId,
-          currentStage: 'framework',
-          unlockedStages: ['framework'],
+          currentStage: 'schedule',
+          unlockedStages: ['schedule'],
           currentArtifactRefs: {},
           updatedAt: new Date().toISOString()
         }
@@ -1504,7 +1505,8 @@ class DatabaseManager {
       activePptOutlineId: pickLatestForLesson('ppt_outline', 'ppt'),
       activeQuizId: pickLatestForLesson('quiz_set', 'quiz'),
       activeHomeworkId: pickLatestForLesson('homework_set', 'homework'),
-      activeMicroVideoId: pickLatestForLesson('micro_video_plan', 'video'),
+      // v4.3.3 Codex #3：统一为 video_prompt（实际生成 type），兜底兼容老 micro_video_plan
+      activeMicroVideoId: pickLatestForLesson('video_prompt', 'video') || pickLatestForLesson('micro_video_plan', 'video'),
     };
     return this.updateSessionContext(id, patch);
   }

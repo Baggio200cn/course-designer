@@ -159,7 +159,7 @@ function ensureNotebookWorkspaceState(notebook) {
     patch.workspacePath = ensuredPath;
   }
   if (!notebook.currentStage) {
-    patch.currentStage = 'framework';
+    patch.currentStage = 'schedule';  // v4.3.3 Codex #4: framework → schedule
   }
   if (Object.keys(patch).length > 0) {
     return db.updateNotebook(notebook.id, patch);
@@ -179,9 +179,11 @@ function getDefaultWorkflowState(notebookId) {
 }
 
 function normalizeUnlockedStages(stages) {
-  const base = ['framework'];
+  // v4.3.3 Codex #4：base 从 framework 改 schedule（起点 stage）
+  const base = ['schedule'];
   const extra = Array.isArray(stages) ? stages : [];
-  return Array.from(new Set([...base, ...extra.filter(Boolean)]));
+  // 同时滤掉残留的 'framework'（老数据兼容）
+  return Array.from(new Set([...base, ...extra.filter((s) => s && s !== 'framework')]));
 }
 
 function ensureWorkflowStateForNotebook(notebookId) {
@@ -343,7 +345,7 @@ function syncFrameworkArtifacts(notebookId, options = {}) {
     }
   });
   const nextWorkflow = syncWorkflowStageAvailability(notebookId, {
-    preferredStage: options.nextStage || workflow.currentStage || 'framework'
+    preferredStage: options.nextStage || workflow.currentStage || 'schedule'  // v4.3.3 Codex #4: framework → schedule
   });
   return {
     ...bundle,

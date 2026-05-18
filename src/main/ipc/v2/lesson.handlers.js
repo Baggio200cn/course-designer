@@ -922,8 +922,14 @@ function register(ipcMain, getDeps) {
       const notebookId = Number(updated?.notebookId || payload.notebookId);
       if (Number.isFinite(notebookId) && notebookId > 0 && typeof syncWorkflowStageAvailability === 'function') {
         try {
-          syncWorkflowStageAvailability(notebookId, { preferredStage: 'video' });
-          console.log(`[v2:lessonConfirm] 已触发 stage unlock 重算（notebookId=${notebookId}）`);
+          // v4.3.3 Codex #2：lesson confirm 后下游是 quiz（不是直接 video）
+          syncWorkflowStageAvailability(notebookId, { preferredStage: 'quiz' });
+          // v4.3.3 Codex #5：上游 lecture 改 → quiz/homework/video/report 标 dirty
+          if (typeof db.markDownstreamDirty === 'function') {
+            const r = db.markDownstreamDirty(notebookId, 'lecture', 'lecture-confirmed');
+            console.log(`[v2:lessonConfirm] 已标 ${r.affected} 个下游 artifact dirty`);
+          }
+          console.log(`[v2:lessonConfirm] 已触发 stage unlock 重算（notebookId=${notebookId}），preferredStage=quiz`);
         } catch (syncErr) {
           console.warn('[v2:lessonConfirm] syncWorkflowStageAvailability 失败:', syncErr.message);
         }
@@ -946,24 +952,15 @@ function register(ipcMain, getDeps) {
       const fromStage = String(payload.fromStage || '').trim();
       const reason = String(payload.reason || '老师手动强制解锁').trim();
       if (!Number.isFinite(notebookId) || notebookId <= 0) return { success: false, error: 'notebookId 无效' };
-      if (!fromStage) return { success: false, error: 'fromStage 必填（如 lecture / ppt）' };
-      const STAGE_ORDER = ['schedule', 'design', 'ppt', 'lecture', 'video', 'report'];
+      if (!fromStage) return { success: false, error: 'fromStage 必填（如 lecture / ppt / quiz / homework）' };
+      // v4.3.3 Codex #1：单一来源，引用 contracts.js（避免漂移）
+      const { STAGE_ORDER, STAGE_PRIMARY_TYPE } = require('../../v2/contracts');
       const idx = STAGE_ORDER.indexOf(fromStage);
       if (idx < 0 || idx >= STAGE_ORDER.length - 1) {
         return { success: false, error: `fromStage 无效或已是末尾阶段：${fromStage}` };
       }
       const nextStage = STAGE_ORDER[idx + 1];
-
-      // 1. 找到 fromStage 对应的"被需要的产物 type"——伪造一个 confirmed=true 的"占位 artifact"
-      //    用 force_unlock_marker 类型，不污染真实产物
-      const STAGE_PRODUCT = {
-        ppt: 'ppt_outline',
-        lecture: 'lecture_final',
-        design: 'design_doc',
-        video: 'video_prompt',
-        schedule: 'schedule_table',
-      };
-      const productType = STAGE_PRODUCT[fromStage];
+      const productType = STAGE_PRIMARY_TYPE[fromStage];
       if (!productType) return { success: false, error: `不支持强制解锁 from ${fromStage}` };
 
       // 2. 检查是否已有 confirmed 产物——如果有，无需写占位

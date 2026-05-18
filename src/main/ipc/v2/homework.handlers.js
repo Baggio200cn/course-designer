@@ -106,8 +106,14 @@ function register(ipcMain, getDeps) {
         confirmed: true, status: 'confirmed', confirmedAt: new Date().toISOString(),
       });
       const notebookId = Number(updated?.notebookId || payload.notebookId);
-      if (Number.isFinite(notebookId) && notebookId > 0 && typeof syncWorkflowStageAvailability === 'function') {
-        try { syncWorkflowStageAvailability(notebookId, { preferredStage: 'video' }); } catch (_) {}
+      if (Number.isFinite(notebookId) && notebookId > 0) {
+        if (typeof syncWorkflowStageAvailability === 'function') {
+          try { syncWorkflowStageAvailability(notebookId, { preferredStage: 'video' }); } catch (_) {}
+        }
+        // v4.3.3 Codex #5：上游 homework 改 → video/report 标 dirty
+        if (typeof db.markDownstreamDirty === 'function') {
+          try { db.markDownstreamDirty(notebookId, 'homework', 'homework-confirmed'); } catch (_) {}
+        }
       }
       return { success: true, data: { homeworkId, confirmed: true } };
     } catch (e) {

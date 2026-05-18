@@ -183,10 +183,37 @@ function validateStageTransition({ targetStage, artifacts = [] } = {}) {
   };
 }
 
+// ── 单一来源 · stage → 主要 artifact type（v4.3.3 Codex #1+#3 收口） ───────────
+//   force-unlock / workbench / sessionContext 都必须从这取，不再各自硬编码
+const STAGE_PRIMARY_TYPE = {
+  schedule: 'schedule_table',
+  design:   'design_doc',
+  ppt:      'ppt_outline',
+  lecture:  'lecture_final',
+  quiz:     'quiz_set',
+  homework: 'homework_set',
+  video:    'video_prompt',          // 注意：真实是 video_prompt，旧 micro_video_plan 已废
+  report:   'implementation_report',
+};
+
+// 中文标题（多处用，统一）
+const STAGE_TITLE = {
+  schedule: '教学进度表',
+  design:   '教学设计',
+  ppt:      '教学课件',
+  lecture:  '课堂讲稿',
+  quiz:     '在线测验',
+  homework: '课后作业',
+  video:    '微课视频',
+  report:   '教学实施报告',
+};
+
 module.exports = {
   STAGE_ORDER,
   STAGE_ORDER_LEGACY_V3,    // 暴露旧 4 阶段供需要的代码读（不要写入）
   STAGE_REQUIREMENTS,
+  STAGE_PRIMARY_TYPE,       // v4.3.3 新增 · 单一来源
+  STAGE_TITLE,              // v4.3.3 新增 · 单一来源
   computeUnlockedStages,
   validateStageTransition,
   isArtifactConfirmed,

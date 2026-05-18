@@ -120,8 +120,14 @@ function register(ipcMain, getDeps) {
         confirmed: true, status: 'confirmed', confirmedAt: new Date().toISOString(),
       });
       const notebookId = Number(updated?.notebookId || payload.notebookId);
-      if (Number.isFinite(notebookId) && notebookId > 0 && typeof syncWorkflowStageAvailability === 'function') {
-        try { syncWorkflowStageAvailability(notebookId, { preferredStage: 'homework' }); } catch (_) {}
+      if (Number.isFinite(notebookId) && notebookId > 0) {
+        if (typeof syncWorkflowStageAvailability === 'function') {
+          try { syncWorkflowStageAvailability(notebookId, { preferredStage: 'homework' }); } catch (_) {}
+        }
+        // v4.3.3 Codex #5：上游 quiz 改 → homework/video/report 标 dirty
+        if (typeof db.markDownstreamDirty === 'function') {
+          try { db.markDownstreamDirty(notebookId, 'quiz', 'quiz-confirmed'); } catch (_) {}
+        }
       }
       return { success: true, data: { quizId, confirmed: true } };
     } catch (e) {

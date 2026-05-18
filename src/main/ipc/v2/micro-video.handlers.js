@@ -145,6 +145,11 @@ function register(ipcMain, getDeps) {
         confirmedAt: new Date().toISOString(),
       });
 
+      // v4.3.3 Codex #5：上游 video 改 → 下游 report 标 dirty
+      if (typeof db.markDownstreamDirty === 'function') {
+        try { db.markDownstreamDirty(notebookId, 'video', 'video-confirmed'); } catch (_) {}
+      }
+
       return { success: true, data: { notebookId, artifactId, confirmed: true } };
     } catch (error) {
       console.error('[v2:confirmMicroVideo] 异常：', error);

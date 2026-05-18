@@ -557,7 +557,12 @@ function createV2Runtime(deps = {}) {
               lectureFinalId: finalArtifact.id
             }
           });
-          syncWorkflowStageAvailability?.(notebookId, { preferredStage: 'ppt' });
+          // v4.3.3 Codex #2：新流程 lecture → quiz（不再 lecture → ppt）
+          syncWorkflowStageAvailability?.(notebookId, { preferredStage: 'quiz' });
+          // v4.3.3 Codex #5：上游 lecture 改 → 下游 quiz/homework/video/report 标 dirty
+          if (typeof db.markDownstreamDirty === 'function') {
+            try { db.markDownstreamDirty(notebookId, 'lecture', 'lecture-confirmed'); } catch (_) {}
+          }
           patchCourseProject(notebookId, {
             dirty: false,
             dirtyReason: 'lecture-confirmed',
@@ -787,7 +792,12 @@ function createV2Runtime(deps = {}) {
               pptOutlineId: outlineArtifact.id
             }
           });
-          syncWorkflowStageAvailability?.(notebookId, { preferredStage: 'video' });
+          // v4.3.3 Codex #2：新流程 ppt → lecture（不再 ppt → video）
+          syncWorkflowStageAvailability?.(notebookId, { preferredStage: 'lecture' });
+          // v4.3.3 Codex #5：上游 ppt 改 → 下游 lecture/quiz/homework/video/report 全标 dirty
+          if (typeof db.markDownstreamDirty === 'function') {
+            try { db.markDownstreamDirty(notebookId, 'ppt', 'ppt-confirmed'); } catch (_) {}
+          }
           patchCourseProject(notebookId, {
             dirty: false,
             dirtyReason: 'ppt-confirmed',

@@ -234,9 +234,12 @@ function register(ipcMain, getDeps) {
         confirmedAt: new Date().toISOString(),
       });
 
-      // contracts.computeUnlockedStages 会基于新 artifact 自然解锁 design 阶段
-      // （前端拿 stageData 时会重新计算 unlockedStages）
+      // v4.3.3 Codex #5：上游 schedule 改 → 整条下游链全标 dirty
+      if (typeof db.markDownstreamDirty === 'function') {
+        try { db.markDownstreamDirty(notebookId, 'schedule', 'schedule-confirmed'); } catch (_) {}
+      }
 
+      // contracts.computeUnlockedStages 会基于新 artifact 自然解锁 design 阶段
       return {
         success: true,
         data: {

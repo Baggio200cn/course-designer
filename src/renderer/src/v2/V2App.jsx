@@ -1531,8 +1531,13 @@ export default function V2App() {
       window.alert('❌ 强制解锁 API 未注入 — 请完整重启 Electron（preload 已更新）');
       return;
     }
-    const STAGE_TITLE = { schedule: '教学进度表', design: '教学设计', ppt: '教学课件', lecture: '课堂讲稿', video: '微课视频', report: '教学实施报告' };
-    const STAGE_ORDER = ['schedule', 'design', 'ppt', 'lecture', 'video', 'report'];
+    // v4.3.3 Codex #1 · 8 阶段链（必须与 src/main/v2/contracts.js STAGE_ORDER 严格一致）
+    // TODO(D11.2)：通过 IPC 拉 contracts.STAGE_ORDER，避免前后端漂移
+    const STAGE_TITLE = {
+      schedule: '教学进度表', design: '教学设计', ppt: '教学课件', lecture: '课堂讲稿',
+      quiz: '在线测验', homework: '课后作业', video: '微课视频', report: '教学实施报告',
+    };
+    const STAGE_ORDER = ['schedule', 'design', 'ppt', 'lecture', 'quiz', 'homework', 'video', 'report'];
     const idx = STAGE_ORDER.indexOf(fromStage);
     if (idx < 0 || idx >= STAGE_ORDER.length - 1) {
       window.alert(`${STAGE_TITLE[fromStage] || fromStage} 已是最后阶段，无需解锁下游`);

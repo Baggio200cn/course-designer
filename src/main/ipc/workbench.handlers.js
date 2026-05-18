@@ -21,7 +21,9 @@ const STAGE_TYPES = {
   ppt: ['ppt_outline', 'ppt_page_image', 'ppt_export_file'],
   quiz: ['quiz_set'],            // v4.3.3
   homework: ['homework_set'],    // v4.3.3
-  video: ['micro_video_plan'],
+  // v4.3.3 Codex #3：实际生成的是 video_prompt（micro-video.handlers.js 第 67 行），
+  //   micro_video_plan 作为 legacy alias 兼容老数据，新数据全用 video_prompt
+  video: ['video_prompt', 'micro_video_plan'],
   report: ['implementation_report'],
 };
 
@@ -30,9 +32,9 @@ const STAGE_PRIMARY_TYPE = {
   design: 'design_doc',
   lecture: 'lecture_final',
   ppt: 'ppt_outline',
-  quiz: 'quiz_set',              // v4.3.3
-  homework: 'homework_set',      // v4.3.3
-  video: 'micro_video_plan',
+  quiz: 'quiz_set',
+  homework: 'homework_set',
+  video: 'video_prompt',         // v4.3.3 Codex #3：统一为真实产物 type
   report: 'implementation_report',
 };
 

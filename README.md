@@ -152,23 +152,33 @@ npm run build  # vite build && electron-builder → dist/驭课Agent-v4.3.3-setu
 ### 验证脚本（H4 必须保留）
 
 ```bash
-node scripts/verify-contracts-v6.js     # stage 转换契约校验（v4.3.3 应升级为 v8）
+# stage 转换契约校验（现仍叫 v6，v4.4.0 会升级为 v8 覆盖 quiz/homework）
+node scripts/verify-contracts-v6.js
 node scripts/verify-design-service.js
 node scripts/verify-ppt-images-pipeline.js
 node scripts/verify-schedule-service.js
+
+# v4.3.3 D15 真实 endpoint 烟雾测试（手动跑，需要 ARK API Key）
+ARK_API_KEY=xxx ARK_TEXT_ENDPOINT=ep-m-xxx npm run smoke
 ```
 
 ---
 
-## 已知技术债（Sprint B 处理）
+## Sprint B 状态（v4.3.3 已落地）
 
-| ID | 内容 | 优先级 |
+| ID | 内容 | 状态 |
 |---|---|---|
-| **D11** | V2App.jsx 4500 LOC 拆分（每 stage 拆独立 component + 数据源从 server bundle 单一来源）| 🟧 中 |
-| **D12** | sessionContext DB 真正落地（当前 SimpleDb 没实现，handlers 返回 null）| 🟥 高 |
-| **D13** | artifact schemaVersion + dirty 信号（上游改 → 下游标记 needs-recompute）| 🟧 中 |
-| **D14** | 删 framework 残留（contracts/runtime/lecture.handlers/workbench/V2App stub）| 🟢 低 |
-| **D15** | 真实 endpoint smoke test CI（按 H9：mock 通过 ≠ 完成）| 🟧 中 |
+| **D11** | useSession hook 抽出（`src/renderer/src/v2/useSession.js`）；V2App.jsx 全拆分留 D11.2 下个 sprint | ✅ 最小可行 |
+| **D12** | sessionContext DB 真落地：`db-simple.js` 加 4 个方法 + `data.sessions` 表 + smoke 6/6 通过 | ✅ |
+| **D13** | artifact schemaVersion + dirty 信号 + markDownstreamDirty + clearArtifactDirty + smoke 7/7 通过 + 接入所有 confirm 入口 | ✅ |
+| **D14** | V2App.jsx framework stub + handleSaveRawJson 删除；framework fallback 全清；runtime.js 老方法删除留 D14.2 | ✅ 部分 |
+| **D15** | `npm run smoke` 真实 ARK endpoint 烟雾测试脚本（scripts/smoke-test-real-ark.js） | ✅ |
+
+## 待处理（v4.4.0 D11.2 / D14.2）
+
+- D11.2: V2App.jsx 4500 LOC 完整拆分（router + StageRouter + per-stage component）
+- D14.2: 删 `runtime.js` 老 framework 方法（仍被 lecture.handlers v3 老路径引用）
+- 验证脚本升级：`verify-contracts-v6.js` → `verify-contracts-v8.js`（覆盖 quiz/homework + 8 阶段解锁链 + video type 一致性）
 
 详见 `.claude/notes/2026-05-18-audit-v4.3.0-to-4.3.3.md`
 
