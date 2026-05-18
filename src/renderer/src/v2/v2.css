@@ -622,8 +622,11 @@
   z-index: 1000;
 }
 
+/* 2026-05-15 老师反馈：弹窗大小不一致——规范化 modal 尺寸为 3 个 variant */
 .v2-modal {
-  width: min(760px, 92vw);
+  width: min(760px, 92vw);    /* 默认（md）：760px */
+  max-height: 88vh;
+  overflow-y: auto;
   background: #fff;
   border-radius: 18px;
   padding: 18px;
@@ -632,6 +635,9 @@
   gap: 10px;
   box-shadow: 0 28px 60px rgba(15, 23, 42, 0.16);
 }
+.v2-modal--sm { width: min(520px, 92vw); }   /* 简单确认 / 短表单 */
+.v2-modal--lg { width: min(960px, 94vw); }   /* 较大表单 / 多列 */
+.v2-modal--xl { width: min(1180px, 96vw); }  /* 复杂编辑 / 预览 */
 
 @media (max-width: 1560px) {
   .v2-stage-layout {
@@ -1418,11 +1424,8 @@ textarea, input, select {
   line-height: 1.4;
 }
 
-/* 创建表单的模态框滚动支持（内容增多后） */
-.v2-modal {
-  max-height: 88vh;
-  overflow-y: auto;
-}
+/* 2026-05-15 重构：max-height/overflow 已合并到主 .v2-modal 规则，此块保留兼容 */
+/* 创建表单的模态框滚动支持（内容增多后）— 已合并到主规则，无需重复 */
 
 /* AI 研究建议区域 */
 .v2-research-bar {
@@ -2627,6 +2630,12 @@ textarea, input, select {
 }
 .ppt-thumb-preview {
   width: 100%;
+  /* P6 修复（2026-05-18）：强制 16:9 + 最小高度 —— 修"预览图变 1 条线"bug
+     根因：SlidePreview baseCard 内部用 aspectRatio:16/9，但因子元素全 position:absolute
+     父容器 in-flow 高度为 0，aspect-ratio 没生效 → 高度塌缩成边框 */
+  aspect-ratio: 16 / 9;
+  min-height: 120px;
+  background: #f9fafb;
   pointer-events: none; /* 点击穿透到卡片 */
 }
 .ppt-thumb-label {
@@ -2882,7 +2891,28 @@ textarea, input, select {
   min-height: 80px;
 }
 
-/* "我的工作台"按钮特殊高亮（新功能引导）*/
+/* v4.3.0 D7（2026-05-18）：⑤ 正式稿编辑器 — 大窗 + 四方向拖拽
+   注意：width/height 不能由 React inline style 设置，否则每次 re-render 会覆盖用户拖拽 */
+.v2-final-script-editor {
+  width: 100%;
+  min-width: 320px;
+  height: 600px;            /* 初始高度，用户拖拽后会被覆盖 */
+  min-height: 400px;
+  max-height: 85vh;
+  resize: both !important;  /* ← 关键：覆盖任何全局 textarea { resize: none } */
+  overflow: auto;
+  font-size: 14px !important;  /* 覆盖全局 textarea 12px !important */
+  line-height: 1.75;
+  font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif !important;
+  padding: 14px 16px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fafafa;
+  display: block;
+  box-sizing: border-box;
+}
+
+/* "教师日志"按钮特殊高亮（新功能引导）*/
 .v2-topbar-actions .v2-btn.v2-btn-secondary:first-child {
   background: linear-gradient(135deg, rgba(124, 58, 237, 0.08), rgba(124, 58, 237, 0.02));
   border-color: rgba(124, 58, 237, 0.35);

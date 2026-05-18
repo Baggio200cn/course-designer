@@ -146,14 +146,31 @@ function normalizeDesign(parsed, ctx = {}) {
   inClassPhases.forEach((p) => {
     if (p && p.phase) phasesByName[String(p.phase).trim()] = p;
   });
-  const phases = REQUIRED_PHASES.map((requiredName) => {
-    const p = phasesByName[requiredName] || {};
+  // 2026-05-15 v4.1.4：phase 名称带前缀（启/授/创/展/拓）也认作合法（向后兼容老数据）
+  const phasesByPrefix = {};
+  inClassPhases.forEach((p) => {
+    if (!p?.phase) return;
+    const trimmed = String(p.phase).trim();
+    // 去掉前缀 "启·" "授·" "创·" "展·" "拓·" 取核心名
+    const core = trimmed.replace(/^[启授创展拓]\s*[·．\.]\s*/, '');
+    phasesByPrefix[core] = p;
+    phasesByPrefix[trimmed] = p;     // 也按原名映射
+  });
+  const phases = REQUIRED_PHASES.map((requiredName, idx) => {
+    const p = phasesByPrefix[requiredName] || phasesByName[requiredName] || {};
+    // 2026-05-15 v4.1.4：evaluation → designIntent 重命名，含向后兼容
+    //   优先用新字段 designIntent；老数据还在 evaluation 里 → 自动迁移
+    const designIntent = String(p.designIntent || p.evaluation || '').trim();
+    // 推荐 phase 名（带动作前缀，与 prompt 对齐）
+    const RECOMMENDED_PREFIXES = ['启', '授', '创', '展', '拓'];
+    const displayPhase = String(p.phase || '').trim() || `${RECOMMENDED_PREFIXES[idx] || ''}·${requiredName}`;
     return {
-      phase: requiredName,
+      phase: displayPhase,
       duration: String(p.duration || '—').trim(),
       teacherActions: String(p.teacherActions || '').trim(),
       studentActions: String(p.studentActions || '').trim(),
-      evaluation: String(p.evaluation || '').trim(),
+      designIntent,                                 // 2026-05-15 v4.1.4：新字段
+      evaluation: designIntent,                     // 2026-05-15 v4.1.4：保留 evaluation 别名供下游兼容
     };
   });
 
@@ -285,18 +302,24 @@ async function generate({ aiClient, courseName, lessonMeta = {}, scheduleData = 
   }
 
   const systemPrompt = loadPrompt('design');
-  const totalMin = hourCheck.total * 45;  // 1 学时 = 45 分钟
+  // T8 修复（2026-05-17）：1 学时 = N 分钟由老师按学校标准配置，无兜底
+  const minutesPerHour = Number(courseContext.minutesPerHour) || 0;
+  if (minutesPerHour <= 0) {
+    return { success: false, error: '缺少"1 学时分钟数"（minutesPerHour）。请在创建笔记本时填写学校标准（如 40 / 45 / 50）。' };
+  }
+  const totalMin = hourCheck.total * minutesPerHour;
 
   const ctxLines = [
     `课程名称：${courseName}`,
-    courseContext.school ? `学校：${courseContext.school}` : '学校：广州纺校',
+    courseContext.school ? `学校：${courseContext.school}` : '',   // T7：删硬编码"广州纺校"
     '',
     '## 【本节定位 - 重要】',
     `本节序号：第 ${lessonMeta.lessonNumber || 1} 节`,
     `本节主题：${lessonMeta.topic}`,
     lessonMeta.chapter ? `对应章节：${lessonMeta.chapter}` : '',
     lessonMeta.weekRange ? `周次范围：${lessonMeta.weekRange}` : '',
-    `本节学时：理论 ${hourCheck.theory} + 实践 ${hourCheck.practice} = ${hourCheck.total} 学时（约 ${totalMin} 分钟）`,
+    `本节学时：理论 ${hourCheck.theory} + 实践 ${hourCheck.practice} = ${hourCheck.total} 学时（按 1 学时 = ${minutesPerHour} 分钟换算 = ${totalMin} 分钟）`,
+    `⚠ 重要：本课程 1 学时 = ${minutesPerHour} 分钟（学校标准，不要假设 45 或 90）`,
     '⚠ 本设计仅覆盖【这一节课】，不要写整门课的内容！教学目标 / 重难点 / 5 段法 / 考核都围绕本节展开。',
     '',
     courseContext.totalHours ? `（整门课总学时：${courseContext.totalHours}，仅供参考；本设计只针对上面这一节）` : '',

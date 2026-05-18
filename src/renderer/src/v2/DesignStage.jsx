@@ -44,18 +44,36 @@ export default function DesignStage({
   currentLessonId,         // 当前选中的 design artifact id
   onSwitchLesson,          // (artifactId) => void
   onNewLesson,             // () => void
+  onDeleteLesson,          // 2026-05-15 老师反馈 4.7：(artifactId, lessonLabel) => void
+  onRestoreLesson,         // 2026-05-15 P2-4：(artifactId) => void
+  selectedNotebookId,      // 2026-05-15 P2-4：用于加载回收站
   courseTotalHours,        // 整门课总学时
   totalAccumulatedHours,   // 已确认节课累计学时
+  totalDesignedHours,      // 2026-05-15 v4.1.4：已设计（含未确认）累计学时
 }) {
   const design = designState.design || null;
   const [viewMode, setViewMode] = useState('text');  // text | edit | json
+  // 2026-05-15 P2-4：回收站状态
+  const [recycleBin, setRecycleBin] = useState([]);
+  const [showRecycleBin, setShowRecycleBin] = useState(false);
+  const loadRecycleBin = async () => {
+    if (!selectedNotebookId || typeof api?.listDeletedDesignLessonsV2 !== 'function') return;
+    try {
+      const r = await api.listDeletedDesignLessonsV2(selectedNotebookId);
+      if (r?.success) setRecycleBin(arr(r.data?.deleted));
+    } catch (_) { /* ignore */ }
+  };
+  useEffect(() => {
+    if (showRecycleBin) loadRecycleBin();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showRecycleBin, selectedNotebookId]);
 
   // 信息图选项（从后端 v2:getInfographicOptions 拉）
   const [infoOptions, setInfoOptions] = useState({ layouts: [], styles: [] });
   // Phase-9 C-2 修正：默认从 magazine_module 换成 design_overview（专为整门课设计）
-  // 老的 magazine_module 是单模块版式（HERO 硬编码"模块 N"），用在整门课会产生"模块 M01"错误标题
+  // 2026-05-16 v4.1.4 方案 B：默认风格从 design_overview 改成 magazine（统一杂志感皮肤）
   const [selectedLayout, setSelectedLayout] = useState('design_overview');
-  const [selectedStyle, setSelectedStyle]   = useState('design_overview');
+  const [selectedStyle, setSelectedStyle]   = useState('magazine');
   const [infographicBusy, setInfographicBusy] = useState(false);
   const [zoomedImage, setZoomedImage] = useState(null);  // 全屏放大查看的 artifact
   const [dirty, setDirty] = useState(false);             // 是否有未保存的修改
@@ -99,14 +117,30 @@ export default function DesignStage({
   //   - 本节视角：显示 content.viewLevel === 'lesson' 且 sourceDesignArtifactId === currentDesignArtifactId
   const allInfoArtifacts = arr(artifacts).filter((a) => a.type === 'design_infographic');
   const isViewCourseLevel = selectedLayout === 'design_overview';
+  // 2026-05-15 v4.1.4 T2：信息图丢失修复
+  //   原过滤器要求 sourceDesignArtifactId 严格匹配 designState.artifactId；
+  //   若 artifactId 缺失或不一致（譬如刚生成、未保存、design 被重生），就把图全过滤掉。
+  //   现改为多层兜底：① artifactId 精确匹配 ② lessonNumber 兜底 ③ topic 兜底
+  const currentLessonNumber = Number(designState?.design?.lessonMeta?.lessonNumber) || null;
+  const currentLessonTopic = String(designState?.design?.lessonMeta?.topic || '').trim();
   const infoArtifacts = allInfoArtifacts.filter((a) => {
     const c = a.content || {};
     const vl = c.viewLevel || (c.layout === 'design_overview' ? 'course' : 'lesson');
     if (isViewCourseLevel) return vl === 'course';
-    // 本节视角：sourceDesignArtifactId 匹配当前选中节课
     if (vl !== 'lesson') return false;
-    if (!c.sourceDesignArtifactId) return false;  // 老数据没关联的不显示
-    return Number(c.sourceDesignArtifactId) === Number(designState.artifactId);
+    // ① 精确匹配
+    if (c.sourceDesignArtifactId && designState.artifactId) {
+      if (Number(c.sourceDesignArtifactId) === Number(designState.artifactId)) return true;
+    }
+    // ② lessonNumber 兜底
+    if (currentLessonNumber && c.sourceLessonNumber) {
+      if (Number(c.sourceLessonNumber) === currentLessonNumber) return true;
+    }
+    // ③ topic 兜底
+    if (currentLessonTopic && c.sourceLessonTopic) {
+      if (String(c.sourceLessonTopic).trim() === currentLessonTopic) return true;
+    }
+    return false;
   });
   // 优先用 confirmed 的（老师标记过最终版）；没有则用最新的
   const finalInfo = infoArtifacts.find((a) => a.confirmed) || null;
@@ -231,8 +265,11 @@ export default function DesignStage({
           <div className="v2-panel-head">
             <h3>教学设计 · 按节课</h3>
             <span className="v2-hint">
-              累计已确认：<strong style={{ color: '#1e40af' }}>{totalAccumulatedHours || 0}</strong>
-              {' / '}{courseTotalHours || 72} 学时
+              {/* 2026-05-15 v4.1.4：双数字（已设计 + 已确认 + 目标）让老师立刻看到进展 */}
+              已设计 <strong style={{ color: '#16a34a' }}>{totalDesignedHours || 0}</strong>
+              {' · '}
+              已确认 <strong style={{ color: '#1e40af' }}>{totalAccumulatedHours || 0}</strong>
+              {' / '}目标 {courseTotalHours || 72} 学时
             </span>
           </div>
           {/* 节课 tab 条 */}
@@ -261,14 +298,91 @@ export default function DesignStage({
                 border: '1px dashed #1e40af', background: 'transparent', color: '#1e40af', fontWeight: 600,
               }}
             >+ 新建一节</button>
+            {/* 2026-05-15 老师反馈 4.7：删除当前选中节（仅在有当前节时显示） */}
+            {currentLessonId && onDeleteLesson ? (
+              <button
+                onClick={() => {
+                  const current = arr(lessons).find((l) => l.artifactId === currentLessonId);
+                  const label = current ? `第 ${current.lessonNumber} 节「${current.topic || '未命名'}」` : '本节';
+                  onDeleteLesson(currentLessonId, label);
+                }}
+                style={{
+                  padding: '6px 12px', fontSize: 13, borderRadius: 6, cursor: 'pointer',
+                  border: '1px solid #dc2626', background: '#fff', color: '#dc2626', fontWeight: 500,
+                  marginLeft: 'auto',
+                }}
+                title="删除当前选中节课的教学设计（软删除，可恢复）"
+              >🗑 删除本节</button>
+            ) : null}
+            {/* 2026-05-15 P2-4：回收站入口 */}
+            <button
+              onClick={() => setShowRecycleBin((v) => !v)}
+              style={{
+                padding: '6px 12px', fontSize: 13, borderRadius: 6, cursor: 'pointer',
+                border: '1px dashed #6b7280', background: showRecycleBin ? '#fef9c3' : 'white',
+                color: '#6b7280', marginLeft: currentLessonId && onDeleteLesson ? 4 : 'auto',
+              }}
+              title="查看已删除的节课设计（可恢复）"
+            >♻ 回收站{recycleBin.length > 0 ? ` (${recycleBin.length})` : ''}</button>
           </div>
+
+          {/* 2026-05-15 P2-4：回收站面板（展开） */}
+          {showRecycleBin ? (
+            <div style={{
+              marginTop: 12, padding: 12,
+              background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 6,
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <strong style={{ color: '#78350f' }}>♻ 已删除的节课设计</strong>
+                <button onClick={loadRecycleBin} className="v2-btn v2-btn-xs">🔄 刷新</button>
+              </div>
+              {recycleBin.length === 0 ? (
+                <p style={{ fontSize: 12, color: '#92400e', margin: 0 }}>回收站为空。删除后的节课会出现在这里，可以恢复。</p>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: '#fde68a', color: '#78350f' }}>
+                      <th style={{ padding: 6, border: '1px solid #fcd34d', width: 50 }}>节次</th>
+                      <th style={{ padding: 6, border: '1px solid #fcd34d' }}>主题</th>
+                      <th style={{ padding: 6, border: '1px solid #fcd34d', width: 60 }}>学时</th>
+                      <th style={{ padding: 6, border: '1px solid #fcd34d', width: 150 }}>删除时间</th>
+                      <th style={{ padding: 6, border: '1px solid #fcd34d', width: 80 }}>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recycleBin.map((l) => (
+                      <tr key={l.artifactId} style={{ background: 'white' }}>
+                        <td style={{ padding: 6, border: '1px solid #fde68a', textAlign: 'center' }}>{l.lessonNumber}</td>
+                        <td style={{ padding: 6, border: '1px solid #fde68a' }}>{l.topic || '（未命名）'}</td>
+                        <td style={{ padding: 6, border: '1px solid #fde68a', textAlign: 'center' }}>{l.totalHours}h</td>
+                        <td style={{ padding: 6, border: '1px solid #fde68a', color: '#6b7280', fontSize: 11 }}>
+                          {l.deletedAt ? new Date(l.deletedAt).toLocaleString('zh-CN', { hour12: false }).slice(0, 16) : '-'}
+                        </td>
+                        <td style={{ padding: 6, border: '1px solid #fde68a', textAlign: 'center' }}>
+                          <button
+                            onClick={async () => {
+                              if (typeof onRestoreLesson === 'function') {
+                                await onRestoreLesson(l.artifactId);
+                                await loadRecycleBin();
+                              }
+                            }}
+                            className="v2-btn v2-btn-xs v2-btn-primary"
+                          >🔄 恢复</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          ) : null}
         </div>
 
         {/* ═══ 本节基础信息（必填） ═══ */}
         <div className="v2-panel">
           <div className="v2-panel-head">
             <h3>本节基础信息（必填）</h3>
-            <span className="v2-hint">主题决定 AI 生成范围 · 学时 ≤ 4 · 理论/实践分配支持 0.5 步进</span>
+            <span className="v2-hint">主题决定 AI 生成范围 · 总学时按钮选择（1/2/3/4）· 理论/实践分配自动联动 0.5 步进</span>
           </div>
           <div className="v2-grid-two">
             <div>
@@ -281,14 +395,31 @@ export default function DesignStage({
             </div>
             <div>
               <label className="v2-label">从进度表拉取（可选）</label>
-              <select onChange={(e) => onPickFromSchedule(e.target.value)} value="" disabled={scheduleRows.length === 0}>
-                <option value="">{scheduleRows.length === 0 ? '（进度表未生成）' : '-- 选某一周次 --'}</option>
-                {scheduleRows.map((r) => (
-                  <option key={`w${r.week}-s${r.session}`} value={`w${r.week}-s${r.session}`}>
-                    第 {r.week} 周 · 第 {r.session} 课次：{r.content || '（无内容）'}
-                  </option>
-                ))}
-              </select>
+              {/* P6 修复（2026-05-18）：下拉值绑定到当前 lessonForm 反推的 rowKey
+                  老师反馈："选了第 17 周后，下拉又显回'选某一周次'，不知道选中了哪个" */}
+              {(() => {
+                // 反推 rowKey：用 lessonForm.weekRange ("第 17 周") + lessonNumber 找匹配的进度表行
+                const weekMatch = String(lessonForm.weekRange || '').match(/\d+/);
+                const weekNum = weekMatch ? Number(weekMatch[0]) : null;
+                const sessionNum = Number(lessonForm.lessonNumber) || null;
+                const currentRowKey = (weekNum && sessionNum)
+                  ? `w${weekNum}-s${sessionNum}`
+                  : '';
+                // 确保 rowKey 真在 scheduleRows 里（否则 select 报警告）
+                const validRowKey = scheduleRows.some(r => `w${r.week}-s${r.session}` === currentRowKey)
+                  ? currentRowKey
+                  : '';
+                return (
+                  <select onChange={(e) => onPickFromSchedule(e.target.value)} value={validRowKey} disabled={scheduleRows.length === 0}>
+                    <option value="">{scheduleRows.length === 0 ? '（进度表未生成）' : '-- 选某一周次 --'}</option>
+                    {scheduleRows.map((r) => (
+                      <option key={`w${r.week}-s${r.session}`} value={`w${r.week}-s${r.session}`}>
+                        第 {r.week} 周 · 第 {r.session} 课次：{r.content || '（无内容）'}
+                      </option>
+                    ))}
+                  </select>
+                );
+              })()}
             </div>
             <div>
               <label className="v2-label">关联章节</label>
@@ -306,25 +437,88 @@ export default function DesignStage({
                 placeholder="如：第 3 周"
               />
             </div>
+            {/* 2026-05-15 老师反馈 4.2：把"理论/实践学时自由输入"改为"先选总学时按钮 → 再分配理论/实践"。
+                上限 4 学时（>4 软提示"后续开发支持中"）。原 max=4 number input 改为按钮组 + 受控分配。 */}
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label className="v2-label">本节总学时（点击选择）</label>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                {[1, 2, 3, 4].map((h) => {
+                  const active = totalLessonHours === h;
+                  return (
+                    <button
+                      key={h}
+                      type="button"
+                      className={`v2-btn v2-btn-xs ${active ? 'v2-btn-primary' : 'v2-btn-secondary'}`}
+                      style={{ minWidth: 64 }}
+                      onClick={() => {
+                        // 选定总学时时，按当前比例缩放 theory/practice；首次默认对半分（实践向上取整）
+                        const prevT = Number(lessonForm.theoryHours) || 0;
+                        const prevP = Number(lessonForm.practiceHours) || 0;
+                        const prevTotal = prevT + prevP;
+                        let newT, newP;
+                        if (prevTotal > 0) {
+                          newT = +((prevT / prevTotal) * h).toFixed(1);
+                          // 0.5 步进取整
+                          newT = Math.round(newT * 2) / 2;
+                          newP = h - newT;
+                        } else {
+                          newT = Math.floor(h / 2 * 2) / 2;  // 偶数取一半
+                          newP = h - newT;
+                        }
+                        setDesignState((prev) => ({
+                          ...prev,
+                          lessonForm: { ...lessonForm, theoryHours: newT, practiceHours: newP },
+                        }));
+                      }}
+                    >{h} 学时</button>
+                  );
+                })}
+                <button
+                  type="button"
+                  className="v2-btn v2-btn-xs"
+                  style={{ minWidth: 96, opacity: 0.55, cursor: 'not-allowed' }}
+                  title="单节 >4 学时支持开发中——目前请拆为多节"
+                  onClick={() => window.alert('单节 > 4 学时支持开发中。\n\n建议：拆为多节（如 6 学时 = 4 学时 + 2 学时 两节），分别生成设计。')}
+                >&gt; 4 学时（开发中）</button>
+              </div>
+              <p className="v2-hint" style={{ marginTop: 6, fontSize: 12, color: '#6b7280' }}>
+                💡 单节建议 ≤ 4 学时（AI token 限制 + 中职单节课时长惯例）；理论/实践可在下方自由分配
+              </p>
+            </div>
             <div>
-              <label className="v2-label">理论学时</label>
+              <label className="v2-label">理论学时（0.5 步进）</label>
               <input
-                type="number" step="0.5" min="0" max="4"
+                type="number" step="0.5" min="0" max={totalLessonHours || 4}
                 value={lessonForm.theoryHours ?? 2}
-                onChange={(e) => updateLessonForm('theoryHours', Number(e.target.value))}
+                onChange={(e) => {
+                  const v = Number(e.target.value) || 0;
+                  // 自动让 practice = total - theory，保持总学时不变
+                  const newP = Math.max(0, totalLessonHours - v);
+                  setDesignState((prev) => ({
+                    ...prev,
+                    lessonForm: { ...lessonForm, theoryHours: v, practiceHours: newP },
+                  }));
+                }}
               />
             </div>
             <div>
-              <label className="v2-label">实践学时</label>
+              <label className="v2-label">实践学时（自动联动）</label>
               <input
-                type="number" step="0.5" min="0" max="4"
+                type="number" step="0.5" min="0" max={totalLessonHours || 4}
                 value={lessonForm.practiceHours ?? 2}
-                onChange={(e) => updateLessonForm('practiceHours', Number(e.target.value))}
+                onChange={(e) => {
+                  const v = Number(e.target.value) || 0;
+                  const newT = Math.max(0, totalLessonHours - v);
+                  setDesignState((prev) => ({
+                    ...prev,
+                    lessonForm: { ...lessonForm, practiceHours: v, theoryHours: newT },
+                  }));
+                }}
               />
             </div>
             <div>
-              <label className="v2-label">本节总学时（自动）</label>
-              <input value={`${totalLessonHours} 学时`} disabled />
+              <label className="v2-label">本节总学时（自动汇总）</label>
+              <input value={`${totalLessonHours} 学时`} disabled style={{ fontWeight: 600 }} />
             </div>
             <div>
               <label className="v2-label">第几节（自动从进度表带）</label>
@@ -365,7 +559,7 @@ export default function DesignStage({
               保存
             </button>
             <button className="v2-btn v2-btn-secondary" onClick={handleConfirmDesign} disabled={!designState.artifactId}>
-              {designState.confirmed ? '✓ 已确认' : '确认（解锁讲稿）'}
+              {designState.confirmed ? '✓ 已确认' : '确认（解锁 PPT）'}
             </button>
             <button className="v2-btn v2-btn-secondary" onClick={handleExportDesignWord} disabled={!designState.artifactId}>
               📄 导出 Word
@@ -389,7 +583,12 @@ export default function DesignStage({
         <div className="v2-panel">
           <div className="v2-panel-head">
             <h3>📊 教学设计信息图（AI 生成）</h3>
-            <span className="v2-hint">{infoOptions.layouts.length} 种布局 × {infoOptions.styles.length} 种风格</span>
+            <span className="v2-hint">
+              {infoOptions.layouts.length} 种骨架 × {infoOptions.styles.length} 种皮肤
+              <span style={{ marginLeft: 8, color: '#64748b' }}>
+                💡 骨架决定结构（卡片 / 思维导图 / 杂志 / 逻辑闭环），皮肤决定视觉气质（专业正式 / 杂志感）
+              </span>
+            </span>
           </div>
 
           {/* 视角提示卡 */}
@@ -403,7 +602,7 @@ export default function DesignStage({
               <>
                 <strong>📚 整门课视角</strong>
                 <span style={{ color: '#92400e' }}>
-                  ：基于全部 <strong>{lessonsCount}</strong> 节已设计课程聚合，给学校汇报用
+                  ：基于全部 <strong>{lessonsCount}</strong> 节已设计课程聚合，教学使用
                 </span>
                 {lessonsCount === 0 ? (
                   <div style={{ marginTop: 4, color: '#dc2626' }}>⚠ 还没有任何节课设计，请先在上方"按节课"区生成至少 1 节</div>
@@ -430,7 +629,7 @@ export default function DesignStage({
           <div className="v2-grid-two">
             <div>
               <label className="v2-label">
-                布局类型
+                骨架（结构）
                 <span className="v2-label-hint">📚 整门课 / 📖 本节 两类</span>
               </label>
               <select value={selectedLayout} onChange={(e) => setSelectedLayout(e.target.value)}>
@@ -451,7 +650,10 @@ export default function DesignStage({
               </select>
             </div>
             <div>
-              <label className="v2-label">视觉风格</label>
+              <label className="v2-label">
+                皮肤（视觉气质）
+                <span className="v2-label-hint">同一骨架可换不同皮肤</span>
+              </label>
               <select value={selectedStyle} onChange={(e) => setSelectedStyle(e.target.value)}>
                 {infoOptions.styles.map((s) => (
                   <option key={s.key} value={s.key}>{s.label}</option>
@@ -739,6 +941,15 @@ export default function DesignStage({
           title="教学设计产物"
           hint="design_doc / design_infographic / design_export_word"
           onOpenFile={(storagePath) => api.openResource(storagePath)}
+          onViewArtifact={(item) => {
+            // 教学设计 design_doc：直接载入编辑器查看（教学设计本来就是表单视图，无需独立 modal）
+            if (item.type === 'design_doc' && item.id && typeof onSwitchLesson === 'function') {
+              onSwitchLesson(item.id);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            } else if (item.storagePath) {
+              api.openResource(item.storagePath);
+            }
+          }}
           dt={dt}
         />
       </div>
@@ -886,19 +1097,62 @@ function DesignEditor({ design, updateField }) {
         </div>
       </Section>
 
-      <Section title="课中 5 段法 · 老师可改各段时长 / 教师活动 / 学生活动">
+      <Section title="课中 5 段法 · 老师可改各段时长 / 教师活动 / 学生活动 / 评价">
+        {/* 2026-05-15 老师反馈 4.5：原 1×4 横排太挤（每列只有 ~150px），改为 卡片标题 + 段时长一行 + 三列大块 textarea */}
         {arr(design.inClass?.phases).map((ph, i) => (
-          <div key={i} style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6, padding: 12, marginBottom: 8 }}>
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>{ph.phase}</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 1fr 1fr', gap: 8 }}>
-              <input placeholder="时长（如 10 分钟）" value={ph.duration || ''}
-                onChange={(e) => updateField(`inClass.phases.${i}.duration`, e.target.value)} />
-              <input placeholder="教师活动" value={ph.teacherActions || ''}
-                onChange={(e) => updateField(`inClass.phases.${i}.teacherActions`, e.target.value)} />
-              <input placeholder="学生活动" value={ph.studentActions || ''}
-                onChange={(e) => updateField(`inClass.phases.${i}.studentActions`, e.target.value)} />
-              <input placeholder="评价" value={ph.evaluation || ''}
-                onChange={(e) => updateField(`inClass.phases.${i}.evaluation`, e.target.value)} />
+          <div key={i} style={{
+            background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8,
+            padding: 14, marginBottom: 12,
+            boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+          }}>
+            {/* 第一行：段名 + 时长 */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, paddingBottom: 10, borderBottom: '1px dashed #e5e7eb' }}>
+              <div style={{
+                background: '#2563eb', color: '#fff', borderRadius: 4,
+                padding: '4px 10px', fontWeight: 600, fontSize: 13, minWidth: 32, textAlign: 'center',
+              }}>{i + 1}</div>
+              <div style={{ fontWeight: 600, fontSize: 15, flex: 1 }}>{ph.phase}</div>
+              <label style={{ fontSize: 12, color: '#6b7280' }}>段时长：</label>
+              <input
+                placeholder="如 10 分钟"
+                value={ph.duration || ''}
+                onChange={(e) => updateField(`inClass.phases.${i}.duration`, e.target.value)}
+                style={{ width: 130, padding: '4px 8px', fontSize: 13 }}
+              />
+            </div>
+            {/* 第二行：三列 textarea（教师活动 / 学生活动 / 设计意图）—— 2026-05-15 v4.1.4 高度加大、占位提示对齐周成锦样例 */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+              <div>
+                <label className="v2-label" style={{ fontSize: 12, marginBottom: 4 }}>👨‍🏫 教师活动</label>
+                <textarea
+                  placeholder="3-4 条编号要点，每条 60-180 字，含教师动作 + 引导话术 + 配合素材。例：1. 设疑激趣：'走进一家店铺...' 2. 概念初识：展示 POP 海报案例..."
+                  value={ph.teacherActions || ''}
+                  onChange={(e) => updateField(`inClass.phases.${i}.teacherActions`, e.target.value)}
+                  rows={5}
+                  style={{ width: '100%', minHeight: 100, fontSize: 13 }}
+                />
+              </div>
+              <div>
+                <label className="v2-label" style={{ fontSize: 12, marginBottom: 4 }}>🧑‍🎓 学生活动</label>
+                <textarea
+                  placeholder="3-4 条编号要点，每条 50-150 字。学生具体行为（看/想/答/做/写），与教师活动一一对应"
+                  value={ph.studentActions || ''}
+                  onChange={(e) => updateField(`inClass.phases.${i}.studentActions`, e.target.value)}
+                  rows={5}
+                  style={{ width: '100%', minHeight: 100, fontSize: 13 }}
+                />
+              </div>
+              <div>
+                {/* 2026-05-15 v4.1.4：原"评价方式"改为"设计意图"（按周成锦老师 POP 设计样例对齐） */}
+                <label className="v2-label" style={{ fontSize: 12, marginBottom: 4 }}>💡 设计意图</label>
+                <textarea
+                  placeholder="为什么这段要这样设计——含教育学原理 / 学习心理 / 职业能力培养逻辑（3-4 条编号要点，每条 80-200 字）"
+                  value={ph.designIntent ?? ph.evaluation ?? ''}
+                  onChange={(e) => updateField(`inClass.phases.${i}.designIntent`, e.target.value)}
+                  rows={5}
+                  style={{ width: '100%', minHeight: 100, fontSize: 13 }}
+                />
+              </div>
             </div>
           </div>
         ))}

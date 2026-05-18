@@ -21,7 +21,8 @@ const { resolveProviderConfig, createAiClientByConfig } = require('./api/provide
 const { normalizeErrorMessage } = require('./api/request-utils');
 const { auditNotebookQuality } = require('./quality/audit');
 const { auditLectureStyle } = require('./quality/style-audit');
-const { generateLectureABCDrafts } = require('./script/abc-generator');
+// P1.1 删除（2026-05-17）：A/B/C 三稿生成体系下线
+// const { generateLectureABCDrafts } = require('./script/abc-generator');   // 已删
 const { generateFormalLectureScript } = require('./script/formal-generator');
 const { normalizeTeacherStyleRubric } = require('./script/style-rubric');
 const { PromptTemplateService } = require('./services/prompt-template.service');
@@ -70,7 +71,8 @@ protocol.registerSchemesAsPrivileged([
     }
   }
 ]);
-app.setName('广纺织课程助手@liu');
+// 2026-05-16 v4.1.4：把旧品牌"广纺织课程助手@liu"统一改成"驭课 Agent"
+app.setName('驭课 Agent');
 
 // Detached Windows launches may have broken stdout/stderr pipes.
 if (process.stdout && typeof process.stdout.on === 'function') {
@@ -166,10 +168,11 @@ function ensureNotebookWorkspaceState(notebook) {
 }
 
 function getDefaultWorkflowState(notebookId) {
+  // v4.3.3 Sprint A.2（2026-05-18）：framework 已退役，起点改为 schedule
   return {
     notebookId,
-    currentStage: 'framework',
-    unlockedStages: ['framework'],
+    currentStage: 'schedule',
+    unlockedStages: ['schedule'],
     currentArtifactRefs: {},
     updatedAt: new Date().toISOString()
   };
@@ -709,6 +712,10 @@ function upsertStageArtifact(notebookId, options = {}) {
           confirmedAt: options.confirmed ? new Date().toISOString() : null
         }
   };
+  // 2026-05-17 v4.2.0：metadata 透传（之前漏，导致 ppt_outline 无节课信息，confirm 学时验证误报）
+  if (options.metadata && typeof options.metadata === 'object') {
+    patch.metadata = options.metadata;
+  }
   // Phase-6 M2.2：用户手动 save/confirm 时锁定（Q2 选项 C 的第二种触发场景）
   // 仅当显式 userInitiated=true 时才设 lockedByUser=true；
   // Agent 调用路径默认 userInitiated=false，让 db.updateArtifact 自行处理 confirmed 联动
@@ -777,21 +784,69 @@ function normalizeLectureStagePayload(payload = {}) {
 
 function buildLectureStageBundle(notebookId) {
   const base = buildV2BaseBundle(notebookId);
-  const draftsArtifact = resolveArtifactByRefOrLatest(notebookId, 'lectureDraftsId', 'lecture_drafts', 'lecture');
-  const finalArtifact = resolveArtifactByRefOrLatest(notebookId, 'lectureFinalId', 'lecture_final', 'lecture');
-  const draftsContent = asPlainObject(draftsArtifact?.content);
-  const finalContent = asPlainObject(finalArtifact?.content);
-  const lectureData = {
-    instruction: String(finalContent.instruction || draftsContent.instruction || ''),
-    drafts: {
-      a: String(asPlainObject(draftsContent.drafts).a || ''),
-      b: String(asPlainObject(draftsContent.drafts).b || ''),
-      c: String(asPlainObject(draftsContent.drafts).c || '')
-    },
-    selectedDraft: String(finalContent.selectedDraft || draftsContent.selectedDraft || 'a'),
-    finalScript: String(finalContent.finalScript || ''),
-    artifacts: db.listArtifacts({ notebookId, stage: 'lecture' })
-  };
+  // D9.1（2026-05-18）：per-lesson 聚合模式
+  //   旧 BUG：只读最新 1 份 lecture_final，把 4 学时一节课的 5210 字当成整门 72 学时校验 → 误报"字数严重偏少"
+  //   新逻辑：把所有 per-lesson artifact（metadata.lessonNumber 标记）聚合成 1 个"门级讲稿"喂给校验器
+  const allLectureArtifacts = db.listArtifacts({ notebookId, stage: 'lecture' }) || [];
+  const perLessonArtifacts = allLectureArtifacts.filter((a) =>
+    a.type === 'lecture_final' && Number(a.metadata?.lessonNumber) > 0
+  );
+
+  let lectureData;
+  if (perLessonArtifacts.length > 0) {
+    // ── per-lesson 聚合模式 ──
+    const sortedLessons = perLessonArtifacts
+      .slice()
+      .sort((a, b) => (Number(a.metadata?.lessonNumber) || 0) - (Number(b.metadata?.lessonNumber) || 0));
+    const concatScripts = sortedLessons
+      .map((a) => String(a.content?.finalScript || a.content?.draftScript || ''))
+      .filter(Boolean)
+      .join('\n\n=== 节课分隔 ===\n\n');
+    const totalLessonHours = sortedLessons.reduce(
+      (s, a) => s + (Number(a.metadata?.theoryHours) || 0) + (Number(a.metadata?.practiceHours) || 0),
+      0
+    );
+    const confirmedLessons = sortedLessons.filter((a) => a.confirmed === true);
+    const confirmedHours = confirmedLessons.reduce(
+      (s, a) => s + (Number(a.metadata?.theoryHours) || 0) + (Number(a.metadata?.practiceHours) || 0),
+      0
+    );
+    lectureData = {
+      instruction: '',
+      drafts: { a: '', b: '', c: '' },     // 新流程不再有 ABC，留空
+      selectedDraft: 'a',
+      finalScript: concatScripts,           // 聚合所有节稿
+      artifacts: allLectureArtifacts,
+      // 给 stage 卡片显示用：per-lesson 聚合统计
+      perLessonMode: true,
+      perLessonStats: {
+        totalLessons: sortedLessons.length,
+        confirmedLessons: confirmedLessons.length,
+        totalLessonHours,
+        confirmedHours,
+        sumScriptChars: concatScripts.length,
+        notebookTotalHours: Number(base.notebook?.totalHours) || 0,
+      },
+    };
+  } else {
+    // ── 老的 single-lecture 模式（向后兼容）──
+    const draftsArtifact = resolveArtifactByRefOrLatest(notebookId, 'lectureDraftsId', 'lecture_drafts', 'lecture');
+    const finalArtifact = resolveArtifactByRefOrLatest(notebookId, 'lectureFinalId', 'lecture_final', 'lecture');
+    const draftsContent = asPlainObject(draftsArtifact?.content);
+    const finalContent = asPlainObject(finalArtifact?.content);
+    lectureData = {
+      instruction: String(finalContent.instruction || draftsContent.instruction || ''),
+      drafts: {
+        a: String(asPlainObject(draftsContent.drafts).a || ''),
+        b: String(asPlainObject(draftsContent.drafts).b || ''),
+        c: String(asPlainObject(draftsContent.drafts).c || '')
+      },
+      selectedDraft: String(finalContent.selectedDraft || draftsContent.selectedDraft || 'a'),
+      finalScript: String(finalContent.finalScript || ''),
+      artifacts: allLectureArtifacts,
+      perLessonMode: false,
+    };
+  }
   return {
     ...base,
     artifacts: lectureData.artifacts,
@@ -822,7 +877,25 @@ function normalizePptPage(page = {}, index = 0) {
     imageQuality: String(page.imageQuality || 'low'),
     referenceImagePath: String(page.referenceImagePath || ''),
     referenceImageUrl: String(page.referenceImageUrl || ''),
-    referenceImageName: String(page.referenceImageName || '')
+    referenceImageName: String(page.referenceImageName || ''),
+    // 2026-05-16 v4.1.4 Phase 2：AI 自主排版三字段
+    layoutType: String(page.layoutType || ''),
+    accentColor: String(page.accentColor || ''),
+    themeMode: String(page.themeMode || ''),
+    // 速记本 / 互动 / 数据点 / 案例（V2 pipeline 输出，保留）
+    speakerNotes: String(page.speakerNotes || ''),
+    dataPoint: String(page.dataPoint || ''),
+    caseExample: String(page.caseExample || ''),
+    interactionPrompt: String(page.interactionPrompt || ''),
+    sourceSection: String(page.sourceSection || ''),
+    // 🔥 2026-05-16 v4.1.4 真相揭露 bug 修复：
+    //   动态练习页字段必须保留！否则 7 道题被 normalizer 整个剥掉，
+    //   顶部"练习题 (0 · 失败)"和卡片"共 7 题"打架。
+    exercises: Array.isArray(page.exercises) ? page.exercises : [],
+    exerciseHtml: String(page.exerciseHtml || ''),
+    // 失败标记（Q4 fix 时 placeholder page 带的字段，也要保留）
+    _generationFailed: Boolean(page._generationFailed),
+    _failureReason: String(page._failureReason || '')
   };
 }
 
@@ -831,8 +904,30 @@ function normalizePptStagePayload(payload = {}) {
     ? payload.pptPages.map((item, index) => normalizePptPage(item, index))
     : [];
   const selectedPageId = String(payload.selectedPageId || pptPages[0]?.id || '');
+  // 2026-05-16 v4.1.4 Phase 2：保留整门课主色（AI 推断或老师指定）
+  const mainAccentColor = String(payload.mainAccentColor || '').trim();
+  // 2026-05-16 v4.1.4 Q2-②：保留 imageQuality 设置（low / medium / high）
+  const imageQuality = ['low', 'medium', 'high'].includes(payload.imageQuality)
+    ? payload.imageQuality
+    : 'medium';
+  // 2026-05-16 v4.1.4 真 P2：PPT 节课上下文（生成 PPT 时绑定的节课信息）
+  //   用于 confirm 阶段按节课学时校验页数门槛，而不是用整门课 36 学时
+  const lessonContext = payload.lessonContext && typeof payload.lessonContext === 'object'
+    ? {
+        lessonId: Number(payload.lessonContext.lessonId) || null,
+        lessonNumber: Number(payload.lessonContext.lessonNumber) || 0,
+        topic: String(payload.lessonContext.topic || ''),
+        chapter: String(payload.lessonContext.chapter || ''),
+        theoryHours: Number(payload.lessonContext.theoryHours) || 0,
+        practiceHours: Number(payload.lessonContext.practiceHours) || 0,
+        totalHours: Number(payload.lessonContext.totalHours) || 0,
+      }
+    : null;
   return {
     templateKey: PPT_TEMPLATE_PRESETS[payload.templateKey] ? String(payload.templateKey) : 'pro_minimalist',
+    mainAccentColor,
+    imageQuality,
+    lessonContext,
     pptOutline: String(payload.pptOutline || ''),
     pptPages,
     selectedPageId
@@ -885,18 +980,66 @@ function upsertPptPageImageArtifacts(notebookId, pptPages, options = {}) {
 
 function buildPptStageBundle(notebookId) {
   const base = buildV2BaseBundle(notebookId);
-  const outlineArtifact = resolveArtifactByRefOrLatest(notebookId, 'pptOutlineId', 'ppt_outline', 'ppt');
-  const outlineContent = asPlainObject(outlineArtifact?.content);
-  const pptPages = Array.isArray(outlineContent.pptPages)
-    ? outlineContent.pptPages.map((item, index) => normalizePptPage(item, index))
-    : [];
-  const pptData = {
-    templateKey: String(outlineContent.templateKey || 'pro_minimalist'),
-    pptOutline: String(outlineContent.pptOutline || ''),
-    pptPages,
-    selectedPageId: String(outlineContent.selectedPageId || pptPages[0]?.id || ''),
-    artifacts: db.listArtifacts({ notebookId, stage: 'ppt' })
-  };
+  // D9.2（2026-05-18）：per-lesson 聚合模式
+  //   旧 BUG：只读 1 份 PPT artifact，把单节 16 页当成整门 72 学时（建议 30-40 页）→ 误报"页数偏少"
+  //   新逻辑：聚合所有 per-lesson PPT 的 pages 算总数
+  const allPptArtifacts = db.listArtifacts({ notebookId, stage: 'ppt' }) || [];
+  const perLessonPpts = allPptArtifacts.filter((a) =>
+    a.type === 'ppt_outline' && Number(a.metadata?.lessonNumber) > 0
+  );
+
+  let pptData;
+  if (perLessonPpts.length > 0) {
+    // ── per-lesson 聚合模式 ──
+    const sortedPpts = perLessonPpts
+      .slice()
+      .sort((a, b) => (Number(a.metadata?.lessonNumber) || 0) - (Number(b.metadata?.lessonNumber) || 0));
+    const aggregatedPages = [];
+    sortedPpts.forEach((a) => {
+      const pages = Array.isArray(a.content?.pages) ? a.content.pages : (Array.isArray(a.content?.pptPages) ? a.content.pptPages : []);
+      pages.forEach((p, i) => aggregatedPages.push(normalizePptPage(p, aggregatedPages.length)));
+    });
+    const totalLessonHours = sortedPpts.reduce(
+      (s, a) => s + (Number(a.metadata?.theoryHours) || 0) + (Number(a.metadata?.practiceHours) || 0),
+      0
+    );
+    const confirmedPpts = sortedPpts.filter((a) => a.confirmed === true);
+    const confirmedHours = confirmedPpts.reduce(
+      (s, a) => s + (Number(a.metadata?.theoryHours) || 0) + (Number(a.metadata?.practiceHours) || 0),
+      0
+    );
+    pptData = {
+      templateKey: String(sortedPpts[0]?.content?.templateKey || 'pro_minimalist'),
+      pptOutline: '',
+      pptPages: aggregatedPages,
+      selectedPageId: aggregatedPages[0]?.id || '',
+      artifacts: allPptArtifacts,
+      perLessonMode: true,
+      perLessonStats: {
+        totalLessons: sortedPpts.length,
+        confirmedLessons: confirmedPpts.length,
+        totalLessonHours,
+        confirmedHours,
+        totalPages: aggregatedPages.length,
+        notebookTotalHours: Number(base.notebook?.totalHours) || 0,
+      },
+    };
+  } else {
+    // ── 老的 single-ppt 模式（向后兼容）──
+    const outlineArtifact = resolveArtifactByRefOrLatest(notebookId, 'pptOutlineId', 'ppt_outline', 'ppt');
+    const outlineContent = asPlainObject(outlineArtifact?.content);
+    const pptPages = Array.isArray(outlineContent.pptPages)
+      ? outlineContent.pptPages.map((item, index) => normalizePptPage(item, index))
+      : [];
+    pptData = {
+      templateKey: String(outlineContent.templateKey || 'pro_minimalist'),
+      pptOutline: String(outlineContent.pptOutline || ''),
+      pptPages,
+      selectedPageId: String(outlineContent.selectedPageId || pptPages[0]?.id || ''),
+      artifacts: allPptArtifacts,
+      perLessonMode: false,
+    };
+  }
   return {
     ...base,
     artifacts: pptData.artifacts,
@@ -1148,7 +1291,7 @@ const normalizeScheduleInput = (schedule) => {
 };
 function createWindow() {
   mainWindow = new BrowserWindow({
-    title: '驭课 Agent v4.0.0',
+    title: '驭课 Agent v4.3.3',   // 2026-05-18 v4.3.3 八阶段 + Step 5/6 + 教师日志
     width: 1400,
     height: 900,
     minWidth: 1200,
@@ -1176,6 +1319,33 @@ function createWindow() {
   });
 }
 app.whenReady().then(() => {
+  // ── v4.3.3 数据迁移（P0-1 修复） ────────────────────────────────────
+  //   每次启动扫一遍 src/main/migrations/*.js，识别老版本"丢失"的 artifact
+  try {
+    const fs = require('fs');
+    const migrationDir = path.join(__dirname, 'migrations');
+    if (fs.existsSync(migrationDir)) {
+      const migrationFiles = fs.readdirSync(migrationDir)
+        .filter((f) => f.endsWith('.js'))
+        .sort();
+      migrationFiles.forEach((f) => {
+        try {
+          const m = require(path.join(migrationDir, f));
+          if (typeof m.run === 'function') {
+            const result = m.run(db, console);
+            if (result?.recoverableCount > 0) {
+              console.warn(`[migrations] ⚠ ${result.recoverableCount} 个 artifact 可恢复，教师日志页可查看`);
+            }
+          }
+        } catch (e) {
+          console.error(`[migrations] ${f} 加载失败:`, e.message);
+        }
+      });
+    }
+  } catch (e) {
+    console.error('[migrations] 整体加载失败（不阻塞 app）:', e.message);
+  }
+
   protocol.handle('local-img', async (request) => {
     try {
       const urlObj = new URL(String(request.url || ''));
@@ -1305,8 +1475,7 @@ const getDeps = () => ({
   imageVersionService,
   imageGeneratorService,
   videoGeneratorService,
-  // Phase-7.7 P0-E 修复：补缺的 2 个依赖，让 agent.handlers 的 buildAgentFrameworkInfographicHelper 能正确注入
-  // 之前缺这 2 个 → capability gating 拦下 generate_framework_infographic 动作 → 信息图永远不生成
+  // P1.1f（2026-05-17）：renderHtmlToPngBuffer / inferInfocardStyle 原为 agent.handlers 注入，agent 已下线，保留依赖供 stage infographic 用
   renderHtmlToPngBuffer,
   inferInfocardStyle,
   // prompt group

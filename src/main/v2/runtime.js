@@ -389,7 +389,14 @@ function createV2Runtime(deps = {}) {
       return respond(async () => {
         const safeNotebookId = Number(notebookId);
         const bundle = buildLectureStageBundle(safeNotebookId);
-        const quality = validateLectureStage(bundle.lectureData, { requireFinal: false, totalHours: Number(bundle.notebook?.totalHours) || 1 });
+        // D9.1（2026-05-18）：per-lesson 模式下用 confirmedHours 作为分母
+        //   不是 notebook.totalHours（72），而是已确认节课累计学时
+        //   这样"4 学时一节" → 期望字数 8800-12000，不再误报 158400 不足
+        const lectureData = bundle.lectureData;
+        const effectiveHours = lectureData.perLessonMode
+          ? Math.max(1, lectureData.perLessonStats?.confirmedHours || lectureData.perLessonStats?.totalLessonHours || 1)
+          : Number(bundle.notebook?.totalHours) || 1;
+        const quality = validateLectureStage(lectureData, { requireFinal: false, totalHours: effectiveHours });
         return {
           success: true,
           data: attachRuntimeMeta(bundle, safeNotebookId, 'lecture', quality)
@@ -604,7 +611,13 @@ function createV2Runtime(deps = {}) {
       return respond(async () => {
         const safeNotebookId = Number(notebookId);
         const bundle = buildPptStageBundle(safeNotebookId);
-        const quality = validatePptStage(bundle.pptData, { requirePages: false });
+        // D9.2（2026-05-18）：per-lesson 模式下用确认节累计学时作为页数门槛分母
+        //   旧 bug：16 页单节 PPT vs 72 学时建议 30-40 页 → 误报"页数偏少"
+        const pptData = bundle.pptData;
+        const effectiveHours = pptData.perLessonMode
+          ? Math.max(1, pptData.perLessonStats?.confirmedHours || pptData.perLessonStats?.totalLessonHours || 1)
+          : 0;
+        const quality = validatePptStage(pptData, { requirePages: false, totalHours: effectiveHours });
         return {
           success: true,
           data: attachRuntimeMeta(bundle, safeNotebookId, 'ppt', quality)
@@ -627,6 +640,13 @@ function createV2Runtime(deps = {}) {
           const normalized = normalizePptStagePayload(payload);
           const quality = validatePptStage(normalized, { requirePages: false });
 
+          // 2026-05-17 v4.2.0 Bug 修复：把 lessonContext 持久化到 metadata
+          //   旧 bug：savePptStage 不存 metadata.lessonContext，老师重启后 confirmPptStage 找不到节课学时，回退用 72 学时（整门课）验证 → "页数严重不足"误报
+          //   修法：从 payload.lessonContext 提取节课信息 → 写入 artifact.metadata
+          const _lcPayload = payload?.lessonContext || {};
+          const _theoryH = Number(_lcPayload.theoryHours) || 0;
+          const _practiceH = Number(_lcPayload.practiceHours) || 0;
+          const _totalH = Number(_lcPayload.totalHours) || (_theoryH + _practiceH);
           const outlineArtifact = upsertStageArtifact(notebookId, {
             refKey: 'pptOutlineId',
             type: 'ppt_outline',
@@ -639,7 +659,19 @@ function createV2Runtime(deps = {}) {
             previewText: normalized.pptOutline.slice(0, 120),
             quality,
             reviewReasons: quality.reviewReasons,
-            userInitiated  // Phase-6 M2.2
+            userInitiated,  // Phase-6 M2.2
+            // 2026-05-17 v4.2.0：节课信息持久化到 metadata（供 confirmPpt 学时验证 fallback）
+            metadata: _lcPayload && (_lcPayload.lessonNumber || _totalH > 0) ? {
+              lessonNumber: _lcPayload.lessonNumber || 0,
+              topic: _lcPayload.topic || '',
+              chapter: _lcPayload.chapter || '',
+              theoryHours: _theoryH,
+              practiceHours: _practiceH,
+              totalHours: _totalH,
+              designId: _lcPayload.designId || null,
+              lessonId: _lcPayload.lessonId || null,
+              lessonContext: _lcPayload,
+            } : undefined,
           });
           const pageArtifacts = upsertPptPageImageArtifacts(notebookId, normalized.pptPages, {
             status: 'edited',
@@ -685,10 +717,41 @@ function createV2Runtime(deps = {}) {
           const notebook = ensureNotebookWorkspaceState(db.getNotebookById(notebookId));
           if (!notebook) throw new Error('Notebook not found');
           const normalized = normalizePptStagePayload(payload);
-          // Phase-7.7 P1-C：PPT confirm 时把 totalHours 传给 quality 让它校验页数门槛
+          // 2026-05-16 v4.1.4 真 P2 修复：PPT 阶段已经按 per-lesson 模式生成（3-4 学时单节课）
+          //   但 confirm 校验仍用 notebook.totalHours = 36 → 误判"页数严重不足"
+          //   修法：优先用 payload 里的 lessonContext.totalHours（节课学时）
+          //   兜底用 notebook.totalHours（兼容整门课模式的旧数据）
+          // 2026-05-17 v4.2.0 加固：payload 没传 lessonContext 时（如老师重启 Electron 后直接点确认），
+          //   从 db 最新 ppt_outline / design_doc artifact 的 metadata 反推节课学时
+          let lessonHours = Number(payload?.lessonContext?.totalHours) || 0;
+          let fallbackSource = '';
+          if (lessonHours === 0) {
+            // 兜底 1：会话上下文 activeDesignArtifactId
+            const session = typeof db.getSessionContext === 'function' ? db.getSessionContext(notebookId) : null;
+            const designId = session?.activeDesignArtifactId;
+            const designArt = designId && typeof db.getArtifactById === 'function' ? db.getArtifactById(designId) : null;
+            const dlm = designArt?.metadata || {};
+            const dh = (Number(dlm.theoryHours) || 0) + (Number(dlm.practiceHours) || 0);
+            if (dh > 0) { lessonHours = dh; fallbackSource = `session.activeDesign #${designId}`; }
+          }
+          if (lessonHours === 0) {
+            // 兜底 2：最新 ppt_outline artifact 的 metadata.lessonContext
+            const latest = typeof db.getLatestArtifact === 'function' ? db.getLatestArtifact(notebookId, 'ppt_outline', 'ppt') : null;
+            const meta = latest?.metadata || {};
+            const ph = Number(meta.lessonContext?.totalHours) || ((Number(meta.theoryHours) || 0) + (Number(meta.practiceHours) || 0));
+            if (ph > 0) { lessonHours = ph; fallbackSource = `latest ppt_outline #${latest?.id}`; }
+          }
+          const validationTotalHours = lessonHours > 0
+            ? lessonHours
+            : (Number(notebook.totalHours) || 1);
+          if (lessonHours > 0) {
+            console.log(`[v2:confirmPptStage] 按节课模式校验：${lessonHours} 学时${fallbackSource ? ` (兜底自 ${fallbackSource})` : ' (来自 payload.lessonContext)'}（不是整门课的 ${notebook.totalHours}）`);
+          } else {
+            console.warn(`[v2:confirmPptStage] ⚠ 无 lessonContext 且无 design/ppt artifact 兜底，回退用整门课 ${notebook.totalHours} 学时验证（可能触发"页数严重不足"误报）`);
+          }
           const quality = validatePptStage(normalized, {
             requirePages: true,
-            totalHours: Number(notebook.totalHours) || 1,
+            totalHours: validationTotalHours,
           });
           // Phase-6 M3.2：用 conflict-policy 裁决
           const conflictDecision = resolveConflict(CONFLICT_TYPE.QUALITY_VS_USER_ACCEPT, {

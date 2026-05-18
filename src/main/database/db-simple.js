@@ -68,6 +68,27 @@ class DatabaseManager {
     this.initDatabase();
   }
 
+  // 2026-05-17 v4.2.0：内置默认 API 配置（火山引擎 Ark，老师装包即可用）
+  _defaultArkSettings() {
+    const apiKey = '3cfb5c8c-4c94-43f7-895d-ec89fdb228cc';
+    const apiKeyB64 = Buffer.from(apiKey, 'utf8').toString('base64');
+    const ts = new Date().toISOString();
+    return {
+      api_key_ark: apiKeyB64,
+      api_key_ark_encrypted: true,
+      api_key_ark_updated_at: ts,
+      api_key_ark_endpoint_text: 'ep-m-20260327105914-k629s',
+      api_key_ark_endpoint_text_updated_at: ts,
+      api_key_ark_endpoint_lecture_formal: 'ep-20260429110329-cgh4p',
+      api_key_ark_endpoint_lecture_formal_updated_at: ts,
+      api_key_ark_endpoint_image: 'ep-20260302101322-8p5dc',
+      api_key_ark_endpoint_image_updated_at: ts,
+      api_key_ark_endpoint_video: 'ep-m-20260405031807-s6htf',
+      api_key_ark_endpoint_video_updated_at: ts,
+      api_key_ark_model_text_default: 'doubao_text',
+    };
+  }
+
   // 鍒濆鍖栨暟鎹簱
   initDatabase() {
     if (!fs.existsSync(this.dbPath)) {
@@ -84,8 +105,10 @@ class DatabaseManager {
         agent_pause_states: [],      // Phase-7.5 M7.5.1: Agent 暂停状态（每 notebook 至多 1 条）
         generation_audit: [],         // Phase-7.6 R8: LLM 生成调用审计日志
         settings: {
-          app_version: '1.0.0',
-          first_run: '1'
+          app_version: '4.2.0',
+          first_run: '1',
+          // 2026-05-17 v4.2.0：首装即注入老师可立刻测试的默认 API 配置
+          ...this._defaultArkSettings(),
         }
       };
       fs.writeFileSync(this.dbPath, JSON.stringify(initialData, null, 2), 'utf8');
@@ -212,15 +235,25 @@ class DatabaseManager {
       name: data.name,
       courseCode: data.courseCode || null,
       totalHours: data.totalHours,
+      // P2（2026-05-17）：每次课学时 + 每学时分钟数（老师按学校标准配，无兜底）
+      hoursPerSession: data.hoursPerSession || 0,
+      minutesPerHour: data.minutesPerHour || 0,
       theoryHours: data.theoryHours || 0,
       practiceHours: data.practiceHours || 0,
       grade: data.grade || null,
       prerequisite: data.prerequisite || null,
       description: data.description || null,
       workspacePath: data.workspacePath || null,
-      currentStage: data.currentStage || 'framework',
+      currentStage: data.currentStage || 'schedule',     // P2：v4.3.0 默认 schedule 起点（framework 已下线）
       teachingSchedule: null,
       currentFrameworkId: null,
+      // P6（2026-05-18）补缺：教学进度表 header 关键字段（之前 v4.2.0 schema 漏掉，导致老师填了无效）
+      teacher: data.teacher || '',
+      school: data.school || '',
+      department: data.department || '',
+      semester: data.semester || '',
+      className: data.className || '',
+      textbook: data.textbook || '',
       // 课程富上下文（Phase-5B：用于提升 AI 生成质量）
       softwareTools: data.softwareTools || '',       // 具体软件工具，如"Blender 4.x"
       jobTargets: data.jobTargets || '',             // 目标职业岗位，如"橱窗陈列师"
@@ -237,8 +270,8 @@ class DatabaseManager {
     allData.workflowStates = Array.isArray(allData.workflowStates) ? allData.workflowStates : [];
     allData.workflowStates.push({
       notebookId: notebook.id,
-      currentStage: notebook.currentStage || 'framework',
-      unlockedStages: ['framework'],
+      currentStage: notebook.currentStage || 'schedule',     // P2：v4.3.0
+      unlockedStages: ['schedule'],                          // P2：起点 schedule
       currentArtifactRefs: {},
       updatedAt: new Date().toISOString()
     });
@@ -391,10 +424,13 @@ class DatabaseManager {
     const data = this._readData();
     const existing = (data.workflowStates || []).find((item) => item.notebookId === notebookId);
     if (existing) return existing;
+    // v4.3.3 Sprint A.2（2026-05-18）：framework 是 v3.x 老阶段，已退役。
+    //   新笔记本从 schedule 起步（v4.0+ 起点），unlocked 含 schedule。
+    //   兼容 D12 后续真落地 sessionContext / artifact 时不需要再迁。
     return {
       notebookId,
-      currentStage: 'framework',
-      unlockedStages: ['framework'],
+      currentStage: 'schedule',
+      unlockedStages: ['schedule'],
       currentArtifactRefs: {},
       updatedAt: new Date().toISOString()
     };

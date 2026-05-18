@@ -293,6 +293,8 @@ function register(ipcMain, getDeps) {
         pptPages: publication.pptPages,
         templateBackground: publication.templateBackground,
         templateKey: publication.templateKey,
+        // 2026-05-16 v4.1.4 Phase 2：透传整门课主 accentColor 给 AI layout dispatcher
+        mainAccentColor: publication.mainAccentColor,
         outputPath: ensureExt(picked.filePath, 'pptx')
       });
       const artifact = createTrackedArtifact(notebookId, {

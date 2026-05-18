@@ -147,12 +147,11 @@ cases.push({
 });
 
 // ── 6) loadingCheck ────────────────────────────────
+// P1.1（2026-05-17）：agent.handlers 已删，仅校验 ppt-images-pipeline.service 加载
 cases.push({
-  name: '[loading] agent.handlers.js + ppt-images-pipeline 加载无错',
+  name: '[loading] ppt-images-pipeline.service 加载无错',
   fn: () => {
-    delete require.cache[require.resolve('../src/main/ipc/agent.handlers')];
     delete require.cache[require.resolve('../src/main/services/ppt-images-pipeline.service')];
-    require('../src/main/ipc/agent.handlers');
     require('../src/main/services/ppt-images-pipeline.service');
   },
 });

@@ -362,6 +362,33 @@ function register(ipcMain, getDeps) {
     }
   });
 
+  // ── v4.3.0 D3（2026-05-18）：.pptx 参考素材解析 ─────────────────────────────
+  //   提取每页文字 + 排版密度，给 AI 学风格（不抄具体内容）
+  ipcMain.handle('system:readPptxContent', async (event, { base64, filename }) => {
+    try {
+      if (!base64) return { success: false, error: '文件内容为空' };
+      const buffer = Buffer.from(base64, 'base64');
+      const { parsePptxBuffer, formatForStyleReference } = require('../services/pptx-parser.service');
+      const parsed = await parsePptxBuffer(buffer);
+      if (parsed.slideCount === 0) {
+        return { success: false, error: '未提取到任何幻灯片（文件可能损坏或加密）' };
+      }
+      const text = formatForStyleReference(parsed);
+      return {
+        success: true,
+        data: {
+          text: text.length > 8000 ? text.slice(0, 8000) + '\n…（已截断 8000 字）' : text,
+          slideCount: parsed.slideCount,
+          totalChars: parsed.totalChars,
+          filename: String(filename || 'PPT 文件'),
+        },
+      };
+    } catch (error) {
+      console.error('[system:readPptxContent]', error);
+      return { success: false, error: `解析失败：${error.message}` };
+    }
+  });
+
   // ── 参考资料：.docx 教案解析 ──────────────────────────────────────────────────
   // 接受 base64 编码的 .docx 文件内容，用 mammoth 提取纯文本
   ipcMain.handle('system:readDocxContent', async (event, { base64, filename }) => {
@@ -382,6 +409,103 @@ function register(ipcMain, getDeps) {
       };
     } catch (error) {
       return { success: false, error: `解析失败：${error.message}` };
+    }
+  });
+
+  // ── v4.3.0 D6.4（2026-05-18）：PDF 数字版文本抽取 ────────────────────────────
+  //   仅支持数字版（有 text layer）；扫描版（图片版）抽不到，需要走 OCR 单页
+  //   依赖：pdf-parse@2.x（class API：new PDFParse({data}).getText()）
+  ipcMain.handle('system:readPdfContent', async (event, { base64, filename }) => {
+    let parser = null;
+    try {
+      if (!base64) return { success: false, error: '文件内容为空' };
+      const buffer = Buffer.from(base64, 'base64');
+      let PDFParse;
+      try {
+        ({ PDFParse } = require('pdf-parse'));
+      } catch (e) {
+        return { success: false, error: `pdf-parse 依赖未安装或加载失败：${e.message}` };
+      }
+      parser = new PDFParse({ data: buffer });
+      const result = await parser.getText();
+      const raw = String(result?.text || '').trim();
+      if (raw.length < 20) {
+        return {
+          success: false,
+          error: '未提取到可读文本。常见原因：扫描版 PDF（图片版）不支持文本抽取，请用截图导出后走图片 OCR'
+        };
+      }
+      const text = raw.length > 8000 ? raw.slice(0, 8000) + '\n…（已截断 8000 字）' : raw;
+      return {
+        success: true,
+        data: {
+          text,
+          charCount: text.length,
+          pageCount: result?.pages?.length || result?.total || 0,
+          filename: String(filename || 'PDF 文件'),
+        },
+      };
+    } catch (error) {
+      console.error('[system:readPdfContent]', error);
+      return { success: false, error: `PDF 解析失败：${error.message}` };
+    } finally {
+      if (parser && typeof parser.destroy === 'function') {
+        try { await parser.destroy(); } catch (_) { /* ignore */ }
+      }
+    }
+  });
+
+  // ── v4.3.0 D6.4（2026-05-18）：图片 OCR（复用多模态文本 endpoint，无需新模型）─
+  //   走 ARK chatVision（doubao-seed-2.0-pro 多模态 ep-m-...）
+  //   prompt：「逐字提取所有文字，保留段落/列表结构，纯文本输出」
+  ipcMain.handle('v2:readImageOcr', async (event, { base64, filename }) => {
+    try {
+      if (!base64) return { success: false, error: '图片内容为空' };
+      const { db } = getDeps();
+      const { resolveProviderConfig, createAiClientByConfig } = require('../api/provider-config');
+      const config = resolveProviderConfig({ payload: {}, db });
+      if (!config?.apiKey || !config?.endpointId) {
+        return { success: false, error: 'API Key 或文本类 Endpoint 未配置（设置 → API 配置）' };
+      }
+      const aiClient = createAiClientByConfig(config);
+      if (typeof aiClient.chatVision !== 'function') {
+        return { success: false, error: 'AI 客户端不支持 chatVision（请检查 provider 类型）' };
+      }
+      // 从 filename 推断图片格式
+      const lower = String(filename || '').toLowerCase();
+      const fmt = lower.endsWith('.jpg') || lower.endsWith('.jpeg') ? 'jpeg'
+                : lower.endsWith('.webp') ? 'webp'
+                : lower.endsWith('.bmp') ? 'bmp'
+                : 'png';
+
+      const systemPrompt = '你是一个专业的 OCR 引擎。任务：逐字提取图片中所有可见文字，保留原始段落、列表、表格结构。纯文本输出，不要解释、不要总结、不要 markdown 包装。';
+      const userPrompt = '请提取这张图片中的所有文字内容。';
+
+      const rawText = await aiClient.chatVision({
+        systemPrompt,
+        userPrompt,
+        imageData: base64,
+        imageFormat: fmt,
+        temperature: 0.1,
+        maxTokens: 4000,
+      });
+      const text = String(rawText || '').trim();
+      if (text.length < 5) {
+        return { success: false, error: 'AI 未能从图片中识别出文字（图片可能模糊或无文字）' };
+      }
+      const finalText = text.length > 8000 ? text.slice(0, 8000) + '\n…（已截断 8000 字）' : text;
+      return {
+        success: true,
+        data: {
+          text: finalText,
+          charCount: finalText.length,
+          filename: String(filename || '图片'),
+          ocrEndpoint: config.endpointId,
+        },
+      };
+    } catch (error) {
+      console.error('[v2:readImageOcr]', error);
+      return { success: false, error: `图片 OCR 失败：${error.message}` };
     }
   });
 

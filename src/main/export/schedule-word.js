@@ -7,7 +7,9 @@
  *   ③ 教学重点 / 难点
  *   ④ 教学方法
  *   ⑤ 实训类目（若有）
- *   ⑥ 主体表格：6 列（周次 / 课次 / 授课章节 / 教学内容 / 授课方式 / 作业次数）
+ *   ⑥ 主体表格：6 列（周次 / 课时 / 授课章节 / 教学内容 / 授课方式 / 作业次数）
+ *     （注：列名"课时"由 2026-05-15 老师反馈引入，替代旧名"课次"；
+ *      内部字段 schedule[].session 保持不变以兼容下游）
  *   ⑦ 考核评价
  *   ⑧ 补充意见（如有）
  */
@@ -57,6 +59,7 @@ function cell(text, override = {}, opts = {}) {
     shading: opts.shading ? { fill: opts.shading, type: ShadingType.CLEAR } : undefined,
     margins: { top: 80, bottom: 80, left: 120, right: 120 },
     verticalAlign: VerticalAlign.CENTER,
+    columnSpan: opts.columnSpan,   // 2026-05-15 P2-7：支持合并单元格
     children: [new Paragraph({
       alignment: opts.align || AlignmentType.LEFT,
       children: [styledRun(text, override)],
@@ -150,9 +153,9 @@ async function exportScheduleWord({ schedule, outputPath }) {
     arr(schedule.experimentTopics).forEach((t, i) => children.push(p(`  ${i + 1}. ${t}`, FONT.body)));
   }
 
-  // ── ⑦ 主体进度表 6 列 ──────────────────────────────
+  // ── ⑦ 主体进度表 7 列（2026-05-15 加"学时"列）─────────
   children.push(p('教学进度安排（按周）', FONT.sectionTitle));
-  const COLS = [800, 800, 1500, 3700, 1280, 1280]; // 总和 9360
+  const COLS = [700, 700, 1400, 3400, 800, 1180, 1180]; // 总和 9360
   const headRow = new TableRow({
     tableHeader: true,
     children: [
@@ -160,8 +163,9 @@ async function exportScheduleWord({ schedule, outputPath }) {
       cell('课次', FONT.tableHead, { width: COLS[1], shading: 'D5E8F0', align: AlignmentType.CENTER }),
       cell('授课章节', FONT.tableHead, { width: COLS[2], shading: 'D5E8F0', align: AlignmentType.CENTER }),
       cell('教学内容', FONT.tableHead, { width: COLS[3], shading: 'D5E8F0', align: AlignmentType.CENTER }),
-      cell('授课方式', FONT.tableHead, { width: COLS[4], shading: 'D5E8F0', align: AlignmentType.CENTER }),
-      cell('作业次数', FONT.tableHead, { width: COLS[5], shading: 'D5E8F0', align: AlignmentType.CENTER }),
+      cell('学时', FONT.tableHead, { width: COLS[4], shading: 'D5E8F0', align: AlignmentType.CENTER }),
+      cell('授课方式', FONT.tableHead, { width: COLS[5], shading: 'D5E8F0', align: AlignmentType.CENTER }),
+      cell('作业次数', FONT.tableHead, { width: COLS[6], shading: 'D5E8F0', align: AlignmentType.CENTER }),
     ],
   });
   const bodyRows = rows.map((row) => new TableRow({
@@ -170,14 +174,24 @@ async function exportScheduleWord({ schedule, outputPath }) {
       cell(String(row.session ?? ''), FONT.body, { width: COLS[1], align: AlignmentType.CENTER }),
       cell(String(row.chapter || ''), FONT.body, { width: COLS[2], align: AlignmentType.CENTER }),
       cell(String(row.content || ''), FONT.body, { width: COLS[3] }),
-      cell(String(row.method || ''), FONT.body, { width: COLS[4], align: AlignmentType.CENTER }),
-      cell(row.homework === 0 || row.homework == null ? '/' : String(row.homework), FONT.body, { width: COLS[5], align: AlignmentType.CENTER }),
+      cell(String(row.hours ?? ''), FONT.body, { width: COLS[4], align: AlignmentType.CENTER }),
+      cell(String(row.method || ''), FONT.body, { width: COLS[5], align: AlignmentType.CENTER }),
+      cell(row.homework === 0 || row.homework == null ? '/' : String(row.homework), FONT.body, { width: COLS[6], align: AlignmentType.CENTER }),
     ],
   }));
+  // 学时合计行（前 4 列合并 + 学时合计 + 后 2 列合并）
+  const totalH = rows.reduce((s, r) => s + (Number(r.hours) || 0), 0);
+  const sumRow = new TableRow({
+    children: [
+      cell('合计', FONT.tableHead, { width: COLS[0], align: AlignmentType.CENTER, shading: 'EFF6FF', columnSpan: 4 }),
+      cell(String(totalH), FONT.tableHead, { width: COLS[4], align: AlignmentType.CENTER, shading: 'EFF6FF' }),
+      cell('—', FONT.body, { width: COLS[5], align: AlignmentType.CENTER, shading: 'EFF6FF', columnSpan: 2 }),
+    ],
+  });
   children.push(new Table({
     width: { size: 9360, type: WidthType.DXA },
     columnWidths: COLS,
-    rows: [headRow, ...bodyRows],
+    rows: [headRow, ...bodyRows, sumRow],
   }));
   children.push(p('', FONT.body));
 

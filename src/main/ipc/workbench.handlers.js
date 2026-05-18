@@ -1,98 +1,296 @@
 /**
- * workbench.handlers.js — 「我的工作台」统计接口（Phase-7.7 A3）
+ * workbench.handlers.js — 教师日志（2026-05-16 v4.2.0 重写）
  *
- * 职责：聚合老师的课程开发统计数据，供 UI 工作台页面展示。
- * 不引入新表，复用现有 notebooks / agent_memories / artifacts 数据。
+ * 修复 v4.1.x 工作台失效问题（用 framework_json 老 type，新 6-stage 数据全显示 0）。
+ * 重写支持：
+ *   - v4.0+ 6 stage 完成度（schedule / design / lecture / ppt / video / report）
+ *   - 每个 notebook 历史 artifact 列表（最近 30 条），含 type/title/updatedAt/storagePath
+ *   - 点击历史 artifact → 跳回原 stage 自动加载该 artifact（前端用）
  *
- * 设计原则（按 CLAUDE.md 第〇节）：
- *  - 完全本地查询，不上传任何数据
- *  - 不修改任何 artifact / notebook 数据，纯读取
- *  - 失败不影响主流程
+ * IPC：
+ *   workbench:getStats          —— 工作台概览统计 + 每个 notebook 的历史 artifact
+ *   workbench:openHistoryArtifact —— 一键跳回该 artifact 所在 stage 并加载（更新 sessionContext）
  */
+
 'use strict';
 
+const STAGE_TYPES = {
+  schedule: ['schedule_table', 'schedule_export_word'],
+  design: ['design_doc', 'design_infographic', 'design_export_word'],
+  lecture: ['lecture_final', 'lecture_drafts', 'lecture_export_word'],
+  ppt: ['ppt_outline', 'ppt_page_image', 'ppt_export_file'],
+  quiz: ['quiz_set'],            // v4.3.3
+  homework: ['homework_set'],    // v4.3.3
+  video: ['micro_video_plan'],
+  report: ['implementation_report'],
+};
+
+const STAGE_PRIMARY_TYPE = {
+  schedule: 'schedule_table',
+  design: 'design_doc',
+  lecture: 'lecture_final',
+  ppt: 'ppt_outline',
+  quiz: 'quiz_set',              // v4.3.3
+  homework: 'homework_set',      // v4.3.3
+  video: 'micro_video_plan',
+  report: 'implementation_report',
+};
+
+const TYPE_LABEL = {
+  schedule_table: '📅 教学进度表',
+  schedule_export_word: '📅 进度表 Word',
+  design_doc: '🎯 教学设计',
+  design_infographic: '🎯 设计信息图',
+  design_export_word: '🎯 设计 Word',
+  lecture_drafts: '🎤 讲稿草稿',
+  lecture_final: '🎤 正式讲稿',
+  lecture_export_word: '🎤 讲稿 Word',
+  ppt_outline: '📊 PPT 大纲',
+  ppt_page_image: '📊 PPT 页图',
+  ppt_export_file: '📊 PPT 文件',
+  quiz_set: '📝 在线测验',        // v4.3.3
+  homework_set: '📚 课后作业',    // v4.3.3
+  micro_video_plan: '🎬 微课视频方案',
+  implementation_report: '📝 实施报告',
+};
+
+function inferStageFromType(type) {
+  for (const [stage, types] of Object.entries(STAGE_TYPES)) {
+    if (types.includes(type)) return stage;
+  }
+  return 'unknown';
+}
+
 function register(ipcMain, getDeps) {
-  /**
-   * workbench:getStats — 获取工作台统计概览
-   *
-   * 返回：{
-   *   success: true,
-   *   data: {
-   *     totalNotebooks: number,
-   *     confirmedFrameworks: number,
-   *     confirmedLectures: number,
-   *     confirmedPpts: number,
-   *     totalMemories: number,
-   *     recentActivities: Array<{ notebookId, name, totalHours, lastActivity, stages: { framework, lecture, ppt } }>,
-   *   }
-   * }
-   */
   ipcMain.handle('workbench:getStats', async () => {
     try {
       const { db } = getDeps();
       if (!db) return { success: false, error: 'Database not initialized' };
 
-      const notebooks = (typeof db.listNotebooks === 'function' ? db.listNotebooks() : []) || [];
+      const allData = typeof db._readData === 'function' ? db._readData() : { notebooks: [], artifacts: [] };
+      const notebooks = Array.isArray(allData.notebooks) ? allData.notebooks : [];
+      const artifacts = Array.isArray(allData.artifacts) ? allData.artifacts : [];
       const memories = (typeof db.getAgentMemories === 'function' ? db.getAgentMemories() : []) || [];
 
-      // 按 notebook 统计 stage 完成情况（基于 artifact 的 confirmed 字段）
-      const recentActivities = notebooks.slice(0, 30).map((nb) => {
-        const fw = typeof db.getLatestArtifact === 'function'
-          ? db.getLatestArtifact(nb.id, 'framework_json', 'framework') : null;
-        const lc = typeof db.getLatestArtifact === 'function'
-          ? db.getLatestArtifact(nb.id, 'lecture_final', 'lecture') : null;
-        const ppt = typeof db.getLatestArtifact === 'function'
-          ? db.getLatestArtifact(nb.id, 'ppt_outline', 'ppt') : null;
+      const courseRows = notebooks.map((nb) => {
+        const myArts = artifacts.filter(
+          (a) => Number(a.notebookId) === Number(nb.id) && a.status !== 'deleted'
+        );
+        const stageStatus = {};
+        Object.entries(STAGE_PRIMARY_TYPE).forEach(([stage, type]) => {
+          const arts = myArts.filter((a) => a.type === type);
+          const confirmedArt = arts.find((a) => a.confirmed);
+          const latest = arts.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0];
+          stageStatus[stage] = {
+            generated: arts.length > 0,
+            confirmed: !!confirmedArt,
+            count: arts.length,
+            latestArtifactId: latest?.id || null,
+            latestUpdatedAt: latest?.updatedAt || '',
+          };
+        });
+        const confirmedCount = Object.values(stageStatus).filter((s) => s.confirmed).length;
+        const generatedCount = Object.values(stageStatus).filter((s) => s.generated).length;
+
+        // 历史 artifact 列表（最近 30 条 + 老师能"随时打开"）
+        const recentArtifacts = myArts
+          .filter((a) => Boolean(TYPE_LABEL[a.type]))
+          .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))
+          .slice(0, 30)
+          .map((a) => ({
+            id: a.id,
+            type: a.type,
+            typeLabel: TYPE_LABEL[a.type] || a.type,
+            stage: a.stage || inferStageFromType(a.type),
+            title: a.title || '未命名',
+            confirmed: !!a.confirmed,
+            status: a.status,
+            storagePath: a.storagePath || '',
+            updatedAt: a.updatedAt,
+            createdAt: a.createdAt,
+            lessonNumber: Number(a.metadata?.lessonNumber) || 0,
+            lessonTopic: a.metadata?.topic || a.metadata?.lessonTopic || '',
+          }));
 
         return {
           notebookId: nb.id,
           name: nb.name || '未命名课程',
-          totalHours: nb.totalHours || 0,
-          updatedAt: nb.updatedAt || nb.createdAt || '',
-          stages: {
-            framework: Boolean(fw?.confirmed),
-            lecture: Boolean(lc?.confirmed),
-            ppt: Boolean(ppt?.confirmed),
-          },
+          totalHours: Number(nb.totalHours) || 0,
+          stageStatus,
+          confirmedCount,
+          generatedCount,
+          completionPct: Math.round((confirmedCount / 8) * 100),  // v4.3.3 八阶段
+          createdAt: nb.createdAt,
+          updatedAt: nb.updatedAt,
+          recentArtifacts,
+          sessionContext: nb.sessionContext || null,
           memorySaved: memories.some((m) => m.notebookId === nb.id),
         };
-      }).sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+      })
+      .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
 
-      const confirmedFrameworks = recentActivities.filter((a) => a.stages.framework).length;
-      const confirmedLectures = recentActivities.filter((a) => a.stages.lecture).length;
-      const confirmedPpts = recentActivities.filter((a) => a.stages.ppt).length;
-
-      // 计算"完成度"：每个笔记本完成的 stage 数 / 3（framework / lecture / ppt 全部完成 = 100%）
-      const totalStages = notebooks.length * 3;
-      const completedStages = confirmedFrameworks + confirmedLectures + confirmedPpts;
-      const overallCompletionRate = totalStages > 0
-        ? Math.round((completedStages / totalStages) * 100) : 0;
-
-      // 平均迭代次数：用 lastVisited - createdAt 的天数粗略估算（更精确版本需要 operations 表）
-      // 这里先简化：framework_json artifact 的 contentVersion（如果有）作为重生成次数
-      const totalRegenerations = notebooks.reduce((acc, nb) => {
-        const fw = typeof db.getLatestArtifact === 'function'
-          ? db.getLatestArtifact(nb.id, 'framework_json', 'framework') : null;
-        return acc + Math.max(1, Number(fw?.version) || 1);
-      }, 0);
-      const avgRegenerations = notebooks.length > 0
-        ? (totalRegenerations / notebooks.length).toFixed(1) : '0.0';
+      // 整体统计
+      const stageCompletion = {};
+      Object.keys(STAGE_PRIMARY_TYPE).forEach((stage) => {
+        stageCompletion[stage] = courseRows.filter((c) => c.stageStatus[stage].confirmed).length;
+      });
+      const totalNotebooks = courseRows.length;
+      const overallPct = totalNotebooks > 0
+        ? Math.round(courseRows.reduce((s, c) => s + c.completionPct, 0) / totalNotebooks)
+        : 0;
 
       return {
         success: true,
         data: {
-          totalNotebooks: notebooks.length,
-          confirmedFrameworks,
-          confirmedLectures,
-          confirmedPpts,
-          overallCompletionRate,
+          // v4.0+ 6 stage 维度
+          totalNotebooks,
+          totalArtifacts: artifacts.length,
+          stageCompletion,
+          overallCompletionRate: overallPct,
+          courses: courseRows,
+          memories: memories.slice(-10).reverse(),
           totalMemories: memories.length,
-          avgRegenerations,
-          recentActivities,
-          memories: memories.slice(-10).reverse(),  // 最近 10 条 memory 摘要
+          generatedAt: new Date().toISOString(),
+
+          // 向后兼容旧 UI 字段（v4.1.x MyWorkbench 里用过）
+          confirmedFrameworks: stageCompletion.schedule || 0,
+          confirmedLectures: stageCompletion.lecture || 0,
+          confirmedPpts: stageCompletion.ppt || 0,
+          recentActivities: courseRows.map((c) => ({
+            notebookId: c.notebookId,
+            name: c.name,
+            totalHours: c.totalHours,
+            updatedAt: c.updatedAt,
+            stages: {
+              schedule: c.stageStatus.schedule.confirmed,
+              design: c.stageStatus.design.confirmed,
+              ppt: c.stageStatus.ppt.confirmed,
+              lecture: c.stageStatus.lecture.confirmed,
+              quiz: c.stageStatus.quiz?.confirmed || false,        // v4.3.3
+              homework: c.stageStatus.homework?.confirmed || false, // v4.3.3
+              video: c.stageStatus.video.confirmed,
+              report: c.stageStatus.report.confirmed,
+            },
+            memorySaved: c.memorySaved,
+          })),
+          avgRegenerations: '—',
         },
       };
     } catch (e) {
+      console.error('[workbench:getStats]', e);
+      return { success: false, error: e.message };
+    }
+  });
+
+  /**
+   * v4.3.3 · P0-1 数据恢复 IPC
+   *   返回 migration 001 扫描出的可恢复 artifact 列表
+   */
+  ipcMain.handle('workbench:listRecoverable', async () => {
+    try {
+      const { db } = getDeps();
+      if (!db) return { success: false, error: 'Database not initialized' };
+      const data = typeof db._readData === 'function' ? db._readData() : {};
+      const list = data?.globalState?._recoverable || [];
+      return {
+        success: true,
+        data: {
+          recoverable: list,
+          updatedAt: data?.globalState?._recoverableUpdatedAt || null,
+        },
+      };
+    } catch (e) {
+      console.error('[workbench:listRecoverable]', e);
+      return { success: false, error: e.message };
+    }
+  });
+
+  /**
+   * v4.3.3 · 把某个 recoverable artifact 状态从 'deleted' 改回 'draft'
+   *   不删任何东西，仅"取消标记"
+   */
+  ipcMain.handle('workbench:restoreArtifact', async (event, payload = {}) => {
+    try {
+      const { db } = getDeps();
+      if (!db) return { success: false, error: 'Database not initialized' };
+      const artifactId = Number(payload.artifactId);
+      if (!Number.isFinite(artifactId) || artifactId <= 0) return { success: false, error: 'artifactId 无效' };
+      if (typeof db.updateArtifact !== 'function') return { success: false, error: 'db.updateArtifact 不可用' };
+      const updated = db.updateArtifact(artifactId, {
+        status: 'draft',
+        restoredAt: new Date().toISOString(),
+        restoredFrom: payload.reason || 'P0-1 数据找回',
+      });
+      // 同步移出 _recoverable 列表
+      const data = db._readData();
+      if (data?.globalState?._recoverable) {
+        data.globalState._recoverable = data.globalState._recoverable.filter((r) => Number(r.id) !== artifactId);
+        db._writeData(data);
+      }
+      return { success: true, data: { artifactId, status: 'draft', updated } };
+    } catch (e) {
+      console.error('[workbench:restoreArtifact]', e);
+      return { success: false, error: e.message };
+    }
+  });
+
+  /**
+   * 一键打开历史 artifact：
+   *   - 更新该 notebook 的 sessionContext（设 active 字段指向该 artifact）
+   *   - 返回该 artifact 所属 stage，让前端跳过去
+   */
+  ipcMain.handle('workbench:openHistoryArtifact', async (event, payload = {}) => {
+    try {
+      const { db } = getDeps();
+      if (!db) return { success: false, error: 'Database not initialized' };
+
+      const notebookId = Number(payload.notebookId);
+      const artifactId = Number(payload.artifactId);
+      if (!Number.isFinite(notebookId) || !Number.isFinite(artifactId)) {
+        return { success: false, error: 'notebookId / artifactId 无效' };
+      }
+
+      const artifact = typeof db.getArtifactById === 'function'
+        ? db.getArtifactById(artifactId)
+        : (typeof db._readData === 'function'
+            ? (db._readData().artifacts || []).find((a) => Number(a.id) === artifactId)
+            : null);
+      if (!artifact) return { success: false, error: '未找到该 artifact' };
+
+      const stage = artifact.stage || inferStageFromType(artifact.type);
+      const fieldMap = {
+        design_doc: 'activeDesignArtifactId',
+        lecture_final: 'activeLectureArtifactId',
+        ppt_outline: 'activePptOutlineId',
+        micro_video_plan: 'activeMicroVideoId',
+        implementation_report: 'activeReportId',
+      };
+      const sessionField = fieldMap[artifact.type];
+      const lessonNumber = Number(artifact.metadata?.lessonNumber) || null;
+
+      const patch = {};
+      if (sessionField) patch[sessionField] = artifactId;
+      if (lessonNumber) patch.activeLessonNumber = lessonNumber;
+
+      let newSession = null;
+      if (typeof db.updateSessionContext === 'function' && Object.keys(patch).length > 0) {
+        newSession = db.updateSessionContext(notebookId, patch);
+      }
+
+      return {
+        success: true,
+        data: {
+          stage,
+          artifactId,
+          artifactType: artifact.type,
+          notebookId,
+          sessionContext: newSession,
+          // 如果是文件型 artifact，前端可直接开打文件
+          storagePath: artifact.storagePath || '',
+        }
+      };
+    } catch (e) {
+      console.error('[workbench:openHistoryArtifact]', e);
       return { success: false, error: e.message };
     }
   });

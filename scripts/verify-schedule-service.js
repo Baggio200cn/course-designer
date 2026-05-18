@@ -140,7 +140,8 @@ function test(name, fn) {
     }
   });
 
-  await test('schedule content 为空 → 被过滤', () => {
+  // 2026-05-15 v4.1.2 策略变更：content 为空不过滤，填占位文字（让老师看到"哪一行漏了"）
+  await test('schedule content 为空 → 保留行 + 填占位（v4.1.2）', () => {
     const r = normalizeSchedule({
       schedule: [
         { week: 1, content: 'A' },
@@ -148,7 +149,8 @@ function test(name, fn) {
         { week: 3, content: 'C' },
       ],
     });
-    if (r.schedule.length !== 2) throw new Error(`长度应为 2，实际：${r.schedule.length}`);
+    if (r.schedule.length !== 3) throw new Error(`长度应为 3（保留所有行），实际：${r.schedule.length}`);
+    if (!r.schedule[1].content.includes('缺失')) throw new Error(`空 content 行应填"缺失"占位，实际："${r.schedule[1].content}"`);
   });
 
   await test('schedule 缺 method → 默认"讲授"', () => {
@@ -229,6 +231,8 @@ function test(name, fn) {
     const r = await SVC.generate({
       aiClient: { chatJson: async () => 'not a valid json at all' },
       courseName: '测试',
+      // 2026-05-15 v4.1.4：现在必传 hoursPerSession，否则 generate 早期就返回错误
+      courseContext: { totalHours: 72, hoursPerSession: 2 },
     });
     if (r.success !== false) throw new Error('应返回 success:false');
     if (!r.raw) throw new Error('应包含 raw 用于调试');
@@ -238,6 +242,7 @@ function test(name, fn) {
     const r = await SVC.generate({
       aiClient: { chatJson: async () => { throw new Error('mock 网络错'); } },
       courseName: '测试',
+      courseContext: { totalHours: 72, hoursPerSession: 2 },
     });
     if (r.success !== false) throw new Error('应返回 success:false');
     if (!r.error.includes('AI 调用失败')) throw new Error(`error 错：${r.error}`);
@@ -260,7 +265,7 @@ function test(name, fn) {
     const r = await SVC.generate({
       aiClient: { chatJson: async () => mockJson },
       courseName: '测试课',
-      courseContext: { totalHours: 36 },
+      courseContext: { totalHours: 36, hoursPerSession: 4 },  // v4.1.4 必填
     });
     if (r.success !== true) throw new Error(`应返回 success:true：${r.error}`);
     if (!r.data?.schedule) throw new Error('缺 schedule');

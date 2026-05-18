@@ -228,8 +228,12 @@ function buildPptPublicationContract(input = {}) {
     (item) => String(item.id || '')
   ).map((item) => item.id);
 
+  // 2026-05-16 v4.1.4 Phase 2：整门课主 accentColor，从 outlineContent.mainAccentColor 取
+  const mainAccentColor = String(outlineContent.mainAccentColor || input.mainAccentColor || '').trim();
+
   return {
     templateKey: String(templateKey || outlineContent.templateKey || 'pro_minimalist'),
+    mainAccentColor,
     lectureScript: String(lectureScript || '').trim(),
     pptOutline,
     pptPages: pages,

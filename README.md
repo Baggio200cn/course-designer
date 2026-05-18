@@ -1,8 +1,8 @@
 # 驭课 Agent
 
-> **职业教育 6 阶段课程开发 Workflow Agent** — Electron + React + JSON DB + Ark/DeepSeek/Doubao API
+> **职业教育 8 阶段课程开发 Workflow Agent** — Electron + React + JSON DB + 火山引擎（豆包）API
 >
-> 当前版本：**v4.0.0**（Phase-9 完成）  ·  最后更新：2026-05-10
+> 当前版本：**v4.3.3**（Sprint A 止血 · Sprint B 结构重构中） · 最后更新：2026-05-18
 
 ---
 
@@ -16,75 +16,59 @@
 
 | 项 | 详情 |
 |---|---|
-| 版本 | **v4.0.0**（"驭课 Agent"——前身"刘老师 Agent 2.x" 已废弃）|
-| 当前阶段 | Phase-9 完成（6 阶段工作流重构 + 多节课讲稿 + AI 信息图 + 4 格式报告导出） |
-| 上一阶段 | Phase-8.5 治理升级（CLAUDE.md 拆分 + 杂志风信息图 + 9 维度审核 B 方案阶段 1） |
-| 下一阶段 | 老师试用反馈 → Phase-10 体验打磨 |
+| 版本 | **v4.3.3**（D6-D9 + Sprint A 止血 · Sprint B 结构重构中） |
+| 工作流 | **8 阶段**（v4.3.3 新增 Step 5 在线测验 + Step 6 课后作业）|
+| 上一里程碑 | v4.3.0 D6-D9 一步出稿 + AI 对话改稿 + 三路径自动保存 + stage 聚合校验 + 强制解锁 |
+| 当前里程碑 | **Sprint A**（止血：文档/默认值/迁移规范统一）+ **Sprint B**（D14-D15 + D11-D13 结构重构）|
+| 下一里程碑 | 老师试用反馈 → v4.4.0 体验打磨 |
 
 ---
 
-## 6 阶段工作流（v4.0.0 核心）
+## 8 阶段工作流（v4.3.3 核心）
 
 ```
-教学进度表 → 教学设计 → 课堂讲稿 → 教学课件 → 微课视频 → 教学实施报告
-   schedule    design     lecture     ppt        video      report
+教学进度表 → 教学设计 → 教学课件 → 课堂讲稿 → 在线测验 → 课后作业 → 微课视频 → 教学实施报告
+  schedule    design      ppt        lecture     quiz       homework     video        report
+    ①          ②           ③           ④           ⑤          ⑥           ⑦           ⑧
 ```
 
-### 各阶段产物
-
-| 阶段 | artifact_type | 老师交付物 | AI 信息图 | 导出格式 |
-|---|---|---|---|---|
-| 教学进度表 | schedule_table | 18 周 6 列排课表 | — | Word |
-| 教学设计 | design_doc | 5 段法 + 考核 100% | ✅ AI 生成（30 种组合）| Word |
-| 课堂讲稿 | lecture_final（多份）| 每节 ≤ 4 学时 | — | Word（每节一份）|
-| 教学课件 | ppt_outline | 22 页 PPT | ✅ 每页主题化插图 | PPTX |
-| 微课视频 | video_prompt | 脚本 + 分镜 + 即梦提示词 | — | JSON 复制粘贴 |
-| 教学实施报告 | implementation_report | 9 大节 + 老师手填 9 项 | — | **Word / Markdown / HTML / PDF** |
+| 阶段 | 关键产物 | AI 输入依据 | 输出格式 |
+|---|---|---|---|
+| ① 教学进度表 | `schedule_table` | 老师上传素材 + 课程基本信息 | JSON + Word |
+| ② 教学设计 | `design_doc` | 进度表 + 教学要求 | 5 段教学法 + 考核权重 + Word |
+| ③ 教学课件 | `ppt_outline` + `ppt_page_image` | 教学设计 + 老师选目标 | 页级框架 + AI 配图 + 导出 |
+| ④ 课堂讲稿 | `lecture_final` | **PPT 骨架 100% 主权重** + 素材 80% 深度 | 逐页教师口播稿 |
+| ⑤ 在线测验 ⭐NEW | `quiz_set` | PPT 每页 + 讲稿 | 每页 1-2 题 + 综合题（5 种题型）|
+| ⑥ 课后作业 ⭐NEW | `homework_set` | 讲稿 + PPT | 3-5 道作业，含 deliverables + 评分标准 |
+| ⑦ 微课视频 | `micro_video_plan` | 讲稿 | 脚本+分镜+即梦提示词+拍摄+剪辑 |
+| ⑧ 教学实施报告 | `implementation_report` | 前 7 阶段全部产物 | AI 汇总 + 老师手填实施成效 |
 
 ---
 
-## v4.0.0 关键能力（vs v3.x）
+## v4.3.3 关键能力（vs v4.2.0）
 
-| 能力 | v3.1.0 | v4.0.0 |
-|---|---|---|
-| 工作流粒度 | 4 阶段（framework→lecture→ppt→video）| **6 阶段**（schedule→design→lecture→ppt→video→report）|
-| 教学框架 | 单一 framework 阶段 | **进度表 + 教学设计** 两阶段（更专业）|
-| 课堂讲稿 | 1 份覆盖整门课 | **N 份多节课**（每节 ≤4 学时，理论+实践拼配）|
-| 讲稿质量 | 5 维度审核 | **9 维度审核**（+ referenceFusionDepth + fiveStepTransform + timelineConsistency + copyrightSafety）|
-| 讲稿素材 | 富上下文 | **URL 抓取 + 文件上传 + 粘贴文本**（支持多素材累加）|
-| 老师手搓正式稿 | ❌ | **✅ 粘贴模态 + 上传 .docx 替换 AI 版本** |
-| AI 信息图 | 仅 framework 阶段 | **教学设计专用 design_overview 版面**（6 段逻辑闭环）|
-| 微课视频 | 仅生成提示词 | **完整方案**（脚本+分镜+即梦提示词+拍摄+剪辑）|
-| 实施报告 | ❌ | **✅ 9 大节 + 5 项实施成效 + 4 项反思改进 + 4 格式导出** |
-| 教学实施报告导出 | — | **Word / Markdown / HTML / PDF**（4 选 1）|
+### 🎯 讲稿阶段（D6-D8）
+- **一步出稿**：删 ABC 三稿流程，AI 直接出正式稿（PPT 骨架 100% 决定节奏）
+- **右侧 380px AI 对话框**：老师可输入「把第 3 页改口语化」「整体减 30% 字数」「整合刚上传的素材」做局部 patch
+- **三路径自动保存**：AI 生成 / AI 对话改稿 / 老师手贴正式稿 — 三处都立即落库 draft，刷新不丢
+- **正式稿大窗预览**：四方向拖拽、字号 14px、行高 1.75，老师阅读体验大改
+- **PDF/PPTX/图片 OCR**：扩展支持的素材格式（图片 OCR 走多模态文本 endpoint，无需新模型）
 
----
+### 📑 PPT 阶段（D1-D5）
+- **AI 主色推荐**：3-5 hex 候选 + 老师自定义
+- **图片风格 preset**：扁平 / 插画 / 写实 / 国潮 / 极简 5 种
+- **3 层防误操作**：确认 modal + 取消按钮 + 清空重做
+- **PPT 骨架下拉**：lecture 阶段可切换骨架来源 PPT（多份时可选）+ 自动预填本节信息
 
-## 安装与使用
+### 🎓 在线测验 + 课后作业（v4.3.3 Step 5/6）
+- AI 基于 PPT 每页骨架出 1-2 道题（单选 / 多选 / 判断 / 填空 / 简答）+ 综合题
+- 课后作业按学时算量（每学时 30-60 分钟练习）
+- 题型多样化，含 deliverables 和 evaluationCriteria
 
-### 给老师（最终用户）
-
-1. 双击安装包 `驭课Agent-v4.0.0-setup.exe`
-2. 选安装位置 → 完成
-3. 桌面 / 开始菜单出现 **"驭课 Agent v4.0.0"** 图标，双击启动
-4. 首次启动 → 右上角"API 配置"填火山引擎 Ark API Key + 文本模型 endpoint
-5. 点 **"新建教学进度表"** 开始 6 阶段工作流
-
-### 给开发者
-
-```powershell
-# 克隆 + 安装依赖
-git clone <repo>
-cd course-designer
-npm install
-
-# 开发模式（vite dev + Electron）
-npm run dev
-
-# 打包
-npm run build              # 完整构建（vite + electron-builder）
-npm run pack               # 仅打包不签名（开发自测用）
-```
+### 🛡 数据安全（Sprint A）
+- **`src/main/migrations/` 数据迁移目录**：跨版本 schema 变化时不再丢老师数据
+- **教师日志**（前称「我的工作台」）：「🔍 找回历史数据」按钮，对老师反馈的「v4.1.4 → v4.3.x 36 个 design 丢失」做修复
+- **「⚙ 强制解锁下游」按钮**：质检误报时老师能手动跳过门槛
 
 ---
 
@@ -92,83 +76,146 @@ npm run pack               # 仅打包不签名（开发自测用）
 
 ```
 course-designer/
-├── CLAUDE.md                  ← Claude Code 工作入口（≤ 200 行）
-├── CONTEXT.md                 ← 当前阶段快照
-├── README.md                  ← 你正在读
-├── .claude/                   ← 治理知识库
-│   ├── README.md              ← 索引
-│   ├── hard-constraints.md    ← H1-H13 硬约束
-│   ├── verify-matrix.md       ← 修改了什么 → 跑什么 verify
-│   ├── ipc-map.md             ← IPC handler 文件地图
-│   ├── notes/                 ← 时间线笔记（一次性问题/经验）
-│   ├── candidates/            ← 候选规则（重复 2-3 次的）
-│   └── phases/                ← Phase 完工总结
-├── .claude-memory/MEMORY.md   ← 跨会话长期记忆
-├── prompts/                   ← AI Prompt 模板（schedule/design/report/micro-video 等）
-├── scripts/                   ← verify-*.js / e2e-*.js 验证脚本
+├── README.md                         ← 你正在读
+├── CLAUDE.md                         ← Claude Code 工作约束（H1-H14 硬约束）
+├── CONTEXT.md                        ← 当前阶段快照
+├── package.json                      ← v4.3.3 · electron-builder 配置
+├── dist/                             ← 打包产物（驭课Agent-v4.3.3-setup.exe）
+├── prompts/                          ← AI Prompt 文件（H5 必须在这）
+├── scripts/                          ← 验证脚本（H4 不可删）
 ├── src/
-│   ├── main/                  ← Electron 主进程
-│   │   ├── index.js           ← 启动 + IPC 注册中心
-│   │   ├── ipc/               ← 87+ IPC handler（按业务拆分）
-│   │   │   ├── _registry.js   ← 注册中心
-│   │   │   └── v2/            ← v4.0.0 阶段 handler（schedule/design/lesson/lecture/ppt/video/report）
-│   │   ├── services/          ← 业务服务（schedule/design/micro-video/report 等）
-│   │   ├── script/            ← AI 生成器（abc-generator/formal-generator）
-│   │   ├── agent/             ← Agent + Builder（formal.builder Phase-6/8.5）
-│   │   ├── export/            ← 各格式导出（word/ppt/schedule-word/design-word/report-export）
-│   │   └── database/          ← JSON DB（db-simple.js）
-│   ├── preload/index.js       ← contextBridge API 桥接
-│   └── renderer/src/v2/       ← V2 React UI
-│       ├── V2App.jsx          ← 主入口（≈3500 行）
-│       ├── ScheduleStage.jsx  ← 阶段 1
-│       ├── DesignStage.jsx    ← 阶段 2 + AI 信息图
-│       ├── LectureStage.jsx   ← 阶段 3（多节课）
-│       ├── PptStage.jsx       ← 阶段 4
-│       ├── MicroVideoStage.jsx← 阶段 5
-│       └── ReportStage.jsx    ← 阶段 6（4 格式导出）
-└── package.json
+│   ├── main/                         ← Electron 主进程
+│   │   ├── index.js
+│   │   ├── migrations/               ← v4.3.3 新增 · 跨版本数据迁移
+│   │   │   ├── README.md
+│   │   │   └── 001-recover-orphan-artifacts.js
+│   │   ├── v2/
+│   │   │   ├── contracts.js          ← STAGE_ORDER 8 阶段 + STAGE_REQUIREMENTS（H1 例外）
+│   │   │   ├── runtime.js
+│   │   │   └── quality.js
+│   │   ├── ipc/
+│   │   │   ├── _registry.js          ← 集中注册（H2: 不在 index.js 加 handler）
+│   │   │   └── v2/                   ← 8 个 stage 的 handlers
+│   │   │       ├── schedule.handlers.js
+│   │   │       ├── design.handlers.js
+│   │   │       ├── ppt.handlers.js
+│   │   │       ├── lesson.handlers.js     ← Phase-9 多节课模型
+│   │   │       ├── quiz.handlers.js       ← v4.3.3 NEW
+│   │   │       ├── homework.handlers.js   ← v4.3.3 NEW
+│   │   │       ├── micro-video.handlers.js
+│   │   │       └── report.handlers.js
+│   │   ├── services/
+│   │   │   ├── quiz.service.js       ← v4.3.3 NEW
+│   │   │   ├── homework.service.js   ← v4.3.3 NEW
+│   │   │   ├── pptx-parser.service.js
+│   │   │   └── ...
+│   │   └── database/
+│   │       └── db-simple.js          ← JSON DB
+│   ├── preload/index.js              ← IPC API 暴露（含 quizV2 / homeworkV2）
+│   └── renderer/src/v2/
+│       ├── V2App.jsx                 ← 主路由 + 全局 state（**4500 LOC，D11 待拆**）
+│       ├── ScheduleStage.jsx
+│       ├── DesignStage.jsx
+│       ├── PptStage.jsx
+│       ├── LectureStage.jsx          ← 含右侧 LectureChatPanel
+│       ├── QuizStage.jsx             ← v4.3.3 NEW
+│       ├── HomeworkStage.jsx         ← v4.3.3 NEW
+│       ├── MicroVideoStage.jsx
+│       ├── ReportStage.jsx
+│       └── MyWorkbench.jsx           ← 教师日志（前称我的工作台）
+└── .claude/
+    ├── README.md                     ← 治理知识库索引
+    ├── hard-constraints.md           ← H1-H14 详细
+    ├── notes/
+    │   ├── 2026-05-18-bug-retrospective-v1-to-v4.3.0.md  ← bug 历史回顾
+    │   └── 2026-05-18-audit-v4.3.0-to-4.3.3.md           ← 审计报告
+    └── phases/                       ← 阶段完工总结
 ```
 
 ---
 
-## 验证回归（CI）
+## 开发指引
 
-完整 verify 脚本清单见 `.claude/verify-matrix.md`。Phase-9 关键回归：
+### 启动 dev
 
-```powershell
-node scripts/verify-contracts-v6.js          # 6 阶段架构 27/27
-node scripts/verify-schedule-service.js      # 进度表 27/27
-node scripts/verify-design-service.js        # 教学设计 21/21
-node scripts/verify-micro-video-service.js   # 微课视频 25/25
-node scripts/verify-report-service.js        # 实施报告 34/34
+```bash
+npm install
+npm run dev    # vite + electron 一键启动
 ```
 
-**累计 134/134 全过**（不含 Phase-5/6/8 历史回归）。
+### 打包
+
+```bash
+npm run build  # vite build && electron-builder → dist/驭课Agent-v4.3.3-setup.exe
+```
+
+### 验证脚本（H4 必须保留）
+
+```bash
+node scripts/verify-contracts-v6.js     # stage 转换契约校验（v4.3.3 应升级为 v8）
+node scripts/verify-design-service.js
+node scripts/verify-ppt-images-pipeline.js
+node scripts/verify-schedule-service.js
+```
 
 ---
 
-## 硬约束（H1-H13）
+## 已知技术债（Sprint B 处理）
 
-| # | 约束 | 详细 |
+| ID | 内容 | 优先级 |
 |---|---|---|
-| H1 | 不修改 contracts.js（**Phase-9 例外，已批准**）| `.claude/hard-constraints.md` |
-| H2 | 不在 index.js 加新 IPC handler | 必须写到 `ipc/` 子文件 |
-| H3 | quality.js 不依赖生成模型 | 验证层独立 |
-| H4 | 不删除/重命名 verify 脚本 | 回归防护网 |
-| H5 | Prompt 必须放 `prompts/*.md` | 不写死代码 |
-| H6 | 单次任务限 1-2 个文件 | 防多模块同时改 |
-| H7 | 每次改动告诉用户跑哪个 verify | 不跳过验证 |
-| H8 | 加新依赖必须先问 | 不随意污染 package.json |
-| H9 | "selfCheck mock 通过 ≠ 功能就绪" | 必须真实路径用例 |
-| H10 | 不允许"force accept"作为质量门槛兜底 | Agent 不能传 userForceAccept=true |
-| H11 | "流程完成 ≠ 任务完成" | 必须 quality.valid + 字段齐全 |
-| H12 | 业务路径必须走 prompt-assembler | systemPrompt 不绕过 |
-| H13 | URL 抓取走 web-extractor.service | 不内嵌 fetch |
+| **D11** | V2App.jsx 4500 LOC 拆分（每 stage 拆独立 component + 数据源从 server bundle 单一来源）| 🟧 中 |
+| **D12** | sessionContext DB 真正落地（当前 SimpleDb 没实现，handlers 返回 null）| 🟥 高 |
+| **D13** | artifact schemaVersion + dirty 信号（上游改 → 下游标记 needs-recompute）| 🟧 中 |
+| **D14** | 删 framework 残留（contracts/runtime/lecture.handlers/workbench/V2App stub）| 🟢 低 |
+| **D15** | 真实 endpoint smoke test CI（按 H9：mock 通过 ≠ 完成）| 🟧 中 |
+
+详见 `.claude/notes/2026-05-18-audit-v4.3.0-to-4.3.3.md`
 
 ---
 
-## 维护人
+## 关键约束（CLAUDE.md H1-H14）
 
-- **项目方**：Baggio
-- **代码协作**：Claude Code（Anthropic）
-- **审查频率**：每版本发布前 + 每月体检
+- **H1**：`contracts.js` 是核心契约，改它需要明确批准（v4.3.3 已批 1 次：6→8 阶段）
+- **H2**：禁止在 `index.js` 加 IPC handler，必须写到 `ipc/v2/*.handlers.js`
+- **H6**：单任务限 1-2 个文件改动（除非用户明确批准大重构）
+- **H8**：加新 npm 依赖需要明确批准（v4.3.3 已批 pdf-parse）
+- **H9**：selfCheck mock 通过 ≠ 功能就绪，必须真实路径覆盖
+- **H14**（v4.3.0 新增）：禁止任何教学参数（学时 / 周次 / 学校 / 教师 / 课程名）硬编码 default
+
+完整说明 → [`.claude/hard-constraints.md`](.claude/hard-constraints.md)
+
+---
+
+## 数据存储位置
+
+| 类型 | 路径 |
+|---|---|
+| JSON DB | `C:\Users\<你>\AppData\Roaming\驭课 Agent\course-designer-data.json` |
+| 工作区（图片 / 导出文件） | `C:\Users\<你>\Documents\驭课Agent工作区\<课程名>\` |
+| 迁移日志（v4.3.3+）| `course-designer-data.json` 内 `migrations` 字段 |
+
+---
+
+## 版本历史
+
+| 版本 | 日期 | 关键改动 |
+|---|---|---|
+| **v4.3.3** | 2026-05-18 | **Sprint A 止血 + Sprint B 结构重构** · 8 阶段（+ Step 5 测验 + Step 6 作业）· 跨版本数据找回 · 教师日志改名 |
+| v4.3.0 | 2026-05-18 | D6-D9 · 讲稿一步出稿 + 右侧 AI 对话 + PPT 骨架自动预填 + 三路径自动保存 + stage 聚合校验 + 强制解锁 + PDF/OCR |
+| v4.2.0 | 2026-05-17 | 6 阶段架构升级（PPT 在 lecture 前）+ 会话上下文 + 实体绑定 + 工作台修复 |
+| v4.1.4 | 2026-05-16 | 多节课模式 + 9 维度质量审核 |
+| v4.0.0 | 2026-05-10 | 6 阶段工作流首版（Phase-9 完成）|
+
+---
+
+## 致谢
+
+- **设计 / 老师反馈**：Baggio（项目方）+ 试用老师群
+- **技术实现**：Claude Code（Anthropic Claude Opus 4.7 / Sonnet 4.5）
+- **AI 模型**：火山引擎（豆包）系列 endpoint
+- **结构性诊断**：Codex AI 代理（Sprint A/B 治理建议）
+
+---
+
+> 📚 治理结构参考：[`CLAUDE.md`](CLAUDE.md) + [`.claude/README.md`](.claude/README.md)

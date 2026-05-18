@@ -1,14 +1,15 @@
 /**
- * v2 课堂讲稿（多节课）handlers — 驭课 Agent v4.0.0 / Phase-9 C-X
+ * v2 课堂讲稿（多节课）handlers — v4.3.0 重构版
  *
- * 与老的 script:generateABC / script:generateFormal 区别：
- *   - 老：1 份讲稿覆盖整门课（totalHours=72）
- *   - 新：每次生成 1 节课（≤4 学时，理论+实践拼配，带主题/章节）
+ * 工作流（P1.1 重构 2026-05-17，已删 A/B/C 三稿）：
+ *   ① v2:lessonGenerateDraft   → AI 直接出 1 份完整草稿
+ *   ② 老师在 LectureStage 右栏改 → 改成意中所想的版本
+ *   ③ v2:lessonGenerateFormal  → 基于改后稿 + 9 维度质量审核 → 出正式稿
  *
  * 处理的 channel：
- *   v2:lessonGenerateABC      生成本节课 A/B/C 三稿
- *   v2:lessonGenerateFormal   生成本节课正式稿
- *   v2:lessonList             列出该笔记本所有节课讲稿（按 lessonNumber 升序）
+ *   v2:lessonGenerateDraft    生成本节课 1 份完整草稿（无 ABC）
+ *   v2:lessonGenerateFormal   基于老师改后的 priorDraft 出正式稿（含 retry-loop + reviewAndRevise）
+ *   v2:lessonList             列出该笔记本所有节课讲稿
  *   v2:lessonSave             保存本节讲稿（手改后）
  *   v2:lessonConfirm          确认本节讲稿
  *   v2:lessonGet              读取单节课
@@ -17,12 +18,12 @@
  * Artifact 设计：
  *   type='lecture_final', stage='lecture'
  *   metadata: { lessonNumber, topic, chapter, theoryHours, practiceHours, weekRange }
- *   content: { drafts:{a,b,c}, selectedDraft, finalScript, referenceMaterials, audit }
+ *   content: { draftScript, priorDraft, finalScript, referenceMaterials, audit, qualityMeta }
  */
 
 const path = require('path');
 const { dialog } = require('electron');
-const { generateLectureABCDrafts } = require('../../script/abc-generator');
+// P1.1（2026-05-17）：abc-generator 已删除，统一走新流程
 const { exportLectureWord } = require('../../export/word');
 const { resolveProviderConfig, createAiClientByConfig } = require('../../api/provider-config');
 // Phase-9（2026-05-10）：接入 B 方案阶段 1 的完整质量链路
@@ -48,7 +49,11 @@ function arr(v) { return Array.isArray(v) ? v : []; }
  *   ④ 评价标准 10 分制（与素材一致，不要 100 分）
  *   ⑤ 减少 AI 套话约束（不要"评价你们学得好不好不是 X 而是 Y"格式）
  */
-function buildLessonContextText({ lessonMeta, scheduleData, designData, referenceMaterials, courseName }) {
+// T8 修复（2026-05-17）：新增 minutesPerHour 参数，1 学时换算分钟数由老师配置传入，无兜底
+function buildLessonContextText({ lessonMeta, scheduleData, designData, referenceMaterials, courseName, minutesPerHour }) {
+  if (!minutesPerHour || minutesPerHour <= 0) {
+    throw new Error('buildLessonContextText: 缺少 minutesPerHour（请先在创建笔记本时填学校的"1 学时分钟数"）');
+  }
   const lines = [];
 
   // ═══ 本节范围 ═══
@@ -58,7 +63,7 @@ function buildLessonContextText({ lessonMeta, scheduleData, designData, referenc
   lines.push(`本节主题：${lessonMeta.topic || '（未指定）'}`);
   if (lessonMeta.chapter) lines.push(`对应章节：${lessonMeta.chapter}`);
   if (lessonMeta.weekRange) lines.push(`周次范围：${lessonMeta.weekRange}`);
-  const totalLessonMinutes = ((lessonMeta.theoryHours || 0) + (lessonMeta.practiceHours || 0)) * 45;
+  const totalLessonMinutes = ((lessonMeta.theoryHours || 0) + (lessonMeta.practiceHours || 0)) * minutesPerHour;  // T8
   lines.push(`本节学时：理论 ${lessonMeta.theoryHours || 0} + 实践 ${lessonMeta.practiceHours || 0} = ${(lessonMeta.theoryHours || 0) + (lessonMeta.practiceHours || 0)} 学时（约 ${totalLessonMinutes} 分钟）`);
   lines.push('⚠ 本讲稿仅覆盖本节课内容（≤4 学时），不要写整门课。');
   if ((lessonMeta.theoryHours || 0) > 0 && (lessonMeta.practiceHours || 0) > 0) {
@@ -142,6 +147,8 @@ function buildLessonContextText({ lessonMeta, scheduleData, designData, referenc
     if (matchedRow) {
       lines.push('## 教学进度表中本节内容定位');
       lines.push(`第 ${matchedRow.week} 周 / 第 ${matchedRow.session} 课次：${matchedRow.content || ''}`);
+      // 2026-05-15：把进度表行的学时数也带入上下文（防讲稿用错时长）
+      if (matchedRow.hours) lines.push(`本课次学时：${matchedRow.hours} 学时（约 ${matchedRow.hours * minutesPerHour} 分钟）`);  // T8
       if (matchedRow.method) lines.push(`授课方式：${matchedRow.method}`);
       lines.push('');
     }
@@ -180,7 +187,7 @@ function buildLessonContextText({ lessonMeta, scheduleData, designData, referenc
   return lines.join('\n');
 }
 
-/** 取最新 confirmed 的 design / schedule 数据 */
+/** 取最新 confirmed 的 design / schedule / ppt 数据（v4.3.0 D6.1）*/
 function pickConfirmedDesign(items) {
   return items
     .filter((a) => a.type === 'design_doc' && a.stage === 'design' && a.confirmed)
@@ -191,8 +198,94 @@ function pickConfirmedSchedule(items) {
     .filter((a) => a.type === 'schedule_table' && a.stage === 'schedule' && a.confirmed)
     .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))[0]?.content || null;
 }
+// D6.1 新增：取最新（可未 confirmed）的 ppt outline 作为讲稿的**主骨架**
+function pickLatestPptOutline(items) {
+  return items
+    .filter((a) => a.type === 'ppt_outline' && a.stage === 'ppt')
+    .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))[0]?.content || null;
+}
+// D6.1 新增：把 PPT pages 序列化成讲稿可用的"页级骨架文本"
+function serializePptPagesForLecture(pptOutline, minutesPerHour, lessonHours) {
+  if (!pptOutline) return null;
+  const pages = Array.isArray(pptOutline.pages) ? pptOutline.pages : [];
+  if (pages.length === 0) return null;
+  const totalMinutes = lessonHours * minutesPerHour;
+  const avgMinutesPerPage = (totalMinutes / pages.length).toFixed(1);
+  const lines = [
+    `═══ PPT 主骨架（${pages.length} 页 · 每页 ≈ ${avgMinutesPerPage} 分钟 · 是讲稿口播的**核心节奏**）═══`,
+    '',
+    '⚠ 铁律：讲稿必须以每页 PPT 为口播段落骨架，依次展开。',
+    '   - 每页 PPT 对应一段教师口播（开场词 → 要点讲解 → 过渡到下一页）',
+    '   - 口播必须扣住页面 title / keyContent / 配图 / 数据点',
+    '',
+  ];
+  pages.forEach((p) => {
+    const keyContent = Array.isArray(p.keyContent) ? p.keyContent.filter(Boolean).join('  /  ')
+      : String(p.keyContent || '').split('\n').filter(Boolean).join('  /  ');
+    lines.push(`▶ P${p.pageNumber} · 【${p.pageType || '内容'}】《${p.title || '未命名'}》${p.subtitle ? '（' + p.subtitle + '）' : ''}`);
+    if (keyContent) lines.push(`  要点：${keyContent.slice(0, 200)}`);
+    if (p.speakerNotes) lines.push(`  演讲备注：${String(p.speakerNotes).slice(0, 150)}`);
+    if (p.dataPoint) lines.push(`  数据点：${String(p.dataPoint).slice(0, 100)}`);
+    if (p.interactionPrompt) lines.push(`  互动提示：${String(p.interactionPrompt).slice(0, 100)}`);
+    lines.push('');
+  });
+  return lines.join('\n');
+}
 
 function register(ipcMain, getDeps) {
+  // 2026-05-16 v4.1.4 新增：从 title 反推修复 metadata
+  //   场景：早期 bug 导致 metadata.lessonNumber/topic/theoryHours 被空表单冲掉，
+  //   但 artifact.title 保留了拼接字符串"第 N 节·主题（X学时）"，可以反向解析重建 metadata。
+  //   仅用于"已存在 title 但 metadata 异常"的情况。
+  ipcMain.handle('v2:lessonRepairMetaFromTitle', async (event, payload = {}) => {
+    const { db } = getDeps();
+    try {
+      const notebookId = Number(payload.notebookId);
+      const lessonId = Number(payload.lessonId);
+      if (!Number.isFinite(notebookId) || !Number.isFinite(lessonId)) {
+        return { success: false, error: 'notebookId / lessonId 无效' };
+      }
+      const items = db.listArtifacts({ notebookId });
+      const target = items.find((a) => Number(a.id) === lessonId);
+      if (!target) return { success: false, error: '未找到该 artifact' };
+
+      const title = String(target.title || '');
+      // 匹配 "第 N 节·主题（X学时）" 或 "第 N 节·主题（X 学时）"
+      const m = title.match(/第\s*(\d+)\s*节·(.+?)（(\d+(?:\.\d+)?)\s*学时）/);
+      if (!m) {
+        return { success: false, error: `title 无法解析：${title}` };
+      }
+      const lessonNumber = Number(m[1]) || 1;
+      const topic = m[2].trim();
+      const totalHrs = Number(m[3]) || 0;
+      // 学时拆分：现有 metadata 优先；否则均分理论/实践（向下取整 + 余数给理论）
+      const oldMeta = target.metadata || {};
+      const theoryHours = Number(oldMeta.theoryHours) > 0
+        ? Number(oldMeta.theoryHours)
+        : Math.ceil(totalHrs / 2);
+      const practiceHours = Number(oldMeta.practiceHours) > 0
+        ? Number(oldMeta.practiceHours)
+        : Math.max(0, totalHrs - theoryHours);
+
+      const merged = {
+        ...oldMeta,
+        lessonNumber: Number(oldMeta.lessonNumber) > 0 ? Number(oldMeta.lessonNumber) : lessonNumber,
+        topic: String(oldMeta.topic || '').trim() || topic,
+        theoryHours,
+        practiceHours,
+        chapter: String(oldMeta.chapter || '').trim(),
+        weekRange: String(oldMeta.weekRange || '').trim(),
+        phase: 'phase-9',
+        source: 'v2:lessonRepairMetaFromTitle',
+      };
+      db.updateArtifact(lessonId, { metadata: merged });
+      return { success: true, data: { metadata: merged } };
+    } catch (e) {
+      console.error('[v2:lessonRepairMetaFromTitle] 异常：', e);
+      return { success: false, error: e.message };
+    }
+  });
+
   // ── 列出该笔记本的所有节课（按 lessonNumber 升序）─────────────────
   ipcMain.handle('v2:lessonList', async (event, notebookId) => {
     const { db } = getDeps();
@@ -203,14 +296,26 @@ function register(ipcMain, getDeps) {
       const items = typeof db.listArtifacts === 'function' ? db.listArtifacts({ notebookId: id }) : [];
       const lessons = items
         .filter((a) => a.type === 'lecture_final' && a.stage === 'lecture')
-        .sort((a, b) => (a.metadata?.lessonNumber || 0) - (b.metadata?.lessonNumber || 0));
+        // 2026-05-15 v4.1.4 T1：多键排序，与 v2:listDesignLessons 对齐
+        //   1) lessonNumber  2) subNumber  3) chapter  4) createdAt
+        .sort((a, b) => {
+          const lnDiff = (Number(a.metadata?.lessonNumber) || 0) - (Number(b.metadata?.lessonNumber) || 0);
+          if (lnDiff !== 0) return lnDiff;
+          const snDiff = (Number(a.metadata?.subNumber) || 0) - (Number(b.metadata?.subNumber) || 0);
+          if (snDiff !== 0) return snDiff;
+          const chDiff = String(a.metadata?.chapter || '').localeCompare(String(b.metadata?.chapter || ''), 'zh');
+          if (chDiff !== 0) return chDiff;
+          const ta = new Date(a.createdAt || 0).getTime() || 0;
+          const tb = new Date(b.createdAt || 0).getTime() || 0;
+          return ta - tb;
+        });
       // 累计学时（已使用）
       const usedHours = lessons.reduce(
         (s, l) => s + (Number(l.metadata?.theoryHours) || 0) + (Number(l.metadata?.practiceHours) || 0),
         0
       );
       const notebook = db.getNotebookById(id);
-      const totalHours = Number(notebook?.totalHours) || 72;
+      const totalHours = Number(notebook?.totalHours) || 0;   // T7
       return {
         success: true,
         data: {
@@ -239,6 +344,63 @@ function register(ipcMain, getDeps) {
     }
   });
 
+  // ── v4.3.0 D7（2026-05-18）：lecture 阶段启动数据 ─────────────────────────
+  //   返回该笔记本下所有 PPT outline artifact（不限本节，老师可下拉切骨架）
+  //   + 默认 PPT 的 lessonMeta（自动预填本节基础信息）
+  //   触发：进 lecture 阶段时 / 老师手动切 PPT 下拉时
+  ipcMain.handle('v2:getLectureBootstrap', async (event, payload = {}) => {
+    const { db } = getDeps();
+    try {
+      if (!db) throw new Error('Database not initialized');
+      const notebookId = Number(payload.notebookId);
+      if (!Number.isFinite(notebookId) || notebookId <= 0) return { success: false, error: 'notebookId 无效' };
+      const items = typeof db.listArtifacts === 'function' ? db.listArtifacts({ notebookId }) : [];
+      // 列出所有 ppt_outline（不论 confirmed）按 updatedAt 倒序
+      const allPpts = items
+        .filter((a) => a.type === 'ppt_outline' && a.stage === 'ppt')
+        .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+
+      // 把每份 PPT 的 lessonMeta 提取出来供前端展示+预填
+      const pptOptions = allPpts.map((a) => {
+        // metadata 优先（D5 治本后保存的字段），fallback 到 content.lessonMeta
+        const meta = (a.metadata && a.metadata.topic)
+          ? a.metadata
+          : (a.content?.lessonMeta || {});
+        const pages = Array.isArray(a.content?.pages) ? a.content.pages : [];
+        return {
+          id: a.id,
+          title: a.title || `PPT 课件 #${a.id}`,
+          createdAt: a.createdAt,
+          updatedAt: a.updatedAt,
+          confirmed: !!a.confirmed,
+          pageCount: pages.length,
+          lessonMeta: {
+            lessonNumber: meta.lessonNumber || 0,
+            topic: meta.topic || '',
+            chapter: meta.chapter || '',
+            theoryHours: Number(meta.theoryHours) || 0,
+            practiceHours: Number(meta.practiceHours) || 0,
+            weekRange: meta.weekRange || '',
+          },
+        };
+      });
+
+      const defaultPpt = pptOptions[0] || null;
+      return {
+        success: true,
+        data: {
+          notebookId,
+          pptOptions,                              // 给下拉用
+          defaultPptId: defaultPpt?.id || null,    // 默认选中
+          lessonMeta: defaultPpt?.lessonMeta || null,  // 默认预填的本节基础信息
+        },
+      };
+    } catch (e) {
+      console.error('[v2:getLectureBootstrap] 异常：', e);
+      return { success: false, error: e.message };
+    }
+  });
+
   // ── 读取单节课 ──────────────────────────────────────────────
   ipcMain.handle('v2:lessonGet', async (event, payload = {}) => {
     const { db } = getDeps();
@@ -255,8 +417,95 @@ function register(ipcMain, getDeps) {
     }
   });
 
-  // ── 生成 A/B/C 候选稿 ──────────────────────────────────────
-  ipcMain.handle('v2:lessonGenerateABC', async (event, payload = {}) => {
+  // ── 💬 v4.3.0 D6.5：辅助对话 patch 讲稿 ──────────────────────
+  //   老师在右侧 ChatPanel 输入指令 + 上传素材 → AI 局部 patch 讲稿
+  ipcMain.handle('v2:lessonChatPatch', async (event, payload = {}) => {
+    const { db } = getDeps();
+    try {
+      const notebookId = Number(payload.notebookId);
+      if (!notebookId) return { success: false, error: 'notebookId 无效' };
+      const notebook = db.getNotebookById(notebookId);
+      if (!notebook) return { success: false, error: 'Notebook not found' };
+      const currentScript = String(payload.currentScript || '').trim();
+      if (currentScript.length < 100) return { success: false, error: '当前讲稿过短，请先生成正式稿' };
+      const instruction = String(payload.instruction || '').trim();
+      const attachments = Array.isArray(payload.attachments) ? payload.attachments : [];
+      if (!instruction && attachments.length === 0) return { success: false, error: '请输入指令或上传素材' };
+
+      const aiClient = pickAiClient(payload, db);
+      if (!aiClient) return { success: false, error: '未配置 AI 客户端' };
+
+      const lessonMeta = payload.lessonMeta || {};
+
+      const systemPrompt = [
+        '你是讲稿协作助手。任务：按老师的指令 + 新素材，对当前讲稿做**局部 patch**，不要重写整篇。',
+        '',
+        '## 输入',
+        '- 当前讲稿（完整文本）',
+        '- 老师指令（明确改哪段、改成什么）',
+        '- 新素材（老师上传的文件 / 图片 OCR 结果）',
+        '',
+        '## 输出',
+        '- 返回**修改后的完整讲稿**（不是 diff）',
+        '- 只改老师指令涉及的部分，**其他段落原样保留**',
+        '- 保持原 Markdown 结构（## 标题 / 教师讲述 / 课堂动作附栏）',
+        '',
+        '## 铁律',
+        '- 如老师指令含"删 X" → 把 X 段删了',
+        '- 如老师指令含"加 X 案例" → 在合适位置插入新段落（优先用素材里的真实数据 / 品牌）',
+        '- 如老师指令含"改更 X 风格" → 仅改语气，不改事实数据',
+        '- 严禁编造素材里没有的数字',
+      ].join('\n');
+
+      const userPromptParts = [
+        `## 老师指令\n${instruction || '（仅提供素材，无具体指令 → 请把素材里的真实数据 / 案例融入讲稿合适位置）'}`,
+        '',
+      ];
+      if (attachments.length > 0) {
+        userPromptParts.push('## 老师新上传的素材');
+        attachments.forEach((a, i) => {
+          userPromptParts.push(`### 素材 ${i + 1}：${a.name}（类型：${a.kind || 'text'}）`);
+          userPromptParts.push(String(a.content || '').slice(0, 4000));
+          userPromptParts.push('');
+        });
+      }
+      userPromptParts.push('## 当前讲稿（按上面指令 patch）');
+      userPromptParts.push(currentScript.slice(0, 18000));   // 留 4k 给 prompt 框架 + 素材
+      const userPrompt = userPromptParts.join('\n');
+
+      let newScript = '';
+      try {
+        newScript = await aiClient.chatJson({
+          systemPrompt, userPrompt,
+          temperature: 0.3,   // patch 时低 temp，避免发挥过度
+          maxTokens: 14000,
+          asText: true,
+        });
+      } catch (e) {
+        return { success: false, error: `AI patch 失败：${e.message}` };
+      }
+      newScript = String(newScript || '').trim();
+      if (newScript.length < 200) return { success: false, error: 'AI 返回的 patch 过短' };
+
+      return {
+        success: true,
+        data: {
+          newScript,
+          beforeLength: currentScript.length,
+          afterLength: newScript.length,
+          deltaChars: newScript.length - currentScript.length,
+          patchedAt: new Date().toISOString(),
+        },
+      };
+    } catch (e) {
+      console.error('[v2:lessonChatPatch]', e);
+      return { success: false, error: e.message };
+    }
+  });
+
+  // ── ① 生成讲稿草稿（1 稿，无 A/B/C）──────────────────────
+  // P1.1（2026-05-17）：新流程入口，AI 直接出 1 份完整讲稿，老师在右栏改后走 generateFormal
+  ipcMain.handle('v2:lessonGenerateDraft', async (event, payload = {}) => {
     const { db, ensureNotebookWorkspaceState } = getDeps();
     try {
       if (!db) throw new Error('Database not initialized');
@@ -268,49 +517,152 @@ function register(ipcMain, getDeps) {
       if (!notebook) return { success: false, error: 'Notebook not found' };
 
       const lessonMeta = payload.lessonMeta || {};
-      const referenceMaterials = arr(payload.referenceMaterials);
+      let referenceMaterials = arr(payload.referenceMaterials);
       const aiClient = pickAiClient(payload, db);
       if (!aiClient) return { success: false, error: '未配置有效的 AI 客户端' };
+
+      // 相关性过滤（同 generateFormal）
+      let referenceFilterAudit = null;
+      if (referenceMaterials.length >= 2) {
+        try {
+          const { filterByRelevance } = require('../../services/reference-filter.service');
+          const filterResult = await filterByRelevance({
+            aiClient,
+            courseName: notebook.name || '课程',
+            lessonTopic: lessonMeta.topic || '',
+            references: referenceMaterials,
+            threshold: 5,
+          });
+          referenceMaterials = filterResult.filtered;
+          referenceFilterAudit = {
+            kept: filterResult.filtered.length,
+            dropped: filterResult.dropped.length,
+            details: filterResult.audit,
+            warning: filterResult.warning || null,
+          };
+        } catch (filterErr) {
+          console.warn('[v2:lessonGenerateDraft] 相关性过滤异常，兜底全保留：', filterErr.message);
+        }
+      }
 
       const allArtifacts = typeof db.listArtifacts === 'function' ? db.listArtifacts({ notebookId }) : [];
       const designData = pickConfirmedDesign(allArtifacts);
       const scheduleData = pickConfirmedSchedule(allArtifacts);
+      // D6.1（2026-05-18）：拉 PPT outline 作为讲稿主骨架（权重最高）
+      const pptOutline = pickLatestPptOutline(allArtifacts);
 
       const lessonHours = (Number(lessonMeta.theoryHours) || 0) + (Number(lessonMeta.practiceHours) || 0);
+      if (lessonHours <= 0) {
+        return { success: false, error: 'lessonMeta 缺少 theoryHours + practiceHours（请确认本节课学时分配，不能为 0）' };
+      }
+      const lessonMinutesPerHour = Number(notebook?.minutesPerHour) || 0;
+      if (lessonMinutesPerHour <= 0) {
+        return { success: false, error: '笔记本未设置"1 学时分钟数"（minutesPerHour）。请在创建/编辑笔记本时填写学校标准（如 40 / 45 / 50）。' };
+      }
       const lessonContextText = buildLessonContextText({
         lessonMeta, scheduleData, designData, referenceMaterials,
         courseName: notebook.name || '课程',
+        minutesPerHour: lessonMinutesPerHour,
       });
 
-      const result = await generateLectureABCDrafts({
-        courseName: notebook.name || '课程',
-        modules: [{
-          // 用一个"虚拟模块"包装本节课，让现有 generator 跑通
-          moduleNumber: lessonMeta.lessonNumber || 1,
-          name: lessonMeta.topic || '本节课',
-          hours: lessonHours || 4,
-          description: lessonMeta.topic || '',
-          knowledgePoints: arr(lessonMeta.knowledgePoints),
-          teachingMethods: '',
-        }],
-        styleRubricText: payload.styleRubricText || '',
-        aiClient,
-        totalHours: lessonHours || 4,        // ⚠ 关键：用本节学时，不是 notebook.totalHours
-        notebookContext: {
-          softwareTools: notebook.softwareTools || '',
-          jobTargets: notebook.jobTargets || '',
-          industryScenarios: notebook.industryScenarios || '',
-          learnerProfile: notebook.learnerProfile || '',
-          frameworkObjectives: '',
-          frameworkTeachingMethods: '',
-          // 把本节上下文 + 素材塞进 referenceContext（最多 6000 字）
-          referenceContext: lessonContextText.slice(0, 6000),
+      // D6.1（2026-05-18）：PPT 骨架文本（主权重）
+      const pptSkeletonText = serializePptPagesForLecture(pptOutline, lessonMinutesPerHour, lessonHours);
+
+      // D6.1 系统提示词：彻底重排权重
+      //   ❌ 老版：教学设计是主、PPT 没参与
+      //   ✅ 新版：PPT 21 页是骨架；老师上传素材是肌肉（直接引用数据 / 案例 / 真实品牌）；设计 5 段法只对齐节奏
+      const totalMinutes = lessonHours * lessonMinutesPerHour;
+      const systemPrompt = [
+        '你是资深的职业教育课堂讲稿专家。',
+        '任务：把【PPT 21 页骨架】扩写成老师可直接照念的完整课堂讲稿，并把【教学辅助素材】里的真实案例 / 数据 / 观点深度融入。',
+        '',
+        '## 🔴 输入权重（必须按此优先级使用）',
+        '1. **PPT 大纲（最高权重 · 100% 决定骨架）**：每页 PPT 对应讲稿的一段口播。',
+        '   - 按页号顺序写，不可跳页 / 不可合并 / 不可添加 PPT 没有的话题。',
+        '   - 每页口播必须扣住该页的 title / keyContent / dataPoint / interactionPrompt。',
+        '2. **教学辅助素材（高权重 · 80% 决定内容深度）**：老师上传的真实案例、行业数据、品牌观察、学情资料。',
+        '   - 优先直接引用其中的具体数字 / 真实品牌名 / 学情数据 / 行业事实。',
+        '   - **素材的质量和提炼深度直接决定讲稿是否打动人**。',
+        '3. **教学设计 5 段法（中权重 · 30% 节奏对齐）**：仅用于确认讲稿不破坏 design.inClass.phases 的节奏。',
+        '4. **lessonMeta（低权重 · 仅校验）**：确认本节学时 / 主题范围。',
+        '',
+        '## 📐 结构（按 PPT 页序展开）',
+        '不再按 5 段法机械拆分，而是按 PPT 21 页的真实节奏：',
+        '- 每页 PPT → 一段教师口播（含【教师讲述】 + 【课堂动作】）',
+        '- 段首标注「## 第 N 页 · 《页标题》（约 X 分钟）」',
+        '- 段内：教师讲述 ≥ 200 字（口语化、引用素材数据、有过渡到下一页的钩子）',
+        '- 段内：课堂动作附栏（3-5 条具体动作：板书 / 展示 / 提问 / 演示 / 学生互动）',
+        '',
+        '## ⏱ 时长校准',
+        `本节 ${lessonHours} 学时 × ${lessonMinutesPerHour} 分钟 = ${totalMinutes} 分钟。`,
+        `PPT 共 ${pptOutline ? (pptOutline.pages?.length || '?') : '0'} 页 → 每页平均 ${pptOutline ? ((totalMinutes / Math.max(1, pptOutline.pages?.length || 1)).toFixed(1)) : '?'} 分钟。`,
+        '',
+        '## 🚫 反编造铁律（H14）',
+        '- 严禁编造销量 / 点赞 / 达人数等具体数字（除非素材里有出处）',
+        '- 软件版本号不写死（用"剪映/PR等任一视频剪辑工具"代替"剪映2024"）',
+        '- 案例 / 品牌名优先用素材里给的真实名（无素材时用通用描述，不编造）',
+        '',
+        '## ✍ 表达自然度',
+        '- 像老师真人讲课：可有停顿 / 反问 / 具体例子 / 师生互动设计',
+        '- 避免 AI 套话（"评价你们学得好不好不是 X 而是 Y" 模板对仗）',
+        '- 思政元素自然融入（不硬塞，找 1-2 个机会贴主题）',
+        '',
+        '## 📤 输出格式（严格 Markdown）',
+        '# {课程名} · 第 N 节 · {主题} · 课堂讲稿',
+        '## 第 1 页 · 《XXX》（约 X 分钟）',
+        '**教师讲述：**',
+        '[完整口语化文本 ≥ 200 字]',
+        '**课堂动作附栏：**',
+        '- 教师：...',
+        '- 学生：...',
+        '...（每页一段，按页号顺序）',
+        '',
+        `总字数 ≈ ${totalMinutes * 25}（按口语 25 字/分钟），不能短于 ${totalMinutes * 15} 字。`,
+      ].join('\n');
+
+      // 组装 user prompt：PPT 骨架（主） + lessonContextText（design + schedule + 素材）
+      const userPromptParts = [];
+      if (pptSkeletonText) {
+        userPromptParts.push(pptSkeletonText);
+        userPromptParts.push('');
+      } else {
+        userPromptParts.push('⚠ 当前没有已生成的 PPT 大纲。请回 PPT 阶段先生成 + 确认 PPT，再回来生成讲稿。');
+        userPromptParts.push('（无 PPT 时本次按教学设计 5 段法兜底，但讲稿质量会打折）');
+        userPromptParts.push('');
+      }
+      userPromptParts.push(lessonContextText);
+      const userPrompt = userPromptParts.join('\n').slice(0, 14000);
+
+      let draftScript = '';
+      try {
+        draftScript = await aiClient.chatJson({
+          systemPrompt,
+          userPrompt,
+          temperature: 0.5,
+          maxTokens: 12000,   // D6.1：扩 token，让 21 页讲稿一次出完
+          asText: true,
+        });
+      } catch (e) {
+        return { success: false, error: `AI 生成讲稿失败：${e.message}` };
+      }
+      if (!draftScript || String(draftScript).trim().length < 200) {
+        return { success: false, error: 'AI 返回的讲稿过短，请检查 PPT 骨架 + 辅助素材是否完整' };
+      }
+
+      return {
+        success: true,
+        data: {
+          draftScript: String(draftScript).trim(),
+          lessonMeta,
+          // D6.1：返回元数据供 UI 显示
+          pptPageCount: pptOutline?.pages?.length || 0,
+          referenceCount: referenceMaterials.length,
+          designLoaded: Boolean(designData),
+          referenceFilterAudit,
         },
-      });
-
-      return { success: true, data: { drafts: result, lessonMeta } };
+      };
     } catch (e) {
-      console.error('[v2:lessonGenerateABC] 异常：', e);
+      console.error('[v2:lessonGenerateDraft] 异常：', e);
       return { success: false, error: e.message };
     }
   });
@@ -328,23 +680,68 @@ function register(ipcMain, getDeps) {
       if (!notebook) return { success: false, error: 'Notebook not found' };
 
       const lessonMeta = payload.lessonMeta || {};
-      const drafts = payload.drafts || {};
-      const preferred = payload.preferred || 'a';
-      const referenceMaterials = arr(payload.referenceMaterials);
+      // P1.1（2026-05-17）：新流程入参从 drafts/preferred 改为 priorDraft（老师改后的 1 稿）
+      const priorDraft = String(payload.priorDraft || '').trim();
+      if (!priorDraft || priorDraft.length < 200) {
+        return { success: false, error: '缺少 priorDraft（老师改后的讲稿草稿），请先点「生成讲稿草稿」并在右栏编辑后再生成正式稿' };
+      }
+      // 向后兼容：内部包装成 drafts/preferred 喂给现有 retry-loop / formal-generator
+      const drafts = { a: priorDraft, b: '', c: '' };
+      const preferred = 'a';
+      let referenceMaterials = arr(payload.referenceMaterials);
       const aiClient = pickAiClient({ ...payload, _stage: 'lecture_formal' }, db);
       if (!aiClient) return { success: false, error: '未配置有效的 AI 客户端' };
+
+      // 2026-05-15 问题一 B 层：正式稿生成前也做相关性过滤（与 ABC 草稿同策略）
+      let referenceFilterAudit = null;
+      if (referenceMaterials.length >= 2) {
+        try {
+          const { filterByRelevance } = require('../../services/reference-filter.service');
+          const filterResult = await filterByRelevance({
+            aiClient,
+            courseName: notebook.name || '课程',
+            lessonTopic: lessonMeta.topic || '',
+            references: referenceMaterials,
+            threshold: 5,
+          });
+          referenceMaterials = filterResult.filtered;
+          referenceFilterAudit = {
+            kept: filterResult.filtered.length,
+            dropped: filterResult.dropped.length,
+            details: filterResult.audit,
+            warning: filterResult.warning || null,
+          };
+          if (filterResult.dropped.length > 0) {
+            console.log(`[v2:lessonGenerateFormal] 相关性过滤剔除 ${filterResult.dropped.length} 条离题素材`);
+          }
+        } catch (filterErr) {
+          console.warn('[v2:lessonGenerateFormal] 相关性过滤异常，兜底全保留：', filterErr.message);
+        }
+      }
 
       const allArtifacts = typeof db.listArtifacts === 'function' ? db.listArtifacts({ notebookId }) : [];
       const designData = pickConfirmedDesign(allArtifacts);
       const scheduleData = pickConfirmedSchedule(allArtifacts);
 
       const lessonHours = (Number(lessonMeta.theoryHours) || 0) + (Number(lessonMeta.practiceHours) || 0);
+      // T7 修复（2026-05-17）：lessonHours 必须由 lessonMeta 提供，禁止兜底 4
+      if (lessonHours <= 0) {
+        return { success: false, error: 'lessonMeta 缺少 theoryHours + practiceHours（请确认本节课学时分配，不能为 0）' };
+      }
+      // T8 修复（2026-05-17）：从 notebook 读 minutesPerHour
+      const lessonMinutesPerHour2 = Number(notebook?.minutesPerHour) || 0;
+      if (lessonMinutesPerHour2 <= 0) {
+        return { success: false, error: '笔记本未设置"1 学时分钟数"（minutesPerHour）。请在创建/编辑笔记本时填写学校标准（如 40 / 45 / 50）。' };
+      }
       const lessonContextText = buildLessonContextText({
         lessonMeta, scheduleData, designData, referenceMaterials,
         courseName: notebook.name || '课程',
+        minutesPerHour: lessonMinutesPerHour2,
       });
 
       const notebookContext = {
+        // 2026-05-15 加固问题一 D：注入 courseName 给 review.service 用于"主题相关度"审核（维度 10）
+        courseName: notebook.name || '课程',
         softwareTools: notebook.softwareTools || '',
         jobTargets: notebook.jobTargets || '',
         industryScenarios: notebook.industryScenarios || '',
@@ -353,7 +750,8 @@ function register(ipcMain, getDeps) {
         frameworkTeachingMethods: '',
         referenceContext: lessonContextText.slice(0, 6000),
         // Phase-8.5：注入 totalHours 给 review.service 用于"课时连贯性"审核（维度 8）
-        totalHours: lessonHours || 4,
+        totalHours: lessonHours,                          // T7
+        minutesPerHour: lessonMinutesPerHour2,            // T8
       };
 
       // ── ① generateWithRetry：3 次重试 + 质量反馈注入（formal.builder fragment 9/10）──
@@ -367,11 +765,11 @@ function register(ipcMain, getDeps) {
           modules: [{
             moduleNumber: lessonMeta.lessonNumber || 1,
             name: lessonMeta.topic || '本节课',
-            hours: lessonHours || 4,
+            hours: lessonHours,                           // T7
             description: lessonMeta.topic || '',
           }],
           aiClient,
-          totalHours: lessonHours || 4,
+          totalHours: lessonHours,                        // T7
           notebookContext,
         },
         {
@@ -413,6 +811,7 @@ function register(ipcMain, getDeps) {
           finalScript,
           audit: result?.audit || null,
           lessonMeta,
+          referenceFilterAudit,   // 2026-05-15 加固问题一 B：相关性过滤审计明细
           // 质量元数据（前端可显示给老师）
           qualityMeta: {
             attempts,                              // 重试次数
@@ -421,6 +820,9 @@ function register(ipcMain, getDeps) {
             reviewScore: reviewMeta?.score || null,
             reviewSubscores: reviewMeta?.subscores || null,
             reviewSuggestions: reviewMeta?.suggestions || [],
+            // 2026-05-15 v4.1.4：把 review issues 也带给前端，否则老师看不到 AI 具体指出哪里有问题
+            reviewIssues: Array.isArray(reviewMeta?.issues) ? reviewMeta.issues : [],
+            reviewSummary: reviewMeta?.summary || '',
             revisedByReview: !!reviewMeta?.revised_success,
           },
         },
@@ -442,13 +844,34 @@ function register(ipcMain, getDeps) {
       const lessonMeta = payload.lessonMeta || {};
       const content = payload.content || {};
 
+      // 2026-05-16 v4.1.4 老师反馈："已确认但进度 0/36"
+      //   根因：原版用整体 metadata 替换，前端如果以"空表单"触发 save，
+      //   metadata.lessonNumber/topic/theoryHours 全部归零，title 字段却保留旧值 → 数据不一致。
+      //   修法：① 取出已存 metadata 做 base；② 用 payload 的字段做 patch；③ 空字符串 / 0 不覆盖非零原值。
+      const existingArtifact = lessonId
+        ? (typeof db.listArtifacts === 'function'
+            ? db.listArtifacts({ notebookId }).find((a) => Number(a.id) === Number(lessonId))
+            : null)
+        : null;
+      const existingMeta = existingArtifact?.metadata || {};
+
+      const pickNum = (next, prev) => {
+        const n = Number(next);
+        if (Number.isFinite(n) && n > 0) return n;
+        return Number(prev) || 0;
+      };
+      const pickStr = (next, prev) => {
+        const s = String(next || '').trim();
+        return s || String(prev || '').trim();
+      };
+
       const metadata = {
-        lessonNumber: Number(lessonMeta.lessonNumber) || 1,
-        topic: String(lessonMeta.topic || '').trim(),
-        chapter: String(lessonMeta.chapter || '').trim(),
-        theoryHours: Number(lessonMeta.theoryHours) || 0,
-        practiceHours: Number(lessonMeta.practiceHours) || 0,
-        weekRange: String(lessonMeta.weekRange || '').trim(),
+        lessonNumber: pickNum(lessonMeta.lessonNumber, existingMeta.lessonNumber) || 1,
+        topic: pickStr(lessonMeta.topic, existingMeta.topic),
+        chapter: pickStr(lessonMeta.chapter, existingMeta.chapter),
+        theoryHours: pickNum(lessonMeta.theoryHours, existingMeta.theoryHours),
+        practiceHours: pickNum(lessonMeta.practiceHours, existingMeta.practiceHours),
+        weekRange: pickStr(lessonMeta.weekRange, existingMeta.weekRange),
         phase: 'phase-9',
         source: 'v2:lessonSave',
       };
@@ -483,20 +906,104 @@ function register(ipcMain, getDeps) {
 
   // ── 确认 ──────────────────────────────────────────────────
   ipcMain.handle('v2:lessonConfirm', async (event, payload = {}) => {
-    const { db } = getDeps();
+    const { db, syncWorkflowStageAvailability } = getDeps();
     try {
       if (!db) throw new Error('Database not initialized');
       const lessonId = Number(payload.lessonId);
       if (!Number.isFinite(lessonId) || lessonId <= 0) return { success: false, error: 'lessonId 无效' };
       if (typeof db.updateArtifact !== 'function') return { success: false, error: 'db.updateArtifact 不存在' };
-      db.updateArtifact(lessonId, {
+      const updated = db.updateArtifact(lessonId, {
         confirmed: true,
         status: 'confirmed',
         confirmedAt: new Date().toISOString(),
       });
+      // D9.1（2026-05-18）：per-lesson confirm 后必须触发 stage 解锁重新计算
+      //   旧 BUG：只翻 artifact.confirmed，但 workflowState.unlockedStages 不更新 → 下游永远等不到信号
+      const notebookId = Number(updated?.notebookId || payload.notebookId);
+      if (Number.isFinite(notebookId) && notebookId > 0 && typeof syncWorkflowStageAvailability === 'function') {
+        try {
+          syncWorkflowStageAvailability(notebookId, { preferredStage: 'video' });
+          console.log(`[v2:lessonConfirm] 已触发 stage unlock 重算（notebookId=${notebookId}）`);
+        } catch (syncErr) {
+          console.warn('[v2:lessonConfirm] syncWorkflowStageAvailability 失败:', syncErr.message);
+        }
+      }
       return { success: true, data: { lessonId, confirmed: true } };
     } catch (e) {
       console.error('[v2:lessonConfirm] 异常：', e);
+      return { success: false, error: e.message };
+    }
+  });
+
+  // ── D9.3（2026-05-18）：手动强制解锁下游 ─────────────────────────────────────
+  //   场景：质量校验误报 / 老师确认通过但 unlockedStages 没刷新 / 老师明确想跳过门槛
+  //   接受 reason 字段写日志，但不阻塞操作
+  ipcMain.handle('v2:forceUnlockNextStage', async (event, payload = {}) => {
+    const { db, syncWorkflowStageAvailability } = getDeps();
+    try {
+      if (!db) throw new Error('Database not initialized');
+      const notebookId = Number(payload.notebookId);
+      const fromStage = String(payload.fromStage || '').trim();
+      const reason = String(payload.reason || '老师手动强制解锁').trim();
+      if (!Number.isFinite(notebookId) || notebookId <= 0) return { success: false, error: 'notebookId 无效' };
+      if (!fromStage) return { success: false, error: 'fromStage 必填（如 lecture / ppt）' };
+      const STAGE_ORDER = ['schedule', 'design', 'ppt', 'lecture', 'video', 'report'];
+      const idx = STAGE_ORDER.indexOf(fromStage);
+      if (idx < 0 || idx >= STAGE_ORDER.length - 1) {
+        return { success: false, error: `fromStage 无效或已是末尾阶段：${fromStage}` };
+      }
+      const nextStage = STAGE_ORDER[idx + 1];
+
+      // 1. 找到 fromStage 对应的"被需要的产物 type"——伪造一个 confirmed=true 的"占位 artifact"
+      //    用 force_unlock_marker 类型，不污染真实产物
+      const STAGE_PRODUCT = {
+        ppt: 'ppt_outline',
+        lecture: 'lecture_final',
+        design: 'design_doc',
+        video: 'video_prompt',
+        schedule: 'schedule_table',
+      };
+      const productType = STAGE_PRODUCT[fromStage];
+      if (!productType) return { success: false, error: `不支持强制解锁 from ${fromStage}` };
+
+      // 2. 检查是否已有 confirmed 产物——如果有，无需写占位
+      const items = db.listArtifacts({ notebookId }) || [];
+      const alreadyConfirmed = items.some((a) => a.type === productType && a.stage === fromStage && a.confirmed === true);
+
+      if (!alreadyConfirmed) {
+        // 写一个最小占位产物，明确标 forceUnlocked=true 以便审计
+        db.createArtifact({
+          notebookId,
+          type: productType,
+          stage: fromStage,
+          title: `[强制解锁占位] ${fromStage} → ${nextStage}`,
+          content: { _forceUnlocked: true, reason, createdAt: new Date().toISOString() },
+          confirmed: true,
+          status: 'confirmed',
+          metadata: { forceUnlocked: true, reason, fromStage, nextStage },
+        });
+        console.warn(`[v2:forceUnlockNextStage] 写占位 confirmed artifact（${productType}）解锁 ${nextStage}（reason: ${reason}）`);
+      }
+
+      // 3. 触发 stage availability 重算
+      if (typeof syncWorkflowStageAvailability === 'function') {
+        syncWorkflowStageAvailability(notebookId, { preferredStage: nextStage });
+      }
+
+      return {
+        success: true,
+        data: {
+          notebookId,
+          fromStage,
+          nextStage,
+          alreadyConfirmed,
+          message: alreadyConfirmed
+            ? `${fromStage} 已有确认产物，已重新计算 stage unlock → ${nextStage} 应已解锁`
+            : `已写占位产物 + 解锁 ${nextStage}（reason: ${reason}）`,
+        },
+      };
+    } catch (e) {
+      console.error('[v2:forceUnlockNextStage] 异常：', e);
       return { success: false, error: e.message };
     }
   });

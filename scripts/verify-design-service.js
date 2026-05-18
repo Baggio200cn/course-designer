@@ -85,7 +85,9 @@ function test(name, fn) {
       },
     });
     const names = r.inClass.phases.map((p) => p.phase);
-    if (JSON.stringify(names) !== JSON.stringify(REQUIRED_PHASES)) {
+    // 2026-05-15 v4.1.4：phase 名允许"启·导入新课"前缀，但核心名（去前缀后）必须等于 REQUIRED_PHASES
+    const cores = names.map((n) => n.replace(/^[启授创展拓]\s*[·．\.]\s*/, ''));
+    if (JSON.stringify(cores) !== JSON.stringify(REQUIRED_PHASES)) {
       throw new Error(`顺序错：${JSON.stringify(names)}`);
     }
   });
@@ -93,7 +95,9 @@ function test(name, fn) {
   await test('完全无 phases → 5 段空内容兜底', () => {
     const r = normalizeDesign({});
     if (r.inClass.phases.length !== 5) throw new Error('空时应返回 5 段空内容');
-    if (r.inClass.phases[0].phase !== '导入新课') throw new Error('第一段应是导入新课');
+    // 2026-05-15 v4.1.4：空 phase 时输出建议前缀 "启·导入新课"（核心名仍是"导入新课"）
+    const firstCore = r.inClass.phases[0].phase.replace(/^[启授创展拓]\s*[·．\.]\s*/, '');
+    if (firstCore !== '导入新课') throw new Error(`第一段应是"导入新课"，实际"${r.inClass.phases[0].phase}"`);
   });
 
   // ── 契约组 4：考核权重归一化 ────────────────────────────────────

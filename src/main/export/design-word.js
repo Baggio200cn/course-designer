@@ -79,33 +79,75 @@ async function exportDesignWord({ courseName, design, outputPath, infographicPat
 
   const children = [];
 
-  // ── ① 标题 ─────────────────────────────────────────
+  // ── ① 标题（2026-05-17 修复：加上节课具体内容）─────────────
+  // 从 design.lessonMeta 读节课信息，组合为 "{课程名} · 第 N 节·{topic} · 教学设计"
+  const lm = (design.lessonMeta && typeof design.lessonMeta === 'object') ? design.lessonMeta : {};
+  const titleParts = [String(courseName || '课程')];
+  if (lm.lessonNumber) titleParts.push(`第 ${lm.lessonNumber} 节`);
+  if (lm.topic) titleParts.push(String(lm.topic));
+  const titleText = `${titleParts.join(' · ')} · 教学设计`;
   children.push(new Paragraph({
     alignment: AlignmentType.CENTER,
-    children: [styledRun(`${courseName || '课程'}教学设计`, FONT.title)],
-    spacing: { before: 100, after: 200 },
+    children: [styledRun(titleText, FONT.title)],
+    spacing: { before: 100, after: 100 },
   }));
+  // 副标题：章节 / 周次范围 / 学时（让 docx 顶部一眼看出"哪节课"）
+  const subParts = [];
+  if (lm.chapter) subParts.push(`章节：${lm.chapter}`);
+  if (lm.weekRange) subParts.push(`周次：${lm.weekRange}`);
+  const theoryH = Number(lm.theoryHours) || 0;
+  const practiceH = Number(lm.practiceHours) || 0;
+  if (theoryH + practiceH > 0) subParts.push(`学时：理论 ${theoryH} + 实践 ${practiceH} = ${theoryH + practiceH} 节`);
+  if (subParts.length > 0) {
+    children.push(new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [styledRun(subParts.join('  ·  '), { ...FONT.body, size: 22 })],
+      spacing: { before: 0, after: 200 },
+    }));
+  }
 
-  // ── 信息图（如有，置于教学目标之前作为整体概览） ──
+  // ── 信息图（2026-05-17 修复：读 PNG 实际宽高按比例缩放，不再硬编码 600×840 强制变形）──
   if (infographicPath && fs.existsSync(infographicPath)) {
     try {
       const ext = path.extname(infographicPath).toLowerCase().replace('.', '') || 'png';
       const imgBuffer = fs.readFileSync(infographicPath);
       const imgType = ext === 'jpg' ? 'jpeg' : ext;  // docx 库只接受 jpeg
-      // 9 寸宽（A4 - 边距），按 PNG 默认比例缩放
-      const targetWidth = 600;
-      const targetHeight = 840;  // 视觉默认 1000 × 1400 → 缩放到 600 × 840
-      children.push(p('教学设计概览（AI 信息图）', FONT.sectionTitle));
+
+      // 读 PNG 实际宽高（PNG 文件头：bytes 16-23 是 width/height，big-endian uint32）
+      let naturalW = 1200, naturalH = 800;   // 默认兜底
+      if (imgType === 'png' && imgBuffer.length > 24) {
+        naturalW = imgBuffer.readUInt32BE(16);
+        naturalH = imgBuffer.readUInt32BE(20);
+      }
+      // 按比例缩放：
+      //   - 横长图（比例 >= 1）：宽 720 顶满 A4 内容区，高按比例
+      //   - 纵长图（比例 < 1，magazine 常见 0.66:1）：宽 720，高按比例算（可能超过 A4 单页，Word 自动分页）
+      // 720 px ≈ 7.5 inch ≈ 9360 DXA - 边距，A4 portrait 安全宽度
+      const targetWidth = 720;
+      const targetHeight = Math.round(targetWidth * naturalH / naturalW);
+
+      // C1 修复（2026-05-17）：title + 图 用 keepNext / keepLines 绑定，避免标题孤悬在上页底部
+      //   keepNext=true → 标题段必须和下一段（图）放同一页
+      //   keepLines=true → 单段内不允许跨页（保险）
+      children.push(new Paragraph({
+        alignment: AlignmentType.LEFT,
+        children: [styledRun('教学设计概览（AI 信息图）', FONT.sectionTitle)],
+        spacing: { before: 60, after: 60 },
+        keepNext: true,
+        keepLines: true,
+      }));
       children.push(new Paragraph({
         alignment: AlignmentType.CENTER,
         children: [new ImageRun({
           type: imgType,
           data: imgBuffer,
           transformation: { width: targetWidth, height: targetHeight },
-          altText: { title: '教学设计信息图', description: 'AI 生成的整门课教学设计可视化', name: 'design-infographic' },
+          altText: { title: '教学设计信息图', description: `AI 生成（PNG 原图 ${naturalW}×${naturalH}）`, name: 'design-infographic' },
         })],
+        keepLines: true,
       }));
       children.push(p('', FONT.body));
+      console.log(`[design-word] 信息图嵌入：原图 ${naturalW}×${naturalH} → docx ${targetWidth}×${targetHeight}（比例 ${(naturalW / naturalH).toFixed(2)}:1 保持不变形）`);
     } catch (e) {
       console.error('[design-word] 嵌入信息图失败：', e.message);
     }
@@ -200,26 +242,28 @@ async function exportDesignWord({ courseName, design, outputPath, infographicPat
       new TableRow({
         tableHeader: true,
         children: [
-          cell('环节', FONT.tableHead, { width: 1300, shading: 'D5E8F0', align: AlignmentType.CENTER }),
-          cell('时长', FONT.tableHead, { width: 800, shading: 'D5E8F0', align: AlignmentType.CENTER }),
-          cell('教师活动', FONT.tableHead, { width: 2800, shading: 'D5E8F0', align: AlignmentType.CENTER }),
-          cell('学生活动', FONT.tableHead, { width: 2660, shading: 'D5E8F0', align: AlignmentType.CENTER }),
-          cell('评价', FONT.tableHead, { width: 1800, shading: 'D5E8F0', align: AlignmentType.CENTER }),
+          // 2026-05-15 v4.1.4：列宽重排——设计意图列更宽（内容密度大）；列名"评价"→"设计意图"
+          cell('环节', FONT.tableHead, { width: 1100, shading: 'D5E8F0', align: AlignmentType.CENTER }),
+          cell('时长', FONT.tableHead, { width: 700, shading: 'D5E8F0', align: AlignmentType.CENTER }),
+          cell('教师活动', FONT.tableHead, { width: 2520, shading: 'D5E8F0', align: AlignmentType.CENTER }),
+          cell('学生活动', FONT.tableHead, { width: 2520, shading: 'D5E8F0', align: AlignmentType.CENTER }),
+          cell('设计意图', FONT.tableHead, { width: 2520, shading: 'D5E8F0', align: AlignmentType.CENTER }),
         ],
       }),
       ...phases.map((ph) => new TableRow({
         children: [
-          cell(ph.phase || '', FONT.body, { width: 1300, align: AlignmentType.CENTER }),
-          cell(ph.duration || '—', FONT.body, { width: 800, align: AlignmentType.CENTER }),
-          cell(ph.teacherActions || '—', FONT.body, { width: 2800 }),
-          cell(ph.studentActions || '—', FONT.body, { width: 2660 }),
-          cell(ph.evaluation || '—', FONT.body, { width: 1800 }),
+          cell(ph.phase || '', FONT.body, { width: 1100, align: AlignmentType.CENTER }),
+          cell(ph.duration || '—', FONT.body, { width: 700, align: AlignmentType.CENTER }),
+          cell(ph.teacherActions || '—', FONT.body, { width: 2520 }),
+          cell(ph.studentActions || '—', FONT.body, { width: 2520 }),
+          // 2026-05-15 v4.1.4：优先用 designIntent；老数据仍在 evaluation
+          cell(ph.designIntent || ph.evaluation || '—', FONT.body, { width: 2520 }),
         ],
       })),
     ];
     children.push(new Table({
       width: { size: 9360, type: WidthType.DXA },
-      columnWidths: [1300, 800, 2800, 2660, 1800],
+      columnWidths: [1100, 700, 2520, 2520, 2520],
       rows: phaseRows,
     }));
     children.push(p('', FONT.body));

@@ -57,3 +57,7 @@ workspace.db
 
 # 误加的桌面截图/HTML
 UsersZhaolDesktop*
+
+# v4.3.3 测试运行临时目录
+.test-run-*/
+tmp_course_deck.pptx

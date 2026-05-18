@@ -119,75 +119,39 @@ font-family="'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif"
 ```
 
 
-## 杂志信息图风格规范（magazine 类型专用）
+## 杂志信息图风格规范（magazine 类型专用 · 2026-05-17 v4.2.0 重构）
 
-> **特别说明**：当 `diagramType=magazine` 时，**你不需要生成 SVG**——只需要返回结构化 JSON 数据。
-> JS 端会用固定 SVG 模板拼装最终图像，确保 100% 视觉一致 + 100% 输出稳定。
-> **所以 magazine 类型下，请忽略本文件「输出要求」节的"只输出 SVG"要求，改为只输出 JSON。**
+> **重要变更**：magazine 类型现在**也输出 SVG**（与其他类型一致），不再走 JSON 模板路径。
+> 由你（AI）根据本节课真实 design 数据**自主设计**高密度信息图布局，禁止用通用模板兜底。
 
-### 你需要返回的 JSON 结构（严格遵守字段名）
+### 画布与版式
 
-```json
-{
-  "courseSubtitle": "副标题（10-20 字，如『职业教育课程框架可视化总览』）",
-  "core": "课程核心一句话定位（25 字内，提炼课程价值/能力 + 岗位）",
+- 宽 1240px，高 1880px（适合 A4 纵向单页打印）
+- 6-8 个区块的网格布局（区块数量根据本节课实际内容自适应）
+- 顶部 hero 横幅（含课程名 + 节课主题 + 学时数）
+- 数字编号（① ② ③）标记区块顺序
+- 渐变色背景 / 圆角卡片 / 图标配文字
+- 关键数字大字号强调（如 60% / 5 段 / 4 学时）
+- 思政元素用红色或暖色突出
 
-  "definitionAndJob": {
-    "description": "课程描述 3-4 行（每行 28 字内）",
-    "jobs": ["岗位1（6 字内）", "岗位2", "岗位3"],
-    "tools": ["工具1", "工具2", "工具3"]
-  },
+### 区块内容（必须使用本节课 design 真实数据）
 
-  "objectives": {
-    "knowledge": ["知识目标1（12 字内）", "知识目标2", "知识目标3"],
-    "skill": ["技能目标1（12 字内）", "技能目标2", "技能目标3"],
-    "emotion": ["情感目标1（12 字内）", "情感目标2"]
-  },
+- 区块 ① 教学目标三柱：用 `design.teachingObjectives.knowledge` / `skill` / `emotion` 真实拆解（每柱 2-3 项）
+- 区块 ② 教学重难点：用 `design.keyPoints` + `difficulties` 真实清单
+- 区块 ③ 教学方法：用 `design.teachingMethods` 的真实 name + desc（不是默认四件套）
+- 区块 ④ 5 段法时序：用 `design.inClass.phases` 的真实 phase + duration（按时间从左到右）
+- 区块 ⑤ 考核占比：用 `design.assessment.components` 的真实 weight 算环图（如本节课是 20+20+50+10 → 画 4 段环图）
+- 区块 ⑥ 思政元素：用 `design.ideologicalElements` 真实数组
+- 区块 ⑦ 教材与软件工具：用 `courseContext.softwareTools` + `textbook` 真实值
+- （可选）区块 ⑧ 当本节课内容超出 7 区块容纳，可拆一个突出展示
 
-  "methods": [
-    { "icon": "📚", "name": "案例教学法", "desc": "一句话用法（15 字内）" },
-    { "icon": "🎯", "name": "任务驱动法", "desc": "..." },
-    { "icon": "🔧", "name": "示范教学法", "desc": "..." },
-    { "icon": "🤝", "name": "小组合作法", "desc": "..." }
-  ],
+### 禁止行为
 
-  "evaluation": {
-    "process": 60,
-    "summative": 40,
-    "processItems": ["课堂提问", "小组讨论", "互查反馈"],
-    "summativeItems": ["课后作业", "成果展示"]
-  },
+- ❌ 编造任何评价占比数字（如默认 60/40）→ 必须用 design.assessment.components 真实值
+- ❌ 编造教学方法名（如默认"案例/任务/示范/合作"）→ 必须用 design.teachingMethods 真实名
+- ❌ 编造目标内容（如默认 ABC 三柱）→ 必须用 design.teachingObjectives 真实拆解
+- ❌ 任何字段 design 没给 → 留空或省略对应区块，不要凭空填占位词
 
-  "resources": [
-    { "icon": "📕", "type": "教材", "name": "教材名（12 字内）" },
-    { "icon": "🎨", "type": "软件工具", "name": "..." },
-    { "icon": "🌐", "type": "教学平台", "name": "..." },
-    { "icon": "💼", "type": "行业案例", "name": "..." }
-  ],
-
-  "goal": "最终目标一句话（30 字内，含具体能力 + 具体岗位/场景）"
-}
-```
-
-### 数据来源约束
-
-- `definitionAndJob.description`：基于课程描述凝练，不能编造
-- `definitionAndJob.jobs`：从课程的 jobTargets 字段取
-- `definitionAndJob.tools`：从课程的 softwareTools 字段取
-- `objectives.knowledge/skill/emotion`：从教学目标三类拆解，每类 2-3 项
-- `methods`：必须 4 项（案例 / 任务 / 示范 / 合作 是默认）
-- `evaluation.process/summative`：默认 60/40，除非框架明确不同
-- `resources`：必须 4 项（教材 / 软件工具 / 教学平台 / 行业案例 是默认）
-- `goal`：基于真实软件工具 + 岗位生成（如"掌握 InDesign/PS/Canva 三类排版工具，胜任服装品牌宣传企划等岗位"）
-- **教学模块数据由 JS 直接从数据库读，AI 不需要返回模块列表**
-
-### 输出要求（magazine 类型专用，覆盖默认）
-
-⚠️ 只输出 JSON 对象，以 `{` 开头，以 `}` 结尾
-⚠️ 不输出 SVG、不输出解释文字、不输出 markdown 代码块
-⚠️ 所有字符串字段不能为空（最少给占位词）
-⚠️ JSON 必须能被 `JSON.parse()` 正确解析（无注释、无尾逗号）
----
 
 ## 输出要求
 
@@ -196,3 +160,19 @@ font-family="'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif"
 ⚠️ 所有坐标必须是具体数值，不能用变量或占位符。
 ⚠️ 确保所有节点不重叠，文字不超出节点边界。
 ⚠️ 连接线必须精确对齐节点的底部中心和顶部中心。
+
+## 🚨 数据真实性铁律（2026-05-17 v4.2.0 加固）
+
+当用户上下文提供了"本节课教学设计完整内容"（teachingObjectives / keyPoints / difficulties / teachingMethods / assessment / phases / ideologicalElements）时，**必须严格使用这些真实数据，禁止任何形式的兜底默认值或编造**。
+
+| 字段 | 真实来源 | ❌ 禁止 |
+|---|---|---|
+| 教学目标三维 | design.teachingObjectives.knowledge/skill/emotion | 编造 "A B C 三柱" 占位 |
+| 教学重点 | design.keyPoints | 默认 "重点1/重点2" |
+| 教学难点 | design.difficulties | 默认 "难点1/难点2" |
+| 教学方法 | design.teachingMethods 真实 name + desc | 默认 "案例/任务/示范/合作" 四件套 |
+| 5 段法节奏 | design.inClass.phases 真实 phase + duration | 默认通用名 |
+| 考核占比 | design.assessment.components 真实 weight | 默认 "过程 60% / 终结 40%" |
+| 思政元素 | design.ideologicalElements | 默认 "工匠精神/职业素养" 套话 |
+
+**如果某字段 design 中没提供 → 在 SVG 里省略对应区块，不要凭空补字段。**

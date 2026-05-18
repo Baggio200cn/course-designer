@@ -1,6 +1,9 @@
 const fs = require('fs');
 const PptxGenJS = require('pptxgenjs');
 
+// 2026-05-16 v4.1.4 Phase 2：AI 自主排版 layout 分发
+const { dispatchLayout: dispatchAiLayout } = require('./ppt-layouts');
+
 const toList = (arr) => (Array.isArray(arr) ? arr : []);
 
 const TEMPLATE_STYLE = {
@@ -1355,8 +1358,13 @@ function addClosingSlide(slide, style, page) {
   }));
 }
 
-function addLectureSlides(pptx, pages, modules, style, lectureSections = [], qualityCollector = []) {
-  pages.forEach((page) => {
+function addLectureSlides(pptx, pages, modules, style, lectureSections = [], qualityCollector = [], opts = {}) {
+  // 2026-05-16 v4.1.4 Phase 2：把整门课主色透传给 AI layout 分发
+  //   mainAccent 优先 opts.mainAccentColor（pipeline 返回），其次 style.accent，最后兜底 #2E86DE
+  const mainAccent = String(opts.mainAccentColor || style.accent || '2E86DE').replace(/^#/, '');
+  const totalPages = pages.length;
+
+  pages.forEach((page, idx) => {
     if (page.pageType === '封面') return;
     const slide = pptx.addSlide();
 
@@ -1377,6 +1385,29 @@ function addLectureSlides(pptx, pages, modules, style, lectureSections = [], qua
         pageNumber: page.pageNumber, pageType: page.pageType,
         title: page.title, variant: 'composite',
         crowding: { score: 0, crowded: false }, noteMapped: Boolean(noteText)
+      });
+      return;
+    }
+
+    // ── 2026-05-16 v4.1.4 Phase 2：AI 自主 layout 分发（最高优先级）──
+    // 只要 page 有合法的 layoutType，就走新分发，不再走 pageType-based 旧路径。
+    const aiLayoutType = String(page.layoutType || '').toLowerCase().trim();
+    const VALID_AI_LAYOUTS = ['hero', 'two-column', 'image-bleed', 'diagram-center', 'quote', 'table', 'bullet-list'];
+    if (VALID_AI_LAYOUTS.includes(aiLayoutType)) {
+      const noteText = (String(page.speakerNotes || '').trim())
+        || mapPageNoteFromSections(page, lectureSections)
+        || buildFallbackNote(page);
+      attachSpeakerNotes(slide, noteText);
+      const dispatchResult = dispatchAiLayout(slide, page, {
+        mainAccent,
+        pageNumber: page.pageNumber || (idx + 1),
+        totalPages,
+      });
+      qualityCollector.push({
+        pageNumber: page.pageNumber, pageType: page.pageType, title: page.title,
+        variant: `ai-${dispatchResult.used || aiLayoutType}`,
+        crowding: page.crowding || analyzePageCrowding(page),
+        noteMapped: Boolean(noteText),
       });
       return;
     }
@@ -1488,9 +1519,22 @@ async function exportCoursePpt({
   pptPages,
   templateBackground,
   templateKey,
-  outputPath
+  outputPath,
+  // 2026-05-16 v4.1.4 Phase 2：整门课主 accentColor，AI 自主 layout 分发会用
+  mainAccentColor,
+  // 2026-05-17 v4.2.0：AI 自决的完整 style 主题（bg/title/accent/accentLight/gradientEnd/decorColor/titleFont/bodyFont）
+  // 传了即覆盖 TEMPLATE_STYLE 查表，实现"删除预定义模板，AI 自主风格"
+  styleOverride,
 }) {
-  const style = TEMPLATE_STYLE[templateKey] || TEMPLATE_STYLE.pro_minimalist;
+  let style;
+  if (styleOverride && typeof styleOverride === 'object') {
+    // AI 给完整 style：用它，缺字段从 pro_minimalist 兜底（避免渲染崩溃）
+    style = { ...TEMPLATE_STYLE.pro_minimalist, ...styleOverride };
+    console.log(`[ppt.js] 使用 AI 自决 styleOverride · accent=${style.accent} bg=${style.bg} font=${style.titleFont}`);
+  } else {
+    style = TEMPLATE_STYLE[templateKey] || TEMPLATE_STYLE.pro_minimalist;
+    console.log(`[ppt.js] 使用预定义 templateKey=${templateKey || 'pro_minimalist'}（向后兼容老路径）`);
+  }
   const moduleList = normalizeModuleList(framework, modules);
   const pageList = splitDensePages(polishPageList(normalizePageList(pptPages)));
 
@@ -1501,8 +1545,9 @@ async function exportCoursePpt({
     bodyFontFace: style.bodyFont || style.titleFont || 'Microsoft YaHei',
     lang: 'zh-CN'
   };
-  pptx.author = '广纺织课程助手@liu';
-  pptx.company = '广纺织课程助手@liu';
+  // 2026-05-16 v4.1.4：品牌统一为"驭课 Agent"
+  pptx.author = '驭课 Agent';
+  pptx.company = '驭课 Agent';
   pptx.subject = notebook?.name || '课程设计';
   pptx.title = `${notebook?.name || '课程'}-课件`;
   pptx.lang = 'zh-CN';
@@ -1511,7 +1556,8 @@ async function exportCoursePpt({
   const lectureSections = splitLectureScriptSections(lectureScript);
   const qualityCollector = [];
   addCoverSlide(pptx, notebook, style, coverPage);
-  addLectureSlides(pptx, pageList, moduleList, style, lectureSections, qualityCollector);
+  // 2026-05-16 v4.1.4 Phase 2：透传 mainAccentColor 到 layout dispatcher
+  addLectureSlides(pptx, pageList, moduleList, style, lectureSections, qualityCollector, { mainAccentColor });
 
   await pptx.writeFile({ fileName: outputPath });
   // 质量报告不写入磁盘：避免在老师的导出目录（如桌面）创建额外文件夹

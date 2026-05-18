@@ -96,11 +96,19 @@ function parseJsonObject(text) {
   }
 }
 
-function buildExecutionTimeline(moduleCount, totalHours) {
+function buildExecutionTimeline(moduleCount, totalHours, minutesPerHour) {
   const safeCount = Math.max(1, Number(moduleCount) || 1);
-  // 根据学时计算总分钟数：1学时=45分钟
+  // T8 修复（2026-05-17）：1 学时 = N 分钟由老师按学校标准配置
+  // 注：lecture 阶段（Step 4）当前还有遗留调用未透传 minutesPerHour，
+  //     这里加 console.warn 让漏点可见，但短期默认回退到 45（避免破坏 lecture 路径）。
+  //     Step 4 跑 lecture 时会接着清。
   const hours = Number(totalHours) || 1;
-  const totalMinutes = Math.max(45, hours * 45);
+  let mph = Number(minutesPerHour) || 0;
+  if (mph <= 0) {
+    console.warn('[formal-generator] ⚠ buildExecutionTimeline 未收到 minutesPerHour，临时回退 45（需后续清）');
+    mph = 45;
+  }
+  const totalMinutes = Math.max(mph, hours * mph);
   // 按比例分配：开场5%，模块70%，练习15%，收束10%
   const openingEnd = Math.round(totalMinutes * 0.05) || 3;
   const practiceStart = Math.round(totalMinutes * 0.85);
@@ -126,8 +134,8 @@ function buildExecutionTimeline(moduleCount, totalHours) {
   };
 }
 
-function buildCanonicalHeadingMap(modules = [], totalHours = 1) {
-  const timeline = buildExecutionTimeline(modules.length || 1, totalHours);
+function buildCanonicalHeadingMap(modules = [], totalHours = 1, minutesPerHour) {
+  const timeline = buildExecutionTimeline(modules.length || 1, totalHours, minutesPerHour);
   const map = new Map();
   map.set('开场导入', `## 开场导入（${timeline.opening}）`);
   modules.forEach((module, index) => {
@@ -139,8 +147,8 @@ function buildCanonicalHeadingMap(modules = [], totalHours = 1) {
   return map;
 }
 
-function canonicalizeLectureHeadings(script = '', modules = [], totalHours = 1) {
-  const headingMap = buildCanonicalHeadingMap(modules, totalHours);
+function canonicalizeLectureHeadings(script = '', modules = [], totalHours = 1, minutesPerHour) {
+  const headingMap = buildCanonicalHeadingMap(modules, totalHours, minutesPerHour);
   return String(script || '')
     .split(/\r?\n/)
     .map((line) => {
@@ -152,8 +160,8 @@ function canonicalizeLectureHeadings(script = '', modules = [], totalHours = 1) 
     .join('\n');
 }
 
-function countCanonicalSections(script = '', modules = [], totalHours = 1) {
-  const headingMap = buildCanonicalHeadingMap(modules, totalHours);
+function countCanonicalSections(script = '', modules = [], totalHours = 1, minutesPerHour) {
+  const headingMap = buildCanonicalHeadingMap(modules, totalHours, minutesPerHour);
   let count = 0;
   headingMap.forEach((heading) => {
     if (String(script || '').includes(heading)) count += 1;
@@ -253,7 +261,7 @@ function buildFallbackSection(sectionKey = '', modules = []) {
   };
 }
 
-function rebuildCanonicalLecture(script = '', modules = [], totalHours = 1) {
+function rebuildCanonicalLecture(script = '', modules = [], totalHours = 1, minutesPerHour) {
   const normalized = String(script || '');
   const lines = normalized.split(/\r?\n/);
   const titleLine = lines.find((line) => /^#\s+/.test(cleanText(line))) || '# 正式讲稿';
@@ -279,7 +287,7 @@ function rebuildCanonicalLecture(script = '', modules = [], totalHours = 1) {
   });
   flush();
 
-  const headingMap = buildCanonicalHeadingMap(modules, totalHours);
+  const headingMap = buildCanonicalHeadingMap(modules, totalHours, minutesPerHour);
   const orderedKeys = ['opening', ...modules.map((_, index) => `module-${index + 1}`), 'practice', 'closing'];
   const canonicalHeadings = new Map();
   canonicalHeadings.set('opening', headingMap.get('开场导入'));
@@ -393,7 +401,9 @@ function buildFormalPrompt({
     ...Object.values(frameworkDirectives?.applied?.modules || {}).flat()
   ].map((item) => item.text).filter(Boolean);
   const hours = Number(totalHours) || 1;
-  const timeline = buildExecutionTimeline(modules.length || 1, hours);
+  // T8 修复（2026-05-17）：minutesPerHour 透传（缺失时 buildExecutionTimeline 自动 console.warn）
+  const mph = Number(notebookContext?.minutesPerHour) || 0;
+  const timeline = buildExecutionTimeline(modules.length || 1, hours, mph);
   const lexicon = getCourseProfileLexicon(courseProfile);
   // 多段生成时每段模块数少，需要提高单模块字数下限，
   // 避免 AI 按"每模块≥400字"填写后总字数远低于 2200 目标。
@@ -430,7 +440,7 @@ function buildFormalPrompt({
     '',
     '<quality_requirements>',
     `<base_draft>当前已选：${selectedLabel}。A偏知识逻辑，B偏口播，C偏执行。正式稿必须继承已选方向。</base_draft>`,
-    `<duration>本课程共${hours}学时，总时长${hours * 45}分钟。</duration>`,
+    `<duration>本课程共${hours}学时，总时长${hours * (Number(notebookContext?.minutesPerHour) || 45)}分钟（按 1 学时 = ${Number(notebookContext?.minutesPerHour) || 45} 分钟换算）。</duration>`,  // T8
     `<length>教师讲述 ${Math.round(2200 * hours)}-${Math.round(3000 * hours)} 字。每模块≥${perModuleNarMin}字，开场≥${Math.round(200 * hours)}字。</length>`,
     // Phase-7.7 E1（2026-04-30）：实操章节字数门槛降低 + 保留执行型节奏
     // 之前的 `<length>` 让所有模块字数门槛一致 → 实操章节为凑字数变成"老师啰嗦讲解"
@@ -476,6 +486,25 @@ function buildFormalPrompt({
     '  这些是备课笔记，不是教师口播正文。每个模块必须写老师真正会对学生说的话。',
     '</forbidden>',
     '',
+    // 2026-05-15 老师反馈 1（A 主题锚定）：在课程段最前插强约束 topic_anchor。
+    //   现象：素材越多偏题越严重（Phase-7.7 E5 "强制引用 ≥2 处" 副作用）。
+    //   修法：先让 AI"先认课程主题，再决定从素材里抽什么"——把主题约束的优先级显式拉到素材之上。
+    '<topic_anchor priority="absolute">',
+    `本节讲稿的唯一核心主题：「${courseName || '本课程'}」。`,
+    '所有内容（开场 / 知识点 / 案例 / 练习 / 总结）必须围绕此主题展开。',
+    '【素材引用优先级规则】',
+    '  ① 主题相关的素材 → 必须引用',
+    '  ② 主题不相关的素材（如不同学科 / 离题文章 / 广告 / 协议条款） → 必须忽略，禁止引用',
+    '  ③ 边界相关的素材（如同领域但非本主题视角） → 仅作背景参考，禁止直接引用具体内容',
+    '【判定方法】',
+    '  在引用某段素材前自问：这段内容是不是在讲「' + (courseName || '本课程') + '」这门课的核心议题？',
+    '  否 → 立刻丢弃，宁可少引用也不偏题。',
+    '【反例】',
+    '  ❌ 课程是"时尚传播"，但素材含 Adobe 课程目录 → 不要把 Adobe 当案例',
+    '  ❌ 课程是"时尚传播"，但素材含 Unsplash CC0 协议 → 不要在讲稿写版权条款',
+    '  ❌ 课程是"时尚传播"，但素材含电商运营文章 → 不要展开讲电商运营',
+    '</topic_anchor>',
+    '',
     '<course>',
     `<name>${courseName || '课程'}</name>`,
     `<profile>${courseProfile}</profile>`,
@@ -507,23 +536,32 @@ function buildFormalPrompt({
     //   - 修法：从"建议"改为"硬约束 + 引用规则 + 失败重生成"
     //   - 副作用提醒：低质量素材（搜索结果墙）会被强行引用，可能拉低自然度——
     //                老师应在 UI 里删掉低质素材后再生成
+    // 2026-05-15 老师反馈 1（A）：把"强制引用 ≥2 处"改为"先判主题相关，再决定引用"
+    // 原规则在素材含离题内容时会被"强行引用"绑架，造成偏题。新规则让 AI 先做相关性判断。
     notebookContext.referenceContext
       ? [
           '<reference_material>',
-          '【关键约束——老师提供的真实素材，必须深度融合到讲稿】',
+          '【关键约束——老师提供的真实素材，要在与本课主题相关的前提下深度融合】',
           '',
-          '【强制引用规则（违反则视为生成失败）】',
-          '1. 必须从下方素材中至少引用 **2 处具体内容**（操作步骤 / 真实术语 / 数据 / 法律条款 / 案例）',
-          '2. 引用方式：可以自然融入教师讲述，但必须用素材中的真实文字（如具体步骤、术语、数据、CC0 协议条款等），不要泛泛改写',
-          '3. 如素材包含**版权 / 授权 / 协议条款**（如 CC0、Creative Commons），必须在相应教学段落引用具体条款文字',
-          '4. 如素材包含**真实操作步骤**，必须用素材的步骤覆盖你自己脑补的简化版本',
-          '5. 如素材包含**具体术语 / 行业数据**，必须直接引用而非自己改写表述',
+          '【引用规则（按以下顺序判断，违反视为生成失败）】',
+          '1. **主题相关性优先**：每段素材在引用前先判断"是否与「' + (courseName || '本课程') + '」主题直接相关"',
+          '   - 相关 → 进入第 2 步',
+          '   - 不相关（如不同学科 / 商业广告 / 离题文章） → 立刻跳过，禁止引用',
+          '2. **真实引用**：相关素材中至少引用 **1-3 处具体内容**',
+          '   - 引用方式：用素材中的真实文字（具体步骤 / 术语 / 数据），不要泛泛改写',
+          '   - **质优于量**：宁可只引用 1 处主题相关的，也不要凑数引用 2 处离题的',
+          '3. **协议 / 版权类内容**：只在该课程涉及版权 / 协议 / 合规话题时引用；否则丢弃',
+          '4. **真实操作步骤**：只在该课程涉及对应软件操作时引用；否则丢弃',
+          '5. **术语 / 数据**：只引用与本课程主题对应的术语和数据；离题数据一律丢弃',
           '',
-          '【素材内容（最多 5000 字）】',
+          '【素材内容（最多 5000 字，已经过相关性预过滤层处理）】',
           String(notebookContext.referenceContext).slice(0, 5000),
           '【素材结束】',
           '',
-          '【再次强调】生成后请自检：是否引用 ≥2 处素材具体内容？如果素材里有 CC0 / 版权类内容，是否在合规相关段落引用了具体文字？',
+          '【自检 checklist】',
+          '  □ 我引用的每一处素材都和「' + (courseName || '本课程') + '」直接相关吗？',
+          '  □ 我有没有为了凑"≥2 处"而强行引用离题内容？（如果有，删掉）',
+          '  □ 离题素材我是不是已经全部忽略？',
           '</reference_material>'
         ].join('\n')
       : '',
@@ -1014,8 +1052,9 @@ async function generateFormalLectureScript({
   if (aiClient && typeof aiClient.chatJson === 'function' && cleanText(selectedDraft)) {
     try {
       // ===== 分段生成策略 =====
-      // 1学时：单次生成（45分钟）
-      // 2学时：分2段生成（各45分钟），合并
+      // T8 修复（2026-05-17）：1 学时 = N 分钟由 notebookContext.minutesPerHour 决定，注释不再硬编码 45
+      // 1学时：单次生成
+      // 2学时：分2段生成，合并
       // N学时：分N段生成，合并
       const segmentCount = Math.max(1, hours);
       const modulesPerSegment = Math.ceil(normalizedModules.length / segmentCount);

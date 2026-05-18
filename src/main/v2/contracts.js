@@ -29,8 +29,16 @@
  *   - report 需要前 5 阶段全部 confirmed 才能生成（汇总用）
  */
 
-// ── 6 阶段链 ─────────────────────────────────────────────────────────────────
-const STAGE_ORDER = ['schedule', 'design', 'lecture', 'ppt', 'video', 'report'];
+// ── 8 阶段链（v4.3.3 H1 例外 · 2026-05-18） ──────────────────────────────────
+//   旧顺序：schedule → design → PPT → 讲稿 → video → report（6 阶段）
+//   新顺序：schedule → design → PPT → 讲稿 → quiz → homework → video → report（8 阶段）
+//
+//   新增：
+//     - quiz（在线测验）：每页 PPT 末尾 1-2 道题 + 章节末综合题
+//     - homework（课后作业）：基于讲稿要点 + PPT 骨架的作业题
+//
+//   pedagogical 因果：先讲完再练再考再总结，符合教学闭环
+const STAGE_ORDER = ['schedule', 'design', 'ppt', 'lecture', 'quiz', 'homework', 'video', 'report'];
 
 // 每个阶段需要的前置 artifact（按 stage + type 联合查找）
 const STAGE_REQUIREMENTS = {
@@ -38,21 +46,34 @@ const STAGE_REQUIREMENTS = {
   design: [
     { type: 'schedule_table', stage: 'schedule' }
   ],
-  lecture: [
+  ppt: [
     { type: 'design_doc', stage: 'design' }
   ],
-  ppt: [
-    { type: 'lecture_final', stage: 'lecture' }
-  ],
-  video: [
+  lecture: [
+    { type: 'design_doc', stage: 'design' },
     { type: 'ppt_outline', stage: 'ppt' }
   ],
+  // v4.3.3：在线测验依赖讲稿 + PPT
+  quiz: [
+    { type: 'lecture_final', stage: 'lecture' },
+    { type: 'ppt_outline', stage: 'ppt' }
+  ],
+  // v4.3.3：课后作业依赖讲稿（与 quiz 平行）
+  homework: [
+    { type: 'lecture_final', stage: 'lecture' }
+  ],
+  // 微课视频保留旧依赖：只需讲稿（quiz/homework 可跳过）
+  video: [
+    { type: 'lecture_final', stage: 'lecture' }
+  ],
+  // 实施报告需要前 7 阶段全部完成
   report: [
-    // 实施报告需要前 5 阶段全部完成
     { type: 'schedule_table', stage: 'schedule' },
     { type: 'design_doc', stage: 'design' },
-    { type: 'lecture_final', stage: 'lecture' },
     { type: 'ppt_outline', stage: 'ppt' },
+    { type: 'lecture_final', stage: 'lecture' },
+    { type: 'quiz_set', stage: 'quiz' },
+    { type: 'homework_set', stage: 'homework' },
     { type: 'video_prompt', stage: 'video' }
   ]
 };
@@ -90,8 +111,8 @@ function findLatestConfirmedArtifact(artifacts = [], requirement = {}) {
  */
 function computeUnlockedStages(artifacts = []) {
   const unlocked = ['schedule'];  // 起点永远解锁
-  // 按依赖顺序逐个检查
-  ['design', 'lecture', 'ppt', 'video', 'report'].forEach((stage) => {
+  // 2026-05-16 v4.2.0 Phase A'：用 STAGE_ORDER 而不是硬编码顺序，跟随顺序调整
+  STAGE_ORDER.slice(1).forEach((stage) => {
     const requirements = STAGE_REQUIREMENTS[stage] || [];
     const satisfied = requirements.every((requirement) => Boolean(findLatestConfirmedArtifact(artifacts, requirement)));
     if (satisfied) unlocked.push(stage);

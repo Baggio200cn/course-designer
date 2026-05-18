@@ -9,9 +9,51 @@ async function postJson(url, apiKey, body) {
 // ── 信息图布局规格（baoyu-infographic 思路） ────────────────────────────────
 
 const LAYOUT_SPECS = {
+  // 2026-05-16 v4.1.4 方案 B：精选 4 layout，强化骨架辨识度
+  //   grid_cards / mindmap（新）/ magazine_module / design_overview
+  //   旧 layouts（linear_flow/hub_spoke/comparison/timeline）保留 spec 兼容老 artifact，
+  //   但 getLayouts() 不再返回它们 → UI 下拉看不到，新生成不会用
   grid_cards: {
     label: '网格卡片',
-    spec: '每个知识点一张独立卡片，自动适配列数（≤3点单列，≤6点两列，>6点三列）。每张卡片含图标、标题、说明文字，高度均匀。这是默认通用布局。'
+    spec: `**网格卡片骨架**——参考"品牌溯源 Agent 架构路线图"的深色技术卡片密度感
+
+画布固定宽度 1000px，高度自适应（1200-1700px）。**结构骨架（必须严格）**：
+
+1. **HERO 横条**（h=120）—— 左侧大字（28-32px）课程/模块名 + 副标题（14px），右侧右上角徽标（14px 大写英文 + 版本号 v1.0 风格）
+2. **TODAY'S RECOMMENDATIONS 章节标题**（h=36）—— 14px 灰色 / 全大写英文 + 中文小字
+3. **主体 2×N 网格**（card grid，每行 2-3 张卡）：
+   - 每张卡左上角彩色大字字母编号（A/B/C/D/E，48px 单色，每张不同色）
+   - 卡片标题（18px 加粗）紧跟字母右侧
+   - 卡片内容：3-5 条彩色圆点 bullet，每条 \`code-style\` 单词 + 中文一句说明（13px）
+   - **不同卡片使用不同主题色**（蓝/绿/橙/紫/红/青）—— 字母颜色 + bullet 点颜色一致
+4. **TODAY'S EXECUTION PRIORITIES 横条**（h=24）—— 灰色全大写英文
+5. **底部 3 张数字优先级卡**（h=120） —— 左侧 01/02/03 极大数字（48px 浅色描边），右侧标题 + 摘要
+
+**视觉签名（缺一不可）**：
+- 字母 A-E 大写编号是这个骨架的灵魂，不允许用数字 1/2/3 代替
+- 每张卡必须有独立主题色（不允许统一灰色）
+- bullet 点用彩色实心圆（直径 6px）+ \`等宽字体片段\`（如 \`agent-config.yaml\`）
+
+**fewshot 结构骨架（请严格遵循这套 HTML 框架）**：
+\`\`\`html
+<div class="hero">
+  <h1 style="font-size:30px">课程名 Agent</h1>
+  <p style="color:#94A3B8">— 副标题</p>
+  <span style="position:absolute;top:24px;right:24px;color:#94A3B8;font-size:11px">HARNESS ENGINEERING / v1.0</span>
+</div>
+<div class="section-label">ARCHITECTURE RECOMMENDATIONS</div>
+<div class="grid" style="grid-template-columns:1fr 1fr 1fr;gap:16px">
+  <div class="card" style="border-left:4px solid #3B82F6">
+    <span class="letter" style="font-size:48px;color:#3B82F6;font-weight:700">A</span>
+    <h3 style="font-size:18px;display:inline-block;margin-left:12px">统一控制平面配置</h3>
+    <ul>
+      <li><span class="dot" style="background:#3B82F6"></span><code>agent-config.yaml</code> 集中管理所有约束参数</li>
+      <li>...</li>
+    </ul>
+  </div>
+  <!-- 重复 B/C/D/E 卡片，每个换不同主题色 -->
+</div>
+\`\`\``
   },
   linear_flow: {
     label: '线性流程',
@@ -29,33 +71,324 @@ const LAYOUT_SPECS = {
     label: '时间轴',
     spec: '中央竖线时间轴，知识点节点交替显示在左右两侧，圆点标记节点位置。适合历史演变、发展阶段、学习路径类内容。'
   },
-  // Phase-8.5：单模块杂志风格——参考用户提供的"如何避免现场补丁"信息图视觉密度
+  // 2026-05-16 v4.1.4 方案 B 新增：真正的多层放射树（中心 → 一级分支 → 二级子节点）
+  // 2026-05-16 第二轮加固：要求绝对定位坐标系 + 精确锚点对齐 + 中心节点 auto-height
+  mindmap: {
+    label: '思维导图',
+    selfContained: true,
+    spec: `**思维导图骨架**——多层放射树结构（中心 → 一级分支 → 二级子节点）
+
+⚠️ **必须用「绝对定位坐标系 + SVG 同坐标系」**，不允许用 flex/grid 让浏览器自己决定位置，否则连线必定漂浮。
+
+---
+
+## 画布与坐标系（必须严格）
+
+\`\`\`
+画布：1400px × 1220px（一级间距加大，避免子节点串列）
+container: position:relative; width:1400; height:1220; background:#FFFFFF
+
+所有盒子用 absolute 定位，左上角 (x, y) 已知
+SVG 用同一个 1400×1220 viewBox 叠在最底层（z-index:0），盒子叠在上面（z-index:2）
+\`\`\`
+
+---
+
+## 中心节点（必须严格）
+
+\`\`\`html
+<div style="position:absolute; left:60px; top:490px;
+            min-width:280px; max-width:320px;
+            min-height:160px; height:auto;
+            padding:20px 24px;
+            border-radius:18px;
+            background:linear-gradient(135deg,#1E3A8A 0%,#3B82F6 100%);
+            color:#fff;
+            z-index:2;
+            overflow:visible;">      <!-- ⚠ 不允许 overflow:hidden -->
+  <div style="font-size:14px; opacity:.85">🎯 第 N 节</div>
+  <div style="font-size:22px; font-weight:800; line-height:1.3; margin-top:6px">本节主标题</div>
+  <div style="font-size:12px; opacity:.8; margin-top:8px; line-height:1.5">章节信息 · 学时信息（允许 2 行）</div>
+</div>
+\`\`\`
+
+**右侧出线锚点**：中心节点右边缘中点 = (60 + 280, 490 + 80) = **(340, 570)** ← 后面 SVG 起点必须用这个坐标
+
+---
+
+## 一级分支（6 条，垂直排开）
+
+固定 y 坐标分布在 1220px 画布上，**每条间距 180px**（加大间距，避免子节点串列）：
+
+| # | 颜色（实色 + hex） | y 中心点 | 一级盒子位置（盒 160×56） |
+|---|---|---|---|
+| 1 | 蓝 #3B82F6 | 120 | left:780, top:92  |
+| 2 | 绿 #10B981 | 300 | left:780, top:272 |
+| 3 | 橙 #F59E0B | 480 | left:780, top:452 |
+| 4 | 紫 #8B5CF6 | 660 | left:780, top:632 |
+| 5 | 红 #EF4444 | 840 | left:780, top:812 |
+| 6 | 青 #06B6D4 | 1020| left:780, top:992 |
+
+一级盒子模板：
+\`\`\`html
+<div style="position:absolute; left:780px; top:{Y-28}px;
+            width:160px; height:56px;
+            display:flex; align-items:center; justify-content:center;
+            border-radius:14px;
+            background:{COLOR}; color:#fff;
+            font-size:16px; font-weight:700;
+            box-shadow:0 4px 12px rgba(0,0,0,.12);
+            z-index:2;">分支名</div>
+\`\`\`
+
+**左边缘锚点**（SVG 终点）：(780, Y) ← 即盒子左边中点
+
+---
+
+## 二级子节点（每个一级带 2-3 个，**严格上限 3，不允许 4**）
+
+固定 x 坐标 = 990，y 坐标按一级 y ± 偏移，**幅度收紧到 ±50，确保相邻一级的子节点不串列**：
+
+\`\`\`
+若一级 y = Y，子节点数 n = 3 → y_child = Y - 50, Y, Y + 50
+若 n = 2 → y_child = Y - 28, Y + 28
+若 n = 1 → y_child = Y
+\`\`\`
+
+**相邻一级子节点的空间隔离验证**：
+- 一级 K 的 Y, 子节点最低 = Y + 50 + 22 = Y + 72（盒底）
+- 一级 K+1 的 Y+180, 子节点最高 = Y+180 - 50 - 22 = Y + 108（盒顶）
+- 间隔 = 108 - 72 = **36px**（绝不允许子节点跨过中间这条无人区）
+
+---
+
+## 🔒 每一级分支的「内容范围」铁律（v4.1.4 第三轮加固）
+
+**绝对禁止「内容串列」**——每个一级分支只能放属于自己语义范围的子节点。
+
+按 6 条一级分支的 fixed 主题映射，每条只能取以下内容：
+
+| 一级 | 子节点必须来自 | 反例（绝对禁止串过来） |
+|---|---|---|
+| ① 教学目标（蓝 Y=120） | teachingObjectives.knowledge / skill / emotion 三类目标各 1 条 | ❌ 出现"案例教学法""5 段法""作业 15%"等 |
+| ② 教学重难点（绿 Y=300） | keyPoints[0] 当"重点"，difficulties[0] 当"难点" | ❌ 出现"小组讨论""课前预习""思政元素" |
+| ③ 教学方法（橙 Y=480） | teachingMethods[].name + 一句话适用 | ❌ 出现"启·导入""课前预习""职业认同感" |
+| ④ 教学流程（紫 Y=660） | inClass.phases[] 5 段法（导/讲/实/查/总）合并成 2-3 段汇总（如"启·导入"+"授·讲授"合一节，时长求和） | ❌ 出现"案例教学法""课后作业 15%" |
+| ⑤ 考核方式（红 Y=840） | assessment.components[] 每项 name + weight% | ❌ 出现"启·导入""职业认同感""树立工匠精神" |
+| ⑥ 思政元素（青 Y=1020） | ideologicalElements[] 每条，前缀加 "职业认同/技能成才/职业规划" 等分类前缀 | ❌ 出现"案例""5 段法""课后作业" |
+
+**视觉串列的另一面是语义串列**——如果不严格按上面表分配内容，无论坐标多精确都会让老师误以为"教学方法里怎么出现了流程？"
+
+子节点盒子（盒 200×44）：
+\`\`\`html
+<div style="position:absolute; left:990px; top:{Y_child-22}px;
+            width:200px; height:auto; min-height:44px;
+            padding:8px 12px;
+            display:flex; align-items:center;
+            border-radius:10px;
+            background:{COLOR_10ALPHA}; color:#1E293B;
+            border:1px solid {COLOR};
+            font-size:12px; line-height:1.4;
+            z-index:2; overflow:visible;">子节点文本（≤ 18 字）</div>
+\`\`\`
+
+其中 \`{COLOR_10ALPHA}\` = 主色 10% 透明（如 \`rgba(59,130,246,.12)\`）
+
+**左边缘锚点**（SVG 二级终点）：(990, Y_child + 22) ← 即盒子左边中点（top + height/2）
+
+---
+
+## SVG 连线（z-index:0，最底层）
+
+\`\`\`html
+<svg viewBox="0 0 1400 1220" width="1400" height="1220"
+     style="position:absolute; left:0; top:0; z-index:0">
+  <!-- 一级主干：从中心节点右边中点 (340, 570) 出发，到对应一级盒子左边中点 -->
+  <!-- 三次贝塞尔曲线，控制点 cp1=(560, 570)，cp2=(640, Y)，让曲线从水平慢慢拐到一级 y -->
+  <path d="M 340 570 C 560 570, 640 120, 780 120"
+        stroke="#3B82F6" stroke-width="3" fill="none" />
+  <path d="M 340 570 C 560 570, 640 300, 780 300"
+        stroke="#10B981" stroke-width="3" fill="none" />
+  <path d="M 340 570 C 560 570, 640 480, 780 480"
+        stroke="#F59E0B" stroke-width="3" fill="none" />
+  <path d="M 340 570 C 560 570, 640 660, 780 660"
+        stroke="#8B5CF6" stroke-width="3" fill="none" />
+  <path d="M 340 570 C 560 570, 640 840, 780 840"
+        stroke="#EF4444" stroke-width="3" fill="none" />
+  <path d="M 340 570 C 560 570, 640 1020, 780 1020"
+        stroke="#06B6D4" stroke-width="3" fill="none" />
+
+  <!-- 二级子干：从一级右边中点 (940, Y) 出发，到二级盒子左边中点 (990, Y_child) -->
+  <!-- 短曲线，cp=(965, (Y+Y_child)/2) -->
+  <!-- 示例：教学目标 Y=120，n=3 子节点 y=70/120/170 -->
+  <path d="M 940 120 C 965 95, 980 70, 990 70"
+        stroke="#3B82F6" stroke-width="1.6" fill="none" opacity=".7" />
+  <path d="M 940 120 L 990 120"
+        stroke="#3B82F6" stroke-width="1.6" fill="none" opacity=".7" />
+  <path d="M 940 120 C 965 145, 980 170, 990 170"
+        stroke="#3B82F6" stroke-width="1.6" fill="none" opacity=".7" />
+  <!-- ... 每个一级带 2-3 条，颜色与一级主色一致 -->
+</svg>
+\`\`\`
+
+---
+
+## 视觉签名（缺一不可）
+
+- ✅ 所有曲线起点、终点必须落在盒子边缘中点（坐标算清楚，不能漂浮）
+- ✅ 6 条主干 6 种不同色，二级用主色淡化（不允许同色调）
+- ✅ 中心节点 \`overflow:visible\` + \`height:auto\`，副标题允许 2 行不被裁
+- ✅ 一级盒子和二级盒子的 x 坐标固定（左对齐 col1=780 / col2=990），不允许参差不齐
+- ✅ 整体呈"中心向右展开 6 条主干"的视觉动势
+- ✅ 每个一级最多 3 个二级子节点（hard cap），子节点必须严格属于该一级的内容范围
+- ✅ 一级 Y 间距 180px，子节点 ±50 内分布，相邻一级子节点间至少 36px 空白带
+
+---
+
+## 反例（绝对禁止）
+
+- ❌ 中心节点用 \`width: 240px; overflow: hidden\` → 副标题被裁
+- ❌ SVG path 起点 \`M 320 480\` 但中心节点实际边缘在 (340, 570) → 线条漂浮
+- ❌ 用 \`<line>\` 直线连接 → 失去思维导图的曲线美感
+- ❌ 一级 / 二级 x 坐标各不相同（780 / 800 / 810 混用） → 视觉杂乱
+- ❌ 二级子节点和一级盒子高度重叠 → 排版炸裂
+- ❌ 做成 flex / grid 让浏览器决定位置 → 线条永远漂浮，本骨架的灵魂在"坐标精确一致"
+- ❌ **教学方法 列出现「启·导入」「课前预习」**（这是教学流程/考核方式的内容）→ 内容串列
+- ❌ **教学流程 列出现「课前预习」「作业 15%」**（这是考核方式的内容）→ 内容串列
+- ❌ **考核方式 列出现「职业认同感」「工匠精神」**（这是思政元素的内容）→ 内容串列
+- ❌ **某一级分支带 4 个或以上子节点** → 必定挤压相邻分支的视觉空间，hard cap 是 3
+- ❌ 一级子节点最低 y 超过 (Y + 72) 或一级子节点最高 y 低于 (Y - 72) → 跨界进无人区`
+  },
+  // Phase-8.5：单模块杂志风格——参考用户提供的"如何避免现场补丁"信息图
+  // 2026-05-16 v4.1.4 第三轮重写：彻底拉开与 design_overview 的差异，向真实杂志/插画感靠拢
+  //   关键差别：插画吉祥物 + 编号叙事卡（1-6）+ 落地清单 + 目标横幅，去掉"banner 区块"的学术感
   magazine_module: {
     label: '杂志信息图（模块版）',
-    selfContained: true,  // ⚠ 跳过通用强制规范（自己有完整 spec）
-    spec: `**杂志信息图风格——单模块版**（参考"现场补丁"信息图视觉密度）
+    selfContained: true,
+    spec: `**杂志信息图风格——单节课杂志页**（严格对标"如何避免 Claude Code 的'现场补丁'越堆越乱"那张图的视觉气质）
 
-固定 5 层结构，画布宽度 1200px，高度自适应（约 1500-1800px）：
+⚠️ 关键差异：这张图必须看起来像「真实杂志页 / 插画式信息图」，**不能像 PPT 学术 banner**。
+⚠️ 如果做出来跟 \`design_overview\`（整门课逻辑闭环）的"彩色头部 + 内容区块"风格一样，就是失败。
 
-1. **HERO 顶部 banner**（h=180）—— 深蓝渐变（#1E3A8A → #3B82F6），左侧大字"模块 N"+ 模块名，右侧 3 数字徽章（学时 / 知识点数 / 教学方法数）
+---
 
-2. **CORE 核心横条**（h=70）—— 淡黄底（#FEF3C7）+ ⭐ + 一句话模块定位（25 字内）
+## 灵魂特征（缺一不可）
 
-3. **主体 4 大维度区块**（2×2 网格，每块 540×340，间距 20）：
-   - ① 知识点卡片（左上，蓝头 #1E40AF）—— 列出本模块全部知识点，每点带图标 + 简短说明
-   - ② 教学方法（右上，绿头 #15803D）—— 流程图样式，列出本模块用到的方法（案例/任务/示范/演练）
-   - ③ 学情对接（左下，橙头 #B45309）—— 学生当前水平 + 学完后能力 + 与岗位对应
-   - ④ 评价标准（右下，紫头 #6B21A8）—— 课堂表现 / 实操作品 / 互查反馈 三柱图
+1. **HERO 区必须有人格化插画 / 吉祥物**：左上角 SVG 圆形头像或机器人 emoji（🤖 / 👨‍🏫 / 🎓 等），不能只有纯文字 HERO
+2. **6 段 narrative 卡片，每张都有大号编号 1./2./3./4./5./6.**：编号在卡片左上角，深蓝色，48-56px 加粗，不是放在彩色 banner 里
+3. **卡片内每条 bullet 必须有色彩图标块**：图标在 24×24 圆角矩形里，每条 bullet 一个不同颜色的图标，不允许纯文本 bullet
+4. **核心原则横幅**（介于 HERO 和卡片之间）：深蓝色横幅 + 🛡 徽章图标 + 一句话本节灵魂（不是淡黄底）
+5. **落地执行清单（CTA 行）**：靠近底部，1 行 5 个有色圆形数字 + 短行动短语
+6. **底部最终目标横幅**：深蓝（不是红色）+ 🎯 + 大字"学完后能..."，必须能被一眼读完
 
-4. **CHECKLIST 5 步教学进度**（h=140，淡灰底）—— 圆形数字 + 标题：1.导入 → 2.讲授 → 3.实操 → 4.互查 → 5.总结。每步圆色不同（黄/橙/绿/蓝/紫）
+---
 
-5. **GOAL 红色目标横幅**（h=110）—— 红底 #DC2626 + 🎯 + 一句话本模块能力达成（"学完后能..."）
+## 画布与坐标系
 
-**核心约束**：
-- 不允许"模块知识点少 → 区块缩小"，要用更详细的说明填满
-- 主体 4 大区块严格 2×2 布局，不允许变 3×1 或单列
-- HERO + CORE + GOAL 文字必须基于真实模块数据生成
-- 整体视觉密度参照杂志页（不留大空白）`
+\`\`\`
+固定宽度 1200px，高度自适应 1900-2400px
+背景：白 #FFFFFF
+卡片间距 20px
+卡片圆角 16px（杂志柔和感，比 design_overview 的 14px 略大）
+\`\`\`
+
+---
+
+## 结构（从上到下严格）
+
+### ① HERO（h=240）—— 必须有"人格化"
+- 渐变深蓝背景 \`linear-gradient(135deg,#1E3A8A 0%,#3B82F6 100%)\` + 白色文字
+- 左侧 80×80 圆形（白底浅蓝）+ 🤖 或 👨‍🏫 emoji 60px
+- 主标题：本节主题（36-42px / 800）
+- 副标题：14px 半透明白
+- 右上角小卡片夹堆装饰（4-5 个倾斜小方块，opacity 0.3-0.6，模拟"文件夹堆"或"卡片堆"的感觉，参考"现场补丁"图右上角的文件夹群）
+- **禁止**右侧放 3 个数字徽章（那是 design_overview 的设计）
+
+### ② 核心原则横幅（h=64）—— 深蓝 + 徽章
+- 背景：深蓝 #1E3A8A
+- 左侧白圆 36×36 + 🛡 emoji
+- 文字：「核心原则：本节的【关键定位】」一句话，18px / 700 / 白色
+- **禁止**淡黄底（那是旧 magazine_module 的 CORE 横条）
+
+### ③ 主体 6 张 narrative 卡（2×3 网格）
+
+每张卡片宽度 580px，高度 auto（最小 220），白底 + #E5E7EB 1px 边框 + 16px 圆角 + 浅阴影。
+
+\`\`\`html
+<div class="narrative-card">
+  <div class="card-head" style="display:flex; align-items:baseline; gap:12px; margin-bottom:14px">
+    <span class="big-num" style="font-size:32px; font-weight:800; color:#1E3A8A">1.</span>
+    <h3 style="font-size:20px; font-weight:700; color:#0F172A">本节学习目标</h3>
+  </div>
+  <ul class="bullets" style="list-style:none; padding:0; display:flex; flex-direction:column; gap:10px">
+    <li style="display:flex; gap:10px; align-items:flex-start">
+      <span class="icon-tile" style="flex-shrink:0; width:26px; height:26px; border-radius:6px; background:#3B82F6; color:#fff; display:flex; align-items:center; justify-content:center; font-size:14px">📘</span>
+      <span style="font-size:13px; line-height:1.55; color:#334155">知识目标 1（≤ 40 字）</span>
+    </li>
+    <!-- 重复 3-5 条 bullet，每条 icon-tile 用不同颜色（蓝/绿/橙/紫/红/青） -->
+  </ul>
+</div>
+\`\`\`
+
+**6 张卡的固定主题**（按数据映射）：
+1. **本节学习目标**（知识 / 技能 / 素养 各一条，3-5 条 bullet，icon 用 📘 🛠 💡）
+2. **本节重难点**（重点 + 难点，3-5 条 bullet，icon 用 ⭐ ⚠ 🎯）
+3. **教学方法卡**（3-4 个方法 + 一句说明，icon 用 🗣 📊 🔬 👥）
+4. **5 段法节奏**（导入 / 讲授 / 实操 / 互查 / 总结 + 时长，icon 用数字徽章 1-5）
+5. **考核维度 + 权重**（3-4 条，每条带百分比 chip 在右侧，icon 用 🎓 📊 🏆）
+6. **思政元素**（2-4 条，icon 用 🇨🇳 💎 ✨）
+
+**强制规范**：
+- 每张卡左上角必须有 \`32px 加粗 #1E3A8A\` 的大号 \`1./2./3./4./5./6.\` 编号
+- 标题不允许写在彩色 banner 里——必须是黑字直接接编号右侧（这是叙事卡视觉的灵魂）
+- 每条 bullet 的 \`icon-tile\` 必须 26×26 圆角矩形 + 实色填充 + emoji，**禁止用纯圆点或 SVG line icon**
+- 同卡片内 6 个 icon 颜色全部用不同色调（蓝/绿/橙/紫/红/青轮换）
+
+### ④ 落地执行清单（h=180，CTA 行）—— 整张图的"行动召唤"
+\`\`\`html
+<div style="background:linear-gradient(135deg,#3B82F6 0%,#1E3A8A 100%); color:#fff; padding:32px 40px; border-radius:16px; display:flex; align-items:center; gap:32px">
+  <div style="flex-shrink:0; width:110px; height:110px; background:rgba(255,255,255,.18); border-radius:16px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-weight:800; line-height:1.2; text-align:center">
+    <div style="font-size:13px; opacity:.9">落地</div>
+    <div style="font-size:22px">执行清单</div>
+  </div>
+  <div style="flex:1; display:flex; gap:24px">
+    <!-- 5 个圆形数字 + 短句 -->
+    <div style="text-align:center"><div style="width:44px;height:44px;border-radius:50%;background:#FBBF24;color:#0F172A;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;margin:0 auto 6px">1</div><div style="font-size:13px">导入新课<br/>10 分钟</div></div>
+    <div style="text-align:center"><div style="background:#FB923C">2</div><div>知识讲授<br/>30 分钟</div></div>
+    <div style="text-align:center"><div style="background:#22C55E">3</div><div>实操练习<br/>25 分钟</div></div>
+    <div style="text-align:center"><div style="background:#3B82F6">4</div><div>互查反馈<br/>15 分钟</div></div>
+    <div style="text-align:center"><div style="background:#A855F7">5</div><div>总结升华<br/>5 分钟</div></div>
+  </div>
+</div>
+\`\`\`
+
+### ⑤ 最终目标横幅（h=140）—— 必须是深蓝 + 大字
+- 深蓝渐变 \`#1E3A8A → #2563EB\` 背景
+- 🎯 emoji（60px）+ 「学完后能…」一句话（28-32px / 800 / 白色）
+- 副行：12px 浅白色"对接岗位：XXX"
+- **禁止**红色背景（那是旧的 GOAL 红横幅，对标错风格）
+
+---
+
+## 视觉签名（缺一不可）
+
+- ✅ HERO 必须含人格化插画 / emoji 头像（🤖 / 👨‍🏫 等）
+- ✅ 6 张卡必须用「左上大号编号 + 黑字标题」叙事范式
+- ✅ 每条 bullet 必须有 26×26 实色圆角图标块
+- ✅ 落地清单是渐变蓝横幅（不是淡灰底 5 圆环）
+- ✅ 最终目标横幅是深蓝（不是红）
+
+---
+
+## 反例（绝对禁止——出现一项视为失败）
+
+- ❌ 卡片标题写在彩色 banner 内（如蓝头/绿头/橙头）—— 那是 design_overview 的事，这里要直接黑字
+- ❌ 用 2×2 主体网格 + 4 大区块（旧 magazine_module 的设计已废弃）
+- ❌ GOAL 横幅用红色 #DC2626 —— 必须深蓝
+- ❌ CORE 横条用淡黄 #FEF3C7 —— 必须深蓝 + 🛡 徽章
+- ❌ 卡片 bullet 用 \`•\` 实心点或 \`<li>\` 默认样式 —— 必须 26×26 emoji 图标块
+- ❌ HERO 只有纯文字没有人格化元素
+- ❌ 整图低于 1900px（杂志感来自高密度信息，太短=没料）`
   },
   // Phase-9 C-2（v2 重写）：整门课教学设计的「内在逻辑闭环」版面
   // 灵感来源：参考"如何避免现场补丁"信息图——每块承担一个【逻辑角色】，块之间有箭头/递进/呼应
@@ -156,7 +489,55 @@ const LAYOUT_SPECS = {
 const STYLE_SPECS = {
   professional: {
     label: '专业正式',
-    spec: '深海军蓝（#1B2E6B）主色系，白色卡片背景，精准对齐，线条清晰。适合院校领导汇报、正式教学文档。颜色规范严格按照学校视觉识别系统。'
+    spec: `**专业正式皮肤**：
+
+颜色体系：
+- 主色 深海军蓝 #1B2E6B
+- 强调色 蓝 #3B82F6 / 青 #06B6D4 / 绿 #10B981 / 橙 #F59E0B / 紫 #8B5CF6 / 红 #EF4444（每张卡用不同色，不允许统一灰）
+- 卡片背景 #FFFFFF，区块底 #F8FAFC / #F1F5F9，文字 #0F172A / 副字 #475569
+
+字体：
+- 主标题 28-32px / 800
+- 卡片标题 18px / 700
+- 正文 13-14px / 400
+- 装饰编号字母 / 数字 48-72px / 800 + 单色
+
+视觉签名（缺一不可）：
+- 每张卡有独立主题色描边或左侧色条（4px 实色）
+- 卡片右上角 / 左上角有装饰性"标签 chip"（如 12px 大写英文 + 小圆点）
+- 顶部右上角必须有"项目签名"小字（如 "PROJECT NAME / v1.0"）
+
+反例（绝对禁止）：
+- ❌ 全部灰色 / 全部蓝色（失去专业层级感）
+- ❌ 所有文字同一字号（专业感来自字号对比）
+- ❌ 圆角 ≥ 16px（太可爱，专业感会丢）—— 圆角统一 8-12px`
+  },
+  magazine: {
+    label: '杂志感',
+    spec: `**杂志感皮肤**：
+
+颜色体系（高饱和、多色块）：
+- 每区块独立主题色头部（实色 banner h=48-56）
+- 蓝 #1E40AF / 绿 #15803D / 橙 #B45309 / 紫 #6B21A8 / 红 #DC2626
+- 强调色横条 淡黄 #FEF3C7 / 红 #DC2626
+- 卡片白 #FFFFFF + 阴影（dy=3, blur=6, opacity=0.1）
+
+字体：
+- 主标题 36-48px / 800
+- 数字徽章 36-48px / 800
+- 区块标题（彩色 banner 内）17-18px / 700 / 白色
+- 正文 13-14px / 400
+
+视觉签名（缺一不可）：
+- HERO 必须深色渐变（不允许纯白 HERO）
+- 至少 4 种不同主题色出现在不同区块（高饱和）
+- 必须有"圆形数字徽章"或"emoji 圆环"
+- 区块圆角 14px（杂志柔和感）
+
+反例（绝对禁止）：
+- ❌ 全白 / 极简（这是 professional 的事）
+- ❌ 所有区块同一色头部
+- ❌ 圆角 ≤ 6px（杂志感会丢）`
   },
   minimalist: {
     label: '极简清爽',
@@ -285,58 +666,31 @@ class InfographicCardService {
   }
 
   getDefaultTemplate() {
+    // 2026-05-16 v4.1.4 第四轮：彻底拆除 user prompt 里的"OLD 设计硬编码"
+    //   原因：旧版 user prompt 写死了"顶部色带 60px / 主标题 120px / 配色 #F8F9FF / 卡片图标 40×40"
+    //   这些"圣旨级"硬编码会覆盖 system prompt 里的 layout spec，AI 总是回到 OLD 范式。
+    //   现在 user prompt 只供应「数据」，不供应「结构 / 配色 / 字号」——结构完全由 system prompt 的 layout spec 决定。
     return [
-      '你是顶尖的教育信息可视化设计师，专为中职院校制作教学展示卡片。',
-      '请把下面的教学内容转换为一张适合课堂投影、领导审阅、插入正式文档的 HTML 信息卡。',
+      '把下面的课程数据，按 system 消息里指定的 layout + visualStyle 渲染成一张 HTML 信息卡。',
+      '',
+      '⚠ 关键规则：',
+      '1. 结构（区块布局 / 编号样式 / 色带位置 / 整图分段）**完全以 system 消息里的 layout spec 为准**',
+      '2. 配色、字号、装饰元素以 system 消息里的 visualStyle spec 为准',
+      '3. 下面"课程内容数据"中如果出现 `## ① ② ③` 等小节编号或 `(顶部，h=160)` 等位置标注，**只把它当作内容的语义分组**，不要把它当作"必须做成这样的版面结构"',
+      '4. 不允许在你的 HTML 中混入 system spec 之外的 "顶部色带" "主标题区" "底部提示条" "圆形图标 40×40" 等旧设计元素',
+      '5. 只输出完整 HTML（含内联 CSS），不输出解释，不输出 Markdown 代码块',
       '',
       '===== 课程上下文 =====',
       '课程名称：{course_name}',
-      '模块标题：{topic}',
+      '主题：{topic}',
       '{software_context}',
       '{job_context}',
-      '视觉风格：{style}',
       '',
-      '===== 内容要点 =====',
-      '{content}',
+      '===== 补充风格提示（弱约束，与 system spec 冲突时以 system 为准）=====',
+      '{style}',
       '',
-      '===== 设计规范（必须严格遵守）=====',
-      '',
-      '【画布】',
-      '- 固定宽度 1000px，高度 1400px（绝对不超过 1600px）',
-      '- 知识点超过 4 条时改用两列网格布局，确保一屏读完',
-      '',
-      '【结构】按此顺序从上到下排列：',
-      '① 顶部色带（60px）：左侧显示课程名称，右侧显示阶段/模块编号',
-      '② 主标题区（120px）：模块大标题 + 一句话核心摘要',
-      '③ 内容卡片区（填满剩余空间）：每个知识点 1 张卡片',
-      '④ 底部提示条（50px）：补充说明或软件提示（若有软件上下文则显示）',
-      '',
-      '【知识点卡片】每张卡片包含：',
-      '- 左侧：SVG 图标或 Unicode 符号（40×40px 圆形背景色块）',
-      '- 右侧上：知识点标题（粗体 16px）',
-      '- 右侧下：2-3 行简洁说明文字（14px 灰色）',
-      '',
-      '【配色（不得随意更改）】',
-      '- 页面底色：#F8F9FF（极浅蓝白）',
-      '- 顶部色带：#1B2E6B（深海蓝）',
-      '- 主标题区背景：#EEF2FF，边框左侧 4px 实线 #4F6FE8',
-      '- 卡片背景：白色 #FFFFFF，边框 1px #E2E8F0，圆角 12px',
-      '- 卡片图标背景色轮换：#EEF2FF / #FEF3C7 / #DCFCE7 / #FCE7F3',
-      '- 主色文字：#1B2E6B，正文：#334155，辅助：#64748B',
-      '- 底部色带：#1B2E6B（同顶部）',
-      '',
-      '【字体】',
-      '- 全部使用 system-ui, “Microsoft YaHei”, sans-serif',
-      '- 顶部课程名：13px 白色',
-      '- 主标题：28-32px 粗体 #1B2E6B',
-      '- 摘要：15px #475569',
-      '- 卡片标题：16px 粗体 #1B2E6B',
-      '- 卡片正文：14px #475569，行高 1.6',
-      '',
-      '【禁止】荧光色、粗糙渐变、表格布局、外部字体/图片链接、高度超过 1600px',
-      '',
-      '===== 输出要求 =====',
-      '只输出完整 HTML 文件（含内联 CSS），不要解释，不要 Markdown 代码块。'
+      '===== 课程内容数据 =====',
+      '{content}'
     ].join('\n');
   }
 
@@ -387,14 +741,27 @@ class InfographicCardService {
     return this.renderPrompt(enhancedParams);
   }
 
-  /** 获取可用布局列表 */
+  /** 获取可用布局列表
+   *  2026-05-16 v4.1.4 方案 B：UI 只暴露 4 个 layout（精选 + 强辨识度）
+   *  其它 LAYOUT_SPECS 条目（linear_flow/hub_spoke/comparison/timeline）保留供老 artifact 渲染兼容
+   */
   static getLayouts() {
-    return Object.entries(LAYOUT_SPECS).map(([key, v]) => ({ key, label: v.label }));
+    const VISIBLE_LAYOUTS = ['grid_cards', 'mindmap', 'magazine_module', 'design_overview'];
+    return VISIBLE_LAYOUTS
+      .filter((key) => LAYOUT_SPECS[key])
+      .map((key) => ({ key, label: LAYOUT_SPECS[key].label }));
   }
 
-  /** 获取可用风格列表 */
+  /** 获取可用风格列表
+   *  2026-05-16 v4.1.4 方案 B：UI 只暴露 2 个 style
+   *  - professional 专业正式（适合 grid_cards / mindmap）
+   *  - magazine     杂志感（适合 magazine_module / design_overview）
+   */
   static getStyles() {
-    return Object.entries(STYLE_SPECS).map(([key, v]) => ({ key, label: v.label }));
+    const VISIBLE_STYLES = ['professional', 'magazine'];
+    return VISIBLE_STYLES
+      .filter((key) => STYLE_SPECS[key])
+      .map((key) => ({ key, label: STYLE_SPECS[key].label }));
   }
 
   /**
@@ -421,26 +788,28 @@ class InfographicCardService {
       styleSpec.spec,
     ];
 
-    if (!isSelfContained) {
-      // 仅对没有自带完整 spec 的 layout（grid_cards / linear_flow / hub_spoke / comparison / timeline）施加通用规范
-      lines.push('');
-      lines.push('===== 通用强制规范 =====');
-      lines.push('- 画布固定宽度 1000px，高度自适应但绝对不超过 1600px');
-      lines.push('- 字体：system-ui, "Microsoft YaHei", sans-serif，禁止引用外部字体');
-      lines.push('- 禁止引用外部图片链接，图标使用 Unicode 符号或内联 SVG');
-      lines.push('- 顶部色带（60px）：左侧课程名，右侧模块编号');
-      lines.push('- 主标题区（100-120px）：模块大标题 + 一句话摘要');
-      lines.push('- 底部提示条（50px）：软件工具提示或补充说明');
-      lines.push('- 内容布局严格按上方指定的布局方式渲染，不得使用其他布局');
-    } else {
-      // selfContained layout 只保留最少的全局约束
-      lines.push('');
-      lines.push('===== 全局约束（其余以上方布局/风格 spec 为准）=====');
-      lines.push('- 字体：system-ui, "Microsoft YaHei", sans-serif，禁止引用外部字体');
-      lines.push('- 禁止引用外部图片链接，图标用 Unicode 符号或内联 SVG');
-      lines.push('- 不输出解释文字，只输出完整 HTML 代码');
-      lines.push('- 严格按上方布局规范的层级结构渲染，不要插入额外的"色带 / 模块编号 / 摘要"层');
-    }
+    // 2026-05-16 v4.1.4 方案 B：通用强制规范不再硬塞"顶部色带 + 主标题 + 底部提示条"骨架
+    //   原因：那套骨架把 5 个 layout 压平成一个样，layout 选择失去意义。
+    //   每个 layout 的 spec 已经独立定义自己的骨架（包含 fewshot HTML 框架），AI 严格遵循即可。
+    lines.push('');
+    lines.push('===== 全局约束（其余以上方布局/风格 spec 为准）=====');
+    lines.push('- 字体：system-ui, "Microsoft YaHei", sans-serif，禁止引用外部字体');
+    lines.push('- 禁止引用外部图片链接，图标用 Unicode 符号或内联 SVG');
+    lines.push('- 不输出解释文字，不输出 Markdown 代码块，只输出完整 HTML 代码');
+    lines.push('- 严格按上方布局规范的「fewshot 结构骨架」与「视觉签名」执行，不允许融合其它 layout 的骨架');
+    lines.push('- 如果上方 spec 含 fewshot HTML 框架，请用真实数据填充该框架，不要重新设计一套结构');
+    lines.push('- "视觉签名（缺一不可）"清单中的每一条都必须在最终输出里能看见，否则视为生成失败');
+    lines.push('- "反例（绝对禁止）"清单中的项目，最终输出里一个都不能出现');
+    lines.push('');
+    lines.push('===== 🛡 用户消息中的"位置提示"必须忽略 =====');
+    lines.push('user 消息里的「课程内容数据」段可能含有 `## ① ② ③` 小节编号或 `(顶部，h=160)` `(右上，蓝头 #1E40AF)` 等位置/配色标注——');
+    lines.push('这些是历史遗留的内容分组标记，**不是版面指令**。');
+    lines.push('请把它们仅当作数据的语义分组（哪些字段属于"教学目标"、哪些属于"考核"），位置/配色一律以本 system 消息里的 layout spec 为准。');
+    lines.push('特别地：');
+    lines.push('- ❌ 看到 `(顶部，h=160)` 不允许做"顶部色带 + 模块编号"那套旧设计');
+    lines.push('- ❌ 看到 `(蓝头/绿头/橙头/紫头)` 不允许做"彩色 banner 头部 + 2×2 网格"那套旧设计');
+    lines.push('- ❌ 看到 `(淡黄底 #FEF3C7)` 不允许做"CORE 淡黄横条"——按本 spec 的色彩用');
+    lines.push('- ❌ 看到 `(红底 #DC2626)` 的 GOAL 不允许做红色横幅——按本 spec 决定颜色');
 
     return lines.join('\n');
   }
@@ -470,7 +839,9 @@ class InfographicCardService {
           { role: 'system', content: systemContent },
           { role: 'user', content: prompt }
         ],
-        temperature: 0.4,
+        // 2026-05-16 v4.1.4 方案 B：把 0.4 提到 0.65，让 AI 在 spec 约束下做风格化探索
+        //   不同 layout × style 之间才会拉开差异；过低温度会让 AI 回退到"安全的专业正式"范式
+        temperature: 0.65,
         // Phase-9 C-2 修正：4000 不够装一个完整的 6 段逻辑闭环 HTML
         // 实测 AI 生成到第 3 段被截断（PNG 只有 1069px 高）
         max_tokens: 12000

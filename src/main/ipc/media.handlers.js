@@ -261,30 +261,117 @@ function register(ipcMain, getDeps) {
         : '';
       const jobContext = notebook.jobTargets ? `面向职业岗位：${notebook.jobTargets}` : '';
 
-      const promptFinal =
-        String(payload.promptFinal || '').trim() ||
-        infographicCardService.buildEnhancedPrompt({
-          course_name: courseName,
-          topic,
-          content,
-          style: payload.style || '',
-          software_context: softwareContext,
-          job_context: jobContext,
+      // ── 2026-05-16 v4.1.4 P1 完整：模板路径优先 ──────────────────────────────
+      //   新路径：AI 输出结构化 JSON 数据 → renderInfographic(layout, data) → HTML
+      //   旧路径：AI 输出 HTML 字符串（保留作 fallback，不可控但已知能跑）
+      //   payload.useTemplateRenderer === false 显式回到旧路径
+      let html = null;
+      let renderingPath = 'unknown';
+      let dataJsonForLog = null;
+
+      // P1.4 删除（2026-05-17）：infographic-templates 5 种固定模板已下线（完全放权 AI 自决 layout）
+      // 原 tryTemplatePath 整段 if-block 已移除，所有信息图生成强制走下方 legacy AI-HTML 路径
+      const tryTemplatePath = false;
+      if (tryTemplatePath) {
+        try {
+          // 已下线代码块；保留外层结构便于回退（永不执行）
+          throw new Error('infographic-templates 已下线');
+          // 让 AI 输出 JSON（不写 HTML）
+          const dataExtractPromptPath = path.join(__dirname, '../../../prompts/infographic-data-extract.md');
+          const dataExtractPrompt = fs.readFileSync(dataExtractPromptPath, 'utf8');
+          const userPrompt = [
+            `## 课程信息`,
+            `- 课程名：${courseName}`,
+            softwareContext ? `- ${softwareContext}` : '',
+            jobContext ? `- ${jobContext}` : '',
+            '',
+            `## 主题`,
+            topic,
+            '',
+            `## templateKey（必须用这个）`,
+            layout,
+            '',
+            `## 原始内容数据`,
+            content,
+          ].filter(Boolean).join('\n');
+
+          // 复用 infographicCardService 拿 API 配置
+          const apiKey = db.getApiKey('ark');
+          const endpointId = payload.endpointId
+            || db.getApiKey('ark_endpoint_text')
+            || db.getApiKey('ark_endpoint')
+            || db.getApiKey('ark_endpoint_text_deepseek');
+          if (!apiKey || !endpointId) {
+            throw new Error('Ark Endpoint 未配置，无法走模板路径');
+          }
+          const { postJsonWithRetry } = require('../api/request-utils');
+          const resp = await postJsonWithRetry(
+            `https://ark.cn-beijing.volces.com/api/v3/chat/completions`,
+            apiKey,
+            {
+              model: endpointId,
+              messages: [
+                { role: 'system', content: dataExtractPrompt },
+                { role: 'user', content: userPrompt },
+              ],
+              temperature: 0.4,
+              max_tokens: 3000,
+            },
+            { retries: 2 }
+          );
+          const raw = String(resp?.choices?.[0]?.message?.content || '').trim();
+          // 解析 JSON
+          const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
+          const s = cleaned.indexOf('{');
+          const e = cleaned.lastIndexOf('}');
+          if (s < 0 || e < s) throw new Error(`AI 返回无 JSON 边界：${raw.slice(0, 120)}`);
+          const data = JSON.parse(cleaned.slice(s, e + 1));
+          dataJsonForLog = data;
+          html = renderInfographic(layout, data);
+          renderingPath = 'template';
+          console.log(`[v2:generateStageInfographic] 模板路径成功：layout=${layout}, html ${html.length} chars`);
+        } catch (templateErr) {
+          console.warn(`[v2:generateStageInfographic] 模板路径失败，回落 legacy AI-HTML 路径：${templateErr.message}`);
+          html = null;
+        }
+      }
+
+      // ── Legacy AI-HTML 路径（fallback or 显式 opt-out）───────────────────────
+      if (!html) {
+        renderingPath = 'legacy-ai-html';
+        const promptFinal =
+          String(payload.promptFinal || '').trim() ||
+          infographicCardService.buildEnhancedPrompt({
+            course_name: courseName,
+            topic,
+            content,
+            style: payload.style || '',
+            software_context: softwareContext,
+            job_context: jobContext,
+            layout,
+            visualStyle
+          });
+
+        html = await infographicCardService.generateHtml({
+          provider: payload.provider || 'ark',
+          endpointId: payload.endpointId || null,
+          promptFinal,
           layout,
           visualStyle
         });
-
-      const html = await infographicCardService.generateHtml({
-        provider: payload.provider || 'ark',
-        endpointId: payload.endpointId || null,
-        promptFinal,
-        layout,
-        visualStyle
-      });
+      }
+      // 2026-05-15 v4.1.4 bug fix：magazine_module/design_overview 画布是 1200×1900+，
+      //   旧默认 1000×1400 让 AI 的 1200 宽 HTML 被缩放或区块内容溢出被裁。
+      //   按 layout 选合适的默认尺寸（高度可被 capturePage 的 scrollHeight 撑开，但 width 必须够）。
+      const layoutDefaults = {
+        magazine_module: { w: 1200, h: 1900 },
+        design_overview: { w: 1200, h: 2200 },
+      };
+      const defaultSize = layoutDefaults[layout] || { w: 1000, h: 1400 };
       const pngBuffer = await renderHtmlToPngBuffer(
         html,
-        Number(payload.width) || 1000,
-        Number(payload.height) || 1400
+        Number(payload.width) || defaultSize.w,
+        Number(payload.height) || defaultSize.h
       );
       const saved = infographicCardService.saveArtifacts({
         html,
@@ -306,6 +393,9 @@ function register(ipcMain, getDeps) {
       // Phase-9.5：sourceDesignArtifactId 关联本节视角信息图到具体的 design artifact（整门课视角为 null）
       const sourceDesignArtifactId = payload.sourceDesignArtifactId ? Number(payload.sourceDesignArtifactId) : null;
       const viewLevel = (layout === 'design_overview') ? 'course' : 'lesson';
+      // 2026-05-15 v4.1.4 T2：兜底关联字段（即使 artifactId 缺失，也能按 lessonNumber/topic 反查）
+      const sourceLessonNumber = payload.sourceLessonNumber != null ? Number(payload.sourceLessonNumber) || null : null;
+      const sourceLessonTopic = String(payload.sourceLessonTopic || '').trim() || null;
       let artifactId = null;
       if (typeof db.createArtifact === 'function') {
         const a = db.createArtifact({
@@ -319,6 +409,11 @@ function register(ipcMain, getDeps) {
             // Phase-9.5：视角与节课关联（供前端筛选）
             viewLevel,                       // 'course' | 'lesson'
             sourceDesignArtifactId,          // 关联的 design artifact id（仅 lesson 视角有效）
+            // 2026-05-15 v4.1.4 T2：兜底字段，artifactId 缺失时按节次/主题反查
+            sourceLessonNumber,
+            sourceLessonTopic,
+            // 2026-05-16 v4.1.4 P1 完整：记录走的哪条渲染路径，便于审计与定位翻车
+            renderingPath,                   // 'template' | 'legacy-ai-html'
           },
           format: 'png',
           status: 'generated',
@@ -412,6 +507,7 @@ function register(ipcMain, getDeps) {
       }
 
       // Phase-8.5：magazine 类型需要 courseContext 生成 description / jobs / tools / goal 等
+      // 2026-05-15 老师反馈 4.4：补 totalHours/theoryHours/practiceHours，防 AI 编造学时
       const courseContext = notebook ? {
         description: notebook.description || '',
         softwareTools: notebook.softwareTools || '',
@@ -420,7 +516,12 @@ function register(ipcMain, getDeps) {
         learnerProfile: notebook.learnerProfile || '',
         teachingMaterials: notebook.teachingMaterials || '',
         objectives: notebook.objectives || '',
-        grade: notebook.audience || notebook.grade || ''
+        grade: notebook.audience || notebook.grade || '',
+        // ── 学时 grounding（防 AI 信息图编造"72 学时""18 周"等） ─────────────
+        totalHours: Number(notebook.totalHours) || 0,
+        theoryHours: Number(notebook.theoryHours) || 0,
+        practiceHours: Number(notebook.practiceHours) || 0,
+        examHours: Number(notebook.examHours) || 0,
       } : {};
 
       const result = await generateDiagram({ aiClient, modules, courseName, diagramType, outputDir, courseContext });

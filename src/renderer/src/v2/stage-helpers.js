@@ -384,24 +384,48 @@ export function buildPptPageImagePrompt({
 
   const safeTemplate = template || {};
 
-  // ── guizang Hero 页分路由（仅限 封面 / 路线图 这种纯纹理过渡用途）─────────
+  // ── 2026-05-16 v4.1.4 Q1：guizang Hero 改造 —— 按主题出图 + 深色质感后处理 ──
+  //   旧版让封面/路线图全部走"纯纹理几乎全黑"→ 老师反馈"所有封面看起来一个样"
+  //   新版：让封面也按本课程主题出真实视觉主体，仅保留"深色调 + 戏剧光影"的统一气质
   if (safeTemplate.variant === 'guizang' && GUIZANG_HERO_TYPES.has(pageType)) {
-    const textureDesc = GUIZANG_HERO_TEXTURE_MAP[safeTemplate.heroBackground]
-      || '深色极简纹理背景，接近全黑，微弱光影层次，沉稳克制';
-    // Phase-9 修正：封面/路线图 也注入本页主题作为细微纹理变化提示
-    //   保留"纯纹理"主基调，但让不同节课的封面有微妙视觉差异（如"5W 模型"封面带轻微辐射感
-    //   "工具操作"封面带轻微网格感等）—— 不能 22 页封面都一模一样
     const titleHint = String(pageTitleSemantic || '').trim().slice(0, 30);
-    const heroConceptLine = titleHint
-      ? `【纹理细微差异提示】本页主题概念为「${titleHint}」，纹理可在主基调下做细微暗示性变化（如 5W 模型→隐约辐射感、工具操作→隐约网格感、流程进度→隐约横向条纹），但仍保持"暗沉抽象纯纹理零文字"的整体特性，绝不出现具体物品/文字/图案。`
-      : '';
-    return [
-      `极简主义抽象背景纹理：${textureDesc}。`,
-      heroConceptLine,
-      `横版全幅（${aspect || '16:9'}），整体画面需足够暗沉，极低亮度，深邃克制，纯粹质感。`,
-      `【绝对禁止】无任何文字符号、无任何字母数字、无人物、无具体物品识别物、无品牌LOGO、无鲜艳颜色区块。`,
-      `纯视觉背景纹理，零内容信息，零文字痕迹，零可识别元素。`
-    ].filter(Boolean).join('\n');
+    const summaryHint = String(pageSummarySemantic || '').trim().slice(0, 100);
+    const subjectTag = courseSubject ? `「${String(courseSubject).slice(0, 50)}」` : '本课';
+
+    if (pageType === '封面') {
+      // 封面：主题对应的高端摄影主视觉 + 深色质感
+      return [
+        `${subjectTag}课程封面主视觉，对应专业的高端摄影质感画面：`,
+        titleHint ? `本节核心概念为「${titleHint}」` : '',
+        summaryHint ? `主题进一步说明：${summaryHint}` : '',
+        '',
+        `画面以与课程主题契合的工具 / 材料 / 设备 / 空间为视觉主体，构图大气专业，戏剧性光影`,
+        `【色调氛围】深色背景为主（如深海军蓝 / 深炭灰 / 深棕等暗色系），保留课程主体细节，整体克制有质感`,
+        `【构图】视觉主体偏画面右侧 2/3，左侧适度留白供后续 Canvas 叠加标题文字`,
+        `【风格】商业摄影级精致质感，专业教育氛围，可有戏剧性聚光灯效果`,
+        `横版全幅（${aspect || '16:9'}）`,
+        '',
+        `【人物规则】以环境/物品/空间为主体，禁止人物正面头像特写`,
+        `【零文字铁律】画面内禁止任何文字、汉字、字母、数字、LOGO、水印，零文字痕迹`,
+        `【风格禁区】禁止水墨画/水彩/油画/铅笔素描/拼贴风/UI 截图`,
+      ].filter(Boolean).join('\n');
+    }
+
+    if (pageType === '路线图') {
+      // 路线图：抽象路径可视化，深色调
+      return [
+        `${subjectTag}课程的抽象学习路径可视化：`,
+        titleHint ? `主题概念「${titleHint}」` : '',
+        '',
+        `画面表现：几何节点 / 圆环 / 流线串联，呈现"流动的阶段感 + 方向感"`,
+        `【色调氛围】深色背景（深海军蓝 / 深炭灰），节点用主色调突出，整体克制专业`,
+        `【构图】横向路径或环形闭环，留出叠加标题的空白区`,
+        `横版全幅（${aspect || '16:9'}）`,
+        '',
+        `【零文字铁律】纯几何抽象，画面内禁止任何文字、汉字、字母、数字、LOGO`,
+        `【风格禁区】禁止水墨画/UI 截图/线框图/拓扑图`,
+      ].filter(Boolean).join('\n');
+    }
   }
 
   // ── 普通内容页场景描述（Phase-7.7 F3：主题驱动改造）─────────────────────
@@ -423,7 +447,43 @@ export function buildPptPageImagePrompt({
     '总结收束': `${subjectTag}的完成收束画面：整洁陈列的与主题对应的成品序列，成就感与收获感，柔和结束氛围，以成品为主体`
   };
 
-  const scene = sceneMap[pageType] || `${subjectTag}相关的现代化职业实训工作空间：与课程主题对应的专业工具与材料精致陈列，干净整洁的构图，以环境与器材为主体，无人物正面头像`;
+  // 2026-05-16 v4.1.4 Q2-③：sceneMap 多样化 —— 按 title 关键词进一步分支
+  //   旧版只有 pageType 维度，同 pageType 多页全用同一段描述 → AI 出图同质化
+  //   新版：在 pageType 基础上，按 title 关键词追加"语义差异化提示"
+  const titleSemantic = String(pageTitleSemantic || '').trim();
+  let titleDifferentiator = '';
+  if (titleSemantic) {
+    // 按 title 关键词推断画面差异
+    if (/概念|定义|认识|理论|原理/.test(titleSemantic)) {
+      titleDifferentiator = `画面侧重"抽象概念可视化"——用几何造型、放射结构或图层叠加表现概念`;
+    } else if (/对比|比较|差异|优劣|VS/.test(titleSemantic)) {
+      titleDifferentiator = `画面侧重"对比并列"——左右双主体构图，材质/形态/亮度对照`;
+    } else if (/步骤|流程|顺序|阶段|路径/.test(titleSemantic)) {
+      titleDifferentiator = `画面侧重"流程串联"——多个节点 / 工具按顺序排列，箭头或光带连接`;
+    } else if (/案例|实例|品牌|项目|实战/.test(titleSemantic)) {
+      titleDifferentiator = `画面侧重"实际案例 / 成品陈列"——具体产品 / 现场实物特写`;
+    } else if (/数据|分析|趋势|结构|占比|薪资|需求/.test(titleSemantic)) {
+      titleDifferentiator = `画面侧重"数据可视化"——抽象柱状 / 饼状 / 层级结构图形`;
+    } else if (/工具|设备|材料|器材/.test(titleSemantic)) {
+      titleDifferentiator = `画面侧重"工具器材陈列"——专业工具材料的精致俯拍`;
+    } else if (/讨论|互查|协作|小组|分享/.test(titleSemantic)) {
+      titleDifferentiator = `画面侧重"协作场景"——远景多人协作工作坊，桌面工具散落有序`;
+    } else if (/检查|验收|评分|标准|规则/.test(titleSemantic)) {
+      titleDifferentiator = `画面侧重"检验 / 评估"——成品验收台 + 检测器具 + 评分维度抽象图形`;
+    } else if (/总结|收束|回顾|复盘/.test(titleSemantic)) {
+      titleDifferentiator = `画面侧重"成果收束"——成品整齐陈列序列，收获与归档感`;
+    } else if (/导入|引入|开篇|启动/.test(titleSemantic)) {
+      titleDifferentiator = `画面侧重"开场氛围"——明亮宽敞空间 + 暖光 + 学习设备整齐就绪`;
+    } else {
+      // 没匹配到关键词时，强制要求 AI 用 title 字面意思推断视觉
+      titleDifferentiator = `画面侧重"${titleSemantic}"字面对应的真实视觉元素，与其他页有可辨识的视觉差异`;
+    }
+  }
+
+  const baseScene = sceneMap[pageType] || `${subjectTag}相关的现代化职业实训工作空间：与课程主题对应的专业工具与材料精致陈列，干净整洁的构图，以环境与器材为主体，无人物正面头像`;
+  const scene = titleDifferentiator
+    ? `${baseScene}\n【本页视觉差异化】${titleDifferentiator}`
+    : baseScene;
   const styleDesc = safeTemplate.imageStyle || '现代扁平化插图风格，色块分明，线条清晰，专业教育氛围';
   const accent = colorCodeToNatural(safeTemplate.accentColor || '#2E86DE');
   const bg = colorCodeToNatural(safeTemplate.background || '#F1F3F5');
@@ -551,8 +611,76 @@ export function buildPptTextFramework({ courseName, template, pages }) {
   ].join('\n');
 }
 
+/**
+ * 2026-05-16 v4.1.4：把 AI stage 2 输出的 imagePrompt 叠加"安全 + 风格 + 零文字"约束
+ *   场景：V2 pipeline 已让 AI 写了与本页讲稿章节对应的 imagePrompt（如"光电产业人才需求层级俯拍"），
+ *   但前端原 ensurePptImagePromptForPage 用 early-return 跳过空 prompt 才生成 → AI prompt 拿不到约束。
+ *   这里：当 AI prompt 已存在时，保留 AI 的"主体场景描述"，叠加固定的安全约束。
+ */
+// v4.3.0 D2（2026-05-18）：5 种配图风格 preset 对应的 styleDesc
+const IMAGE_STYLE_DESC = {
+  flat:         '现代扁平化插图风格，色块分明，线条清晰，专业教育氛围',
+  illustration: '柔和插画风格，手绘质感，亲和力强，温暖明亮色调',
+  realistic:    '写实摄影质感，真实场景，自然光影，细节丰富的实物特写',
+  guochao:      '国潮中式风格，传统纹样配现代色彩，留白克制，文化韵味',
+  minimal:      '极简留白风格，大面积空白，单色或两色搭配，几何构图',
+};
+
+export function enhanceAiImagePromptWithSafety(aiPrompt, { courseSubject, aspect = '16:9', template = {}, imageStylePreset } = {}) {
+  let cleanedAi = String(aiPrompt || '').trim();
+  if (!cleanedAi) return '';
+  // C3 修复（2026-05-17）：检测并剥离已有的"【本页主体场景】..."以及后续约束段，避免重复包装
+  if (cleanedAi.includes('【本页主体场景】')) {
+    const m = cleanedAi.match(/【本页主体场景】([\s\S]*?)(?:\n\s*\n|\n【|$)/);
+    if (m && m[1]) {
+      cleanedAi = m[1].trim();
+    }
+  }
+  if (!cleanedAi) return '';
+  const safeTemplate = template || {};
+  // v4.3.0 D2 优先级：imageStylePreset > template.imageStyle > 默认 flat
+  const presetDesc = imageStylePreset && IMAGE_STYLE_DESC[imageStylePreset];
+  const styleDesc = presetDesc || safeTemplate.imageStyle || IMAGE_STYLE_DESC.flat;
+  const accent = colorCodeToNatural(safeTemplate.accentColor || '#2E86DE');
+  const bg = colorCodeToNatural(safeTemplate.background || '#F1F3F5');
+  const subjectTag = courseSubject ? `「${String(courseSubject).slice(0, 50)}」` : '本课';
+
+  return [
+    // ── ① 主体：AI 写的页面具体场景描述（这是 V2 pipeline 的核心价值） ──
+    `【本页主体场景】${cleanedAi}`,
+    '',
+    // ② 课程主题统一约束
+    `【课程主题】图属于${subjectTag}课程的配图，画面元素必须服务于此主题`,
+    '',
+    // ③ 构图 / 视觉风格 / 色彩
+    `【构图】横版全幅（${aspect}），视觉主体集中于画面中央主要区域，四周边缘保持简洁通透`,
+    `【视觉风格】${styleDesc}`,
+    `【色彩方向】主色调以${accent}为强调色，整体与${bg}色调协调统一`,
+    '',
+    // ④ 人物 / 文字 / 风格禁区 三条铁律
+    `【人物构图规则】①画面以环境/物品/场景为主体，人物面积不超过画面总面积的 20%；②人物如出现须为东亚面孔（中国学生/教师/职业人员），严禁欧美白人；③严禁正面人物头像特写、半身证件照式构图；④人物须以远景或侧身背景配角形式出现`,
+    `【零文字铁律——绝对执行】画面内禁止任何文字符号：禁止中文汉字、拼音、英文字母、数字、标签、品牌 LOGO、水印、技术参数标注。上方"本页主体场景"中的中文描述只是给 AI 理解概念，画面里绝不能出现这些字`,
+    `【风格禁区】禁止水墨画、水彩画、油画、铅笔素描、拼贴风；禁止 UI 界面截图、拓扑图、流程图线框；禁止模仿杂志封面版式`,
+  ].join('\n');
+}
+
 export function ensurePptImagePromptForPage(page, { courseName, template, imageAspect, imageQuality }) {
-  if (!page || !page.needImage || String(page.imagePrompt || '').trim()) return page;
+  if (!page || !page.needImage) return page;
+  // 2026-05-16 v4.1.4 Q2-①：AI stage 2 输出的 imagePrompt 不再被丢弃
+  //   只要 imagePrompt 长度 ≥ 15 字（说明是真实的 AI 输出，不是空 / 占位），
+  //   就走"叠加安全约束"路径，保留 AI 的页面级具体场景描述
+  const aiPrompt = String(page.imagePrompt || '').trim();
+  if (aiPrompt.length >= 15) {
+    return {
+      ...page,
+      imagePrompt: enhanceAiImagePromptWithSafety(aiPrompt, {
+        courseSubject: courseName,
+        aspect: page.imageAspect || imageAspect,
+        template,
+      }),
+    };
+  }
+  // imagePrompt 为空或过短，走原有 buildPptPageImagePrompt fallback
   return {
     ...page,
     imagePrompt: buildPptPageImagePrompt({

@@ -754,15 +754,24 @@ async function exportMergedDiscussionWord({ notebook, discussionDraft, structure
 function buildLectureInfoTable(notebook) {
   const nb = notebook || {};
   const rows = [];
-  // 构建两列键值表：左列字段名，右列值
+  // 2026-05-17 v4.2.0 修复：基础信息表必须含节课元信息
+  //   - 老 bug：notebook 只有 totalHours，theoryHours/practiceHours 缺失 → 显示"理论 0 / 实践 0"
+  //   - 修复：从 notebook.lessonMeta（如果有）或 notebook 顶层字段读节课级别理论/实践
+  const lm = nb.lessonMeta || {};
+  const theoryH = Number(lm.theoryHours ?? nb.theoryHours) || 0;
+  const practiceH = Number(lm.practiceHours ?? nb.practiceHours) || 0;
+  const totalH = Number(nb.totalHours) || (theoryH + practiceH);
   const fields = [
     ['课程名称', nb.name || ''],
-    ['课程代码', nb.courseCode || ''],
-    ['授课对象', nb.grade || ''],
-    ['总学时', `${nb.totalHours || 0}（理论 ${nb.theoryHours || 0} / 实践 ${nb.practiceHours || 0}）`],
+    nb.lessonNumber || lm.lessonNumber ? ['节课', `第 ${lm.lessonNumber || nb.lessonNumber} 节 · ${lm.topic || nb.lessonTopic || ''}`] : null,
+    nb.chapter || lm.chapter ? ['所属章节', lm.chapter || nb.chapter] : null,
+    nb.courseCode ? ['课程代码', nb.courseCode] : null,
+    ['授课对象', nb.className || nb.grade || ''],
+    ['任课教师', nb.teacher || ''],
+    ['本节学时', `${totalH}（理论 ${theoryH} / 实践 ${practiceH}）`],
     nb.softwareTools ? ['教学软件', nb.softwareTools] : null,
     nb.jobTargets   ? ['目标岗位', nb.jobTargets] : null,
-    ['先修课程', nb.prerequisite || '无'],
+    nb.prerequisite ? ['先修课程', nb.prerequisite] : null,
     ['导出时间', new Date().toLocaleString('zh-CN', { hour12: false })]
   ].filter(Boolean);
 

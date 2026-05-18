@@ -236,25 +236,12 @@ function filterByType(items, type) {
  * @returns {string} 最终 prompt
  */
 function assembleWithBaseline(items, options = {}) {
-  const withBaseline = options.withBaseline !== false;
-  if (!withBaseline) return assemble(items, options);
-
-  // 延迟 require 避免循环依赖（platform-safety.builder 也 require 了 source-registry）
-  const { buildPlatformSafetyBaselineFragments, isBaselineFragmentId } =
-    require('./builders/platform-safety.builder');
-
-  const baseline = buildPlatformSafetyBaselineFragments(options.stage);
-
-  // 去重：调用方已有同 id 的 fragment 则跳过基线注入
-  const callerIds = new Set(
-    (Array.isArray(items) ? items : [])
-      .map((it) => it && it.meta && it.meta.id)
-      .filter(Boolean)
-  );
-  const dedupedBaseline = baseline.filter((b) => !callerIds.has(b.meta.id));
-
-  return assemble([...dedupedBaseline, ...(Array.isArray(items) ? items : [])], options);
+  // P1.1 修复（2026-05-17）：platform-safety.builder 已删（仅 Agent 模式用）
+  // assembleWithBaseline 现在等同于 assemble（无 baseline 注入）
+  return assemble(items, options);
 }
+
+// （旧 platform-safety baseline 注入实现已删，assembleWithBaseline 现等同于 assemble）
 
 /**
  * 工具方法：检查 items 是否包含某 id 的 fragment。

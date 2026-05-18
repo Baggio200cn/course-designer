@@ -1,7 +1,7 @@
 {
   "name": "ai-course-designer",
-  "version": "4.0.0",
-  "description": "驭课 Agent v4.0.0 — 职业教育课程开发 6 阶段工作流（教学进度表 → 教学设计 → 课堂讲稿 → 教学课件 → 微课视频 → 教学实施报告）",
+  "version": "4.3.3",
+  "description": "驭课 Agent v4.3.3 — 8 阶段工作流（schedule → design → ppt → lecture → quiz → homework → video → report）+ 在线测验/课后作业 AI 生成 + 跨版本数据找回 + 教师日志（前称我的工作台）",
   "main": "src/main/index.js",
   "scripts": {
     "dev": "node scripts/dev.js",
@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "pack": "electron-builder --dir",
     "dist": "vite build && electron-builder",
-    "start": "electron ."
+    "start": "electron .",
+    "smoke": "node scripts/smoke-test-real-ark.js"
   },
   "keywords": [
     "electron",
@@ -24,6 +25,7 @@
     "@vitejs/plugin-react": "^4.2.1",
     "electron": "^28.3.3",
     "electron-builder": "^24.9.1",
+    "sharp": "^0.34.5",
     "vite": "^5.0.10"
   },
   "dependencies": {
@@ -35,6 +37,7 @@
     "file-type": "^18.7.0",
     "lucide-react": "^0.309.0",
     "mammoth": "^1.6.0",
+    "pdf-parse": "^2.4.5",
     "pptxgenjs": "^3.12.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -43,7 +46,7 @@
   },
   "build": {
     "appId": "com.newvision.course-designer",
-    "productName": "驭课 Agent v4.0.0",
+    "productName": "驭课 Agent v4.3.3",
     "directories": {
       "output": "dist"
     },
@@ -68,8 +71,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "驭课 Agent v4.0.0"
+      "shortcutName": "驭课 Agent v4.3.3"
     },
-    "artifactName": "驭课Agent-v4.0.0-setup.exe"
+    "artifactName": "驭课Agent-v4.3.3-setup.exe"
   }
 }

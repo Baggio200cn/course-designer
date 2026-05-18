@@ -263,11 +263,18 @@ function validateLectureStage(lectureData = {}, options = {}) {
       else warnings.push(message);
       reviewReasons.push('正式讲稿结构不完整，建议人工检查课堂执行表达。');
     }
-    if (headingCount(finalScript) < 6) {
-      const message = '正式讲稿章节偏少，可能没有形成完整课堂流程';
+    // 2026-05-16 v4.1.4：章节数阈值按学时动态调整
+    //   Phase-9 引入"按节课讲稿"后，单节课 1-4 学时讲稿原本 6 章节门槛过严
+    //   重新标定：1-2 学时 ≥ 3 章节；3 学时 ≥ 4 章节；4 学时 ≥ 5 章节；≥ 5 学时 ≥ 6 章节
+    const minHeadings = totalHours <= 2 ? 3
+      : totalHours <= 3 ? 4
+      : totalHours <= 4 ? 5
+      : 6;
+    if (headingCount(finalScript) < minHeadings) {
+      const message = `正式讲稿章节偏少（${totalHours}学时建议≥${minHeadings}章节），可能没有形成完整课堂流程`;
       if (requireFinal) errors.push(message);
       else warnings.push(message);
-      reviewReasons.push('正式讲稿章节结构偏弱，建议人工确认开场、模块、练习、总结是否齐全。');
+      reviewReasons.push(`正式讲稿章节结构偏弱（${totalHours}学时建议≥${minHeadings}章节），建议人工确认开场、模块、练习、总结是否齐全。`);
     }
     if (finalNarrationCharCount < minNarration) {
       // Phase-7.7 P0-A 修复（H10 / R6 精神）：字数严重不足升 error 触发 pauseAgent；轻微不足保持 warning
@@ -337,6 +344,41 @@ function validateLectureStage(lectureData = {}, options = {}) {
     }
   }
 
+  // ── 2026-05-16 v4.2.0 Phase A'-7：PPT 页覆盖率校验 ──────────────────────
+  // 仅当 options.pptPages 提供时启用（design-first / lecture-from-ppt 流程）
+  // 老 v4.1.x lecture-only 流程 options 不带 pptPages，此段跳过保证向后兼容
+  let pptCoverageResult = null;
+  if (Array.isArray(options.pptPages) && options.pptPages.length > 0 && finalScript) {
+    // 用 lecture-from-ppt-generator 暴露的 checkPptCoverage 做校验
+    try {
+      const { checkPptCoverage } = require('../script/lecture-from-ppt-generator');
+      pptCoverageResult = checkPptCoverage(finalScript, options.pptPages);
+
+      if (pptCoverageResult.missingSlides.length > 0) {
+        const message = `讲稿缺失 ${pptCoverageResult.missingSlides.length} 张 PPT 页对应段落（缺：SLIDE-${pptCoverageResult.missingSlides.slice(0, 5).join(', SLIDE-')}${pptCoverageResult.missingSlides.length > 5 ? '...' : ''}）`;
+        if (requireFinal) errors.push(message);
+        else warnings.push(message);
+        reviewReasons.push(`讲稿与 PPT 不对齐：${pptCoverageResult.missingSlides.length} 张 PPT 页没有对应口播段，建议重新生成或人工补齐。`);
+      }
+      if (pptCoverageResult.duplicateSlides.length > 0) {
+        const message = `讲稿出现重复 SLIDE 编号：${pptCoverageResult.duplicateSlides.join(', ')}`;
+        if (requireFinal) errors.push(message);
+        else warnings.push(message);
+        reviewReasons.push('讲稿出现重复 SLIDE 编号，可能造成讲述顺序混乱。');
+      }
+      if (pptCoverageResult.outOfRange.length > 0) {
+        warnings.push(`讲稿存在超出 PPT 页数范围的 SLIDE 编号：${pptCoverageResult.outOfRange.join(', ')}`);
+        reviewReasons.push('讲稿中存在超出 PPT 总页数的 SLIDE 编号，建议清理。');
+      }
+      if (pptCoverageResult.tooShort.length > 0) {
+        warnings.push(`讲稿有 ${pptCoverageResult.tooShort.length} 张 SLIDE 段落过短（<30 字），可能是空话`);
+        reviewReasons.push(`讲稿中部分 SLIDE 段落过短（SLIDE-${pptCoverageResult.tooShort.slice(0, 3).join(', SLIDE-')}），建议补充实质讲述内容。`);
+      }
+    } catch (_) {
+      // 加载失败不影响主流程
+    }
+  }
+
   return {
     stage: 'lecture',
     valid: errors.length === 0,
@@ -356,7 +398,9 @@ function validateLectureStage(lectureData = {}, options = {}) {
       duplicateKnowledge: dupKnowledge,
       garbageSentences: garbageCount,
       transitionCoverage: transitions,
-      questionCount: questions
+      questionCount: questions,
+      // v4.2.0 Phase A'-7：PPT 覆盖率（仅 design-first 流程注入 pptPages 时有值）
+      pptCoverage: pptCoverageResult,
     }
   };
 }
@@ -394,17 +438,19 @@ function validatePptStage(pptData = {}, options = {}) {
   else if (pptPages.length === 0) warnings.push('PPT 页级框架尚未生成');
 
   // Phase-7.7 P1-C：页数门槛校验
+  // 2026-05-17 v4.2.0 加固：严重不足只 warning 不 error（不再阻塞老师确认）
+  //   理由：节课模式下学时常被错误传成 72（整门课），导致 16 页 PPT vs "72 学时建议 30-40 页" 误报
+  //         即使老师真按 4 学时生 22 页 PPT，也可能因学时计算 bug 被误判
+  //         改成 warning 后，老师能看到建议但能确认通过
   if (totalHours > 0 && pptPages.length > 0) {
     const expectedMin = totalHours <= 1 ? 8 : totalHours <= 2 ? 14 : totalHours <= 4 ? 22 : 30;
     const expectedMax = totalHours <= 1 ? 12 : totalHours <= 2 ? 18 : totalHours <= 4 ? 30 : 40;
-    // 严重不足：< 60% 的最小期望页数
     if (pptPages.length < expectedMin * 0.6) {
-      const msg = `PPT 页数严重不足（实际 ${pptPages.length} 页，${totalHours} 学时建议 ${expectedMin}-${expectedMax} 页）`;
-      if (strict) errors.push(msg);
-      else warnings.push(msg);
-      reviewReasons.push(`PPT 页数远低于学时建议，可能讲稿过短或 AI 规划失误。`);
+      // 严重不足：仅 warning + reviewReasons，**不再 error 阻塞**（v4.2.0 改）
+      const msg = `PPT 页数偏少（实际 ${pptPages.length} 页，按 ${totalHours} 学时建议 ${expectedMin}-${expectedMax} 页 · 仅参考）`;
+      warnings.push(msg);
+      reviewReasons.push(`PPT 页数与学时建议有差距，请老师审核是否补充。如已基于节课设计生成（如 4 学时建议 22+ 页），可忽略此提示。`);
     } else if (pptPages.length < expectedMin) {
-      // 轻微不足：< minimum 但 ≥ 60%
       warnings.push(`PPT 页数偏少（实际 ${pptPages.length} 页，${totalHours} 学时建议 ${expectedMin}-${expectedMax} 页）`);
     }
   }

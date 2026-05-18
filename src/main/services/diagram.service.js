@@ -13,7 +13,8 @@
 
 const fs = require('fs');
 const path = require('path');
-const { buildMagazineSvg } = require('./magazine-svg-builder');
+// P1.4 删除（2026-05-17）：magazine-svg-builder.js 已下线（完全放权 AI 自决 SVG）
+// 同时 generateMagazineDiagram 函数（半模板半 AI 路径）也整段删除
 
 const PROMPT_DIR = path.join(__dirname, '../../../prompts');
 
@@ -37,7 +38,29 @@ function extractSvgCode(text) {
   if (svgStart < 0 || svgEnd < 0) {
     throw new Error('AI 未返回有效的 SVG 代码（缺少 <svg>…</svg> 结构）');
   }
-  return candidate.slice(svgStart, svgEnd + 6);
+  return sanitizeSvg(candidate.slice(svgStart, svgEnd + 6));
+}
+
+/**
+ * 2026-05-17 v4.2.0：sanitize AI 输出的 SVG，修复常见 XML 实体错误
+ * AI 在 <text> 中常写 "A & B" / "<5%" / ">10" 等没转义的 &/</>，导致 sharp/浏览器无法解析。
+ */
+function sanitizeSvg(svg) {
+  let s = String(svg || '');
+
+  // 把 <text>...</text> / <tspan>...</tspan> 里的 & 转义（不影响 entity 已转义的 &amp; / &#x2026; 等）
+  s = s.replace(/(<(?:text|tspan|title|desc)[^>]*>)([\s\S]*?)(<\/(?:text|tspan|title|desc)>)/g, (m, open, body, close) => {
+    const fixed = body
+      .replace(/&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)/g, '&amp;')   // 裸 & → &amp;
+      .replace(/<(?!\/?[a-z])/gi, '&lt;')                                          // 裸 < → &lt;（不影响 tag 起始）
+      .replace(/>(?=[^<]*<\/(?:text|tspan|title|desc)>)/g, '');                    // 处理后再 trim
+    return open + fixed + close;
+  });
+
+  // 兜底：整个 SVG 中所有"裸 &"（非 entity）转义
+  s = s.replace(/&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)/g, '&amp;');
+
+  return s;
 }
 
 /**
@@ -72,18 +95,14 @@ function buildModulesSummary(modules) {
  *
  * @returns {Promise<{ svg: string, svgPath: string, diagramType: string }>}
  */
-async function generateDiagram({ aiClient, modules, courseName, diagramType = 'hierarchy', outputDir, courseContext = {} }) {
+async function generateDiagram({ aiClient, modules, courseName, diagramType = 'hierarchy', outputDir, courseContext = {}, design = null }) {
   if (!aiClient || typeof aiClient.chatJson !== 'function') {
     throw new Error('未提供有效的 AI 客户端');
   }
 
-  // ── 杂志风格走单独路径：AI 只生成 JSON，JS 拼装 SVG ─────────────────────
-  // Phase-8.5：替代"AI 直接生成 SVG"（成功率 ~30%）
-  if (diagramType === 'magazine') {
-    return generateMagazineDiagram({ aiClient, modules, courseName, courseContext, outputDir });
-  }
+  // 2026-05-17 v4.2.0：magazine 不再走 JS 模板拼装，与其它类型统一由 AI 自主生成 SVG
+  // 老的 generateMagazineDiagram 路径已废弃（保留函数体作 deprecated 备份，但不再被调用）
 
-  // ── 其他类型走原 AI 生成 SVG 路径 ─────────────────────────────────────
   const systemPrompt = loadPrompt('diagram');
   const modulesSummary = buildModulesSummary(modules);
 
@@ -94,6 +113,76 @@ async function generateDiagram({ aiClient, modules, courseName, diagramType = 'h
     timeline: '学习时间轴（中央横轴，各模块按顺序交替显示在轴线上下两侧）'
   };
 
+  // 2026-05-15 老师反馈 4.4：信息图总时长随机变化——根因是 userPrompt 完全没传学时数据。
+  // 注入 courseContext 里的 totalHours / theoryHours / practiceHours，并在 prompt 加铁律
+  // "禁止编造任何学时/时长数字，必须从上下文取"。
+  const hoursLines = [];
+  const totalH = Number(courseContext.totalHours) || 0;
+  const theoryH = Number(courseContext.theoryHours) || 0;
+  const practiceH = Number(courseContext.practiceHours) || 0;
+  const examH = Number(courseContext.examHours) || 0;
+  if (totalH > 0) hoursLines.push(`总学时：${totalH}`);
+  if (theoryH > 0) hoursLines.push(`理论学时：${theoryH}`);
+  if (practiceH > 0) hoursLines.push(`实践学时：${practiceH}`);
+  if (examH > 0) hoursLines.push(`考核学时：${examH}`);
+
+  // 2026-05-17 v4.2.0：注入完整 design 数据让 AI 用真实内容（禁止默认模板）
+  const designBlock = (() => {
+    if (!design || typeof design !== 'object') return '';
+    const lines = ['## 本节课教学设计完整内容（必须使用这些真实数据，禁止编造）', ''];
+    if (design.lessonMeta) {
+      const lm = design.lessonMeta;
+      lines.push(`### 节课元信息`);
+      lines.push(`- 节课编号：第 ${lm.lessonNumber || '?'} 节`);
+      lines.push(`- 节课主题：${lm.topic || '?'}`);
+      lines.push(`- 学时：理论 ${lm.theoryHours || 0} + 实践 ${lm.practiceHours || 0} = ${(Number(lm.theoryHours) || 0) + (Number(lm.practiceHours) || 0)} 节`);
+      if (lm.chapter) lines.push(`- 章节：${lm.chapter}`);
+    }
+    const obj = design.teachingObjectives || {};
+    if ((obj.knowledge || []).length || (obj.skill || []).length || (obj.emotion || []).length) {
+      lines.push('', '### 教学目标三维');
+      if ((obj.knowledge || []).length) lines.push(`- 知识：${obj.knowledge.join(' / ')}`);
+      if ((obj.skill || []).length) lines.push(`- 技能：${obj.skill.join(' / ')}`);
+      if ((obj.emotion || []).length) lines.push(`- 素养：${obj.emotion.join(' / ')}`);
+    }
+    if ((design.keyPoints || []).length) {
+      lines.push('', '### 教学重点');
+      design.keyPoints.forEach((kp, i) => lines.push(`- ${i + 1}. ${kp}`));
+    }
+    if ((design.difficulties || []).length) {
+      lines.push('', '### 教学难点');
+      design.difficulties.forEach((d, i) => lines.push(`- ${i + 1}. ${d}`));
+    }
+    if (Array.isArray(design.teachingMethods) && design.teachingMethods.length) {
+      lines.push('', '### 教学方法（必须用这些真实名字）');
+      design.teachingMethods.forEach((m, i) => {
+        const desc = m.desc || m.applicable || '';
+        lines.push(`- ${i + 1}. ${m.name || ''}${desc ? '：' + desc : ''}`);
+      });
+    }
+    const phases = design.inClass?.phases || [];
+    if (phases.length) {
+      lines.push('', '### 5 段法节奏（必须用真实 phase 名 + duration）');
+      phases.forEach((p, i) => {
+        lines.push(`- 第 ${i + 1} 段：${p.phase || '?'}（${p.duration || '?'}）`);
+      });
+    }
+    const assessComps = design.assessment?.components || [];
+    if (assessComps.length) {
+      lines.push('', '### 考核组成（占比必须用真实 weight）');
+      const totalW = assessComps.reduce((s, c) => s + (Number(c.weight) || 0), 0);
+      assessComps.forEach((c, i) => {
+        lines.push(`- ${c.name || '?'}：**${c.weight || 0}%**${c.criteria || c.desc ? '（' + (c.criteria || c.desc).slice(0, 40) + '）' : ''}`);
+      });
+      lines.push(`- 合计：${totalW}%`);
+    }
+    if ((design.ideologicalElements || []).length) {
+      lines.push('', '### 思政元素');
+      design.ideologicalElements.forEach((e, i) => lines.push(`- ${i + 1}. ${e}`));
+    }
+    return lines.join('\n');
+  })();
+
   const userPrompt = [
     `## 课程名称`,
     courseName || '课程',
@@ -101,15 +190,25 @@ async function generateDiagram({ aiClient, modules, courseName, diagramType = 'h
     `## 图表类型`,
     typeDescriptions[diagramType] || typeDescriptions.hierarchy,
     '',
-    `## 课程模块结构（共 ${(modules || []).length} 个模块）`,
-    modulesSummary
-  ].join('\n');
+    hoursLines.length ? `## 课程学时（必须以此为准，禁止编造）` : '',
+    hoursLines.length ? hoursLines.join('\n') : '',
+    '',
+    designBlock,    // 2026-05-17 v4.2.0：完整 design 注入（含 7 维度真实数据）
+    '',
+    designBlock ? '' : `## 课程模块结构（共 ${(modules || []).length} 个模块）`,
+    designBlock ? '' : modulesSummary,
+    '',
+    '## 🚨 数据真实性铁律（违反视为生成失败）',
+    '- 凡数字（学时/时长/周数/考核占比）→ 严格用上文真实数字',
+    '- 教学方法名/教学目标内容/重难点 → 严格用上文 design 字段',
+    '- design 没提供的字段 → 在 SVG 中省略对应区块，禁止凭空补占位（如默认"60% 过程性""ABC 三柱"）',
+  ].filter(Boolean).join('\n');
 
   const rawText = await aiClient.chatJson({
     systemPrompt,
     userPrompt,
-    temperature: 0.1,
-    maxTokens: 6000
+    temperature: 0.2,
+    maxTokens: 12000   // 2026-05-17：magazine 高密度信息图 SVG 可能 5-10KB，token 需提高
   });
 
   const svg = extractSvgCode(rawText);
@@ -128,8 +227,10 @@ async function generateDiagram({ aiClient, modules, courseName, diagramType = 'h
   return { svg, svgPath, diagramType };
 }
 
-// ── Magazine 专用路径：AI 生成 JSON → JS 拼装 SVG ───────────────────────
-async function generateMagazineDiagram({ aiClient, modules, courseName, courseContext, outputDir }) {
+// P1.4 删除（2026-05-17）：generateMagazineDiagram（半模板半 AI 路径）整段下线
+// 所有 diagram 类型（含 magazine）统一走上方 generateDiagram 的 AI 自决 SVG 路径
+// 老函数体保留供历史参考，但不再被任何入口调用
+async function _legacyGenerateMagazineDiagramDeleted({ aiClient, modules, courseName, courseContext, outputDir }) {
   const systemPrompt = loadPrompt('diagram');
   const modulesSummary = buildModulesSummary(modules);
 
@@ -142,6 +243,10 @@ async function generateMagazineDiagram({ aiClient, modules, courseName, courseCo
   if (courseContext.learnerProfile) contextLines.push(`学情说明：${courseContext.learnerProfile}`);
   if (courseContext.teachingMaterials) contextLines.push(`教材课标：${courseContext.teachingMaterials}`);
   if (courseContext.objectives) contextLines.push(`教学目标：${courseContext.objectives}`);
+  // 2026-05-15 老师反馈 4.4：学时数据必须 grounding，magazine 路径也加注入
+  if (Number(courseContext.totalHours) > 0) contextLines.push(`总学时：${Number(courseContext.totalHours)}（必须以此为准，禁止编造）`);
+  if (Number(courseContext.theoryHours) > 0) contextLines.push(`理论学时：${Number(courseContext.theoryHours)}`);
+  if (Number(courseContext.practiceHours) > 0) contextLines.push(`实践学时：${Number(courseContext.practiceHours)}`);
 
   const userPrompt = [
     `## 课程名称`,
@@ -157,7 +262,12 @@ async function generateMagazineDiagram({ aiClient, modules, courseName, courseCo
     modulesSummary,
     '',
     `## 严格遵守输出要求`,
-    '只返回 JSON 对象，以 { 开头，以 } 结尾，必须能被 JSON.parse() 正确解析。'
+    '只返回 JSON 对象，以 { 开头，以 } 结尾，必须能被 JSON.parse() 正确解析。',
+    '',
+    `## 数据真实性约束（2026-05-15 加固）`,
+    '- 凡是要写"总学时""理论学时""实践学时""时长""周数"等数字',
+    '  → 严格使用上文"课程上下文"提供的真实数字',
+    '  → 上文未提供时，留空或省略，禁止编造（如"72 学时""18 周"这种凭空数据）',
   ].join('\n');
 
   console.log('[diagram.service] magazine 类型：调 AI 生成 JSON…');
@@ -181,13 +291,8 @@ async function generateMagazineDiagram({ aiClient, modules, courseName, courseCo
     throw new Error(`AI 未返回有效 JSON：${e.message}`);
   }
 
-  // 用 JS 模板拼装 SVG（100% 成功）
-  const svg = buildMagazineSvg({
-    courseName: courseName || '课程',
-    modules: modules || [],
-    grade: courseContext.grade || courseContext.audience || '',
-    aiData
-  });
+  // P1.4 删除：buildMagazineSvg 已下线 → 函数永不到达此处（_legacyGenerateMagazineDiagramDeleted 不被调）
+  const svg = '<!-- magazine svg deprecated -->';
 
   // 保存 SVG 文件
   let svgPath = '';
