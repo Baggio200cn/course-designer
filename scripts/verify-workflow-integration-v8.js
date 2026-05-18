@@ -141,8 +141,65 @@ test('preload 暴露 getStageContractsV2 给前端', () => {
   assert(/getStageContractsV2/.test(preloadSrc), 'preload 缺 getStageContractsV2');
 });
 
-// ── 6. framework fallback 残留扫描（防回归）──────────────────────────────
-console.log('\n【6】framework fallback 残留扫描');
+// ── 6. V2App.jsx 前端阶段过滤包含 quiz/homework（Codex Round 5 #1 防回归）─────
+console.log('\n【6】V2App STAGE_KEYS 必须包含 quiz/homework');
+const v2AppSrc = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'V2App.jsx'), 'utf8');
+test('V2App 不再存在硬编码 6 阶段 STAGE_KEYS（旧 STAGE_KEYS_V4 = [...6...]）', () => {
+  // 旧危险模式：STAGE_KEYS_V4 = ['schedule', 'design', 'ppt', 'lecture', 'video', 'report']
+  //   该数组**不**含 quiz / homework → 会把这两阶段从 unlockedStages 过滤掉
+  // 现在应该全是动态 stageContracts.STAGE_ORDER || 8 阶段 fallback
+  const dangerousLine = /STAGE_KEYS[\w_]*\s*=\s*\[[^\]]*'video'[^\]]*\][^\n]*$/m;
+  const lines = v2AppSrc.split('\n');
+  const offending = lines.filter((l) => {
+    // 硬编码且不包含 quiz/homework 的危险数组
+    if (!dangerousLine.test(l)) return false;
+    if (l.includes('quiz') || l.includes('homework')) return false;
+    // 排除注释行
+    if (l.trim().startsWith('//') || l.trim().startsWith('*')) return false;
+    return true;
+  });
+  assert(offending.length === 0, `V2App 仍有 ${offending.length} 处硬编码 6 阶段 STAGE_KEYS：\n${offending.join('\n')}`);
+});
+test('V2App STAGE_KEYS fallback 包含 quiz/homework（防 stageContracts 加载失败时降级）', () => {
+  // 必须能找到一个 fallback 8 阶段数组（带 quiz + homework）
+  const fallback8 = /\[[^\]]*'quiz'[^\]]*'homework'[^\]]*\]|\[[^\]]*'homework'[^\]]*'quiz'[^\]]*\]/;
+  assert(fallback8.test(v2AppSrc), 'V2App 找不到 8 阶段 fallback 数组（应在 stageContracts || [...] 形式中）');
+});
+test('V2App 使用 stageContracts.STAGE_ORDER 作为 STAGE_KEYS 主权源', () => {
+  // 应该有 stageContracts?.STAGE_ORDER ||  ... 模式（不只是 handleForceUnlockNext 一处）
+  const stageKeysUsageRe = /STAGE_KEYS[\w_]*\s*=\s*stageContracts\??\.?\s*STAGE_ORDER/;
+  assert(stageKeysUsageRe.test(v2AppSrc),
+    'V2App 的 STAGE_KEYS 未接管为 stageContracts.STAGE_ORDER（仍硬编码会过滤 quiz/homework）');
+});
+
+// ── 7. session.handlers setActiveArtifact fieldMap 含 quiz/homework ──────────
+console.log('\n【7】session.handlers setActiveArtifact 支持 quiz/homework');
+test('session.handlers fieldMap 含 quiz: activeQuizId', () => {
+  assert(/quiz:\s*['"]activeQuizId['"]/.test(sessionSrc), 'fieldMap 缺 quiz 映射');
+});
+test('session.handlers fieldMap 含 homework: activeHomeworkId', () => {
+  assert(/homework:\s*['"]activeHomeworkId['"]/.test(sessionSrc), 'fieldMap 缺 homework 映射');
+});
+
+// ── 8. workbench STAGE_TYPES / TYPE_LABEL 也从 contracts 拉（Codex Round 5 #5）──
+console.log('\n【8】workbench STAGE_TYPES / TYPE_LABEL 单一来源');
+test('workbench import ARTIFACT_TYPES_BY_STAGE 从 contracts', () => {
+  assert(/ARTIFACT_TYPES_BY_STAGE/.test(workbenchSrc), 'workbench 缺 ARTIFACT_TYPES_BY_STAGE 引入');
+});
+test('workbench import ARTIFACT_TYPE_LABEL 从 contracts', () => {
+  assert(/ARTIFACT_TYPE_LABEL/.test(workbenchSrc), 'workbench 缺 ARTIFACT_TYPE_LABEL 引入');
+});
+test('contracts.js 导出 ARTIFACT_TYPE_LABEL + ARTIFACT_TYPES_BY_STAGE', () => {
+  const contracts = require(path.resolve(__dirname, '..', 'src', 'main', 'v2', 'contracts.js'));
+  assert(contracts.ARTIFACT_TYPE_LABEL, 'contracts.js 没导出 ARTIFACT_TYPE_LABEL');
+  assert(contracts.ARTIFACT_TYPES_BY_STAGE, 'contracts.js 没导出 ARTIFACT_TYPES_BY_STAGE');
+  assert(contracts.ARTIFACT_TYPE_LABEL.quiz_set, 'ARTIFACT_TYPE_LABEL 缺 quiz_set');
+  assert(contracts.ARTIFACT_TYPE_LABEL.homework_set, 'ARTIFACT_TYPE_LABEL 缺 homework_set');
+  assert(contracts.ARTIFACT_TYPE_LABEL.video_prompt, 'ARTIFACT_TYPE_LABEL 缺 video_prompt');
+});
+
+// ── 9. framework fallback 残留扫描（防回归）──────────────────────────────
+console.log('\n【9】framework fallback 残留扫描');
 const indexSrc = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'index.js'), 'utf8');
 test('index.js syncFrameworkArtifacts 不再 fallback framework', () => {
   // 找 currentStage: ... || 'framework' 模式

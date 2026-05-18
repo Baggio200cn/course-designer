@@ -14,24 +14,26 @@
 
 'use strict';
 
-// v4.3.3 Codex Round 4 #1：单一来源 · STAGE_PRIMARY_TYPE 从 contracts.js 引用
-const { STAGE_PRIMARY_TYPE: CONTRACTS_PRIMARY_TYPE } = require('../v2/contracts');
+// v4.3.3 Codex Round 5 #5 收口（2026-05-18）：STAGE_TYPES / STAGE_PRIMARY_TYPE / TYPE_LABEL
+//   全部从 contracts.js 单一来源引用，不再本地定义
+const {
+  STAGE_PRIMARY_TYPE: CONTRACTS_PRIMARY_TYPE,
+  ARTIFACT_TYPES_BY_STAGE: CONTRACTS_TYPES_BY_STAGE,
+  ARTIFACT_TYPE_LABEL: CONTRACTS_TYPE_LABEL,
+} = require('../v2/contracts');
 
-const STAGE_TYPES = {
+// fallback 保留，仅在 contracts 加载失败时启用（防御性编程）
+const STAGE_TYPES = CONTRACTS_TYPES_BY_STAGE || {
   schedule: ['schedule_table', 'schedule_export_word'],
   design: ['design_doc', 'design_infographic', 'design_export_word'],
   lecture: ['lecture_final', 'lecture_drafts', 'lecture_export_word'],
   ppt: ['ppt_outline', 'ppt_page_image', 'ppt_export_file'],
-  quiz: ['quiz_set'],            // v4.3.3
-  homework: ['homework_set'],    // v4.3.3
-  // v4.3.3 Codex #3：实际生成的是 video_prompt（micro-video.handlers.js 第 67 行），
-  //   micro_video_plan 作为 legacy alias 兼容老数据，新数据全用 video_prompt
+  quiz: ['quiz_set'],
+  homework: ['homework_set'],
   video: ['video_prompt', 'micro_video_plan'],
   report: ['implementation_report'],
 };
 
-// v4.3.3 Codex Round 4 #1：不再本地定义，从 contracts.js 单一来源拉
-//   旧代码留作 fallback 仅在 contracts 加载失败时启用
 const STAGE_PRIMARY_TYPE = CONTRACTS_PRIMARY_TYPE || {
   schedule: 'schedule_table',
   design: 'design_doc',
@@ -43,7 +45,7 @@ const STAGE_PRIMARY_TYPE = CONTRACTS_PRIMARY_TYPE || {
   report: 'implementation_report',
 };
 
-const TYPE_LABEL = {
+const TYPE_LABEL = CONTRACTS_TYPE_LABEL || {
   schedule_table: '📅 教学进度表',
   schedule_export_word: '📅 进度表 Word',
   design_doc: '🎯 教学设计',
@@ -55,9 +57,10 @@ const TYPE_LABEL = {
   ppt_outline: '📊 PPT 大纲',
   ppt_page_image: '📊 PPT 页图',
   ppt_export_file: '📊 PPT 文件',
-  quiz_set: '📝 在线测验',        // v4.3.3
-  homework_set: '📚 课后作业',    // v4.3.3
-  micro_video_plan: '🎬 微课视频方案',
+  quiz_set: '📝 在线测验',
+  homework_set: '📚 课后作业',
+  video_prompt: '🎬 微课视频方案',
+  micro_video_plan: '🎬 微课视频方案（老）',
   implementation_report: '📝 实施报告',
 };
 

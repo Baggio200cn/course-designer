@@ -155,15 +155,19 @@ npm run build  # vite build && electron-builder → dist/驭课Agent-v4.3.3-setu
 # v4.3.3 8 阶段契约自检（35/35 测试覆盖 STAGE_ORDER / REQUIREMENTS / PRIMARY_TYPE / unlock 链 / video type 一致性）
 node scripts/verify-contracts-v8.js
 
-# 老 v6 自检脚本（v4.3.3 仍保留作向后兼容参考，已不再适配 8 阶段，会有部分失败）
-# node scripts/verify-contracts-v6.js
+# v4.3.3 集成验证（14/14 测试覆盖 runtime / workbench / migration / IPC 暴露 / V2App stageContracts）
+node scripts/verify-workflow-integration-v8.js
 
+# 业务服务验证
 node scripts/verify-design-service.js
 node scripts/verify-ppt-images-pipeline.js
 node scripts/verify-schedule-service.js
 
 # v4.3.3 D15 真实 endpoint 烟雾测试（手动跑，需要 ARK API Key）
 ARK_API_KEY=xxx ARK_TEXT_ENDPOINT=ep-m-xxx npm run smoke
+
+# ⚠ scripts/legacy/ 是老脚本（v4.1.x / v4.2.x 6 阶段断言），仅历史参考，不要跑
+# 见 scripts/legacy/README.md
 ```
 
 ---

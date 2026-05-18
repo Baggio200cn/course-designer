@@ -80,13 +80,16 @@ function register(ipcMain, getDeps) {
     try {
       if (!db) throw new Error('Database not initialized');
       const id = Number(payload.notebookId);
-      const kind = String(payload.kind || ''); // 'design' | 'lecture' | 'ppt' | 'microVideo' | 'report'
+      // v4.3.3 Codex Round 5 #4：加 quiz/homework，与 db-simple.js setActiveArtifact 一致
+      const kind = String(payload.kind || ''); // 'design' | 'lecture' | 'ppt' | 'quiz' | 'homework' | 'microVideo' | 'report'
       const artifactId = Number(payload.artifactId) || null;
       if (!Number.isFinite(id) || id <= 0) return { success: false, error: 'notebookId 无效' };
       const fieldMap = {
         design: 'activeDesignArtifactId',
         lecture: 'activeLectureArtifactId',
         ppt: 'activePptOutlineId',
+        quiz: 'activeQuizId',           // v4.3.3 Codex Round 5 新增
+        homework: 'activeHomeworkId',   // v4.3.3 Codex Round 5 新增
         microVideo: 'activeMicroVideoId',
         report: 'activeReportId',
       };

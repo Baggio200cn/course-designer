@@ -1136,8 +1136,11 @@ export default function V2App() {
   const lectureEditRef = useRef({ notebookId: null, editedAt: 0 });
   // Phase-9：老笔记本（v3.x）的 currentStage 可能是 'framework'，新流程已没有这个阶段——静默矫正为 'schedule'
   const rawCurrentStage = workflowState?.currentStage || selectedNotebook?.currentStage || 'schedule';
-  // 2026-05-16 v4.2.0 Phase A'：ppt 在 lecture 之前
-  const STAGE_KEYS_V4 = ['schedule', 'design', 'ppt', 'lecture', 'video', 'report'];
+  // v4.3.3 Codex Round 5 #1 高风险修复（2026-05-18）：
+  //   旧 STAGE_KEYS_V4 是 6 阶段，会把 quiz/homework 阶段从 unlockedStages 过滤掉
+  //   现在主权 → stageContracts.STAGE_ORDER（IPC 拉的 8 阶段），fallback 也用 8 阶段
+  const STAGE_KEYS_V4 = stageContracts?.STAGE_ORDER
+    || ['schedule', 'design', 'ppt', 'lecture', 'quiz', 'homework', 'video', 'report'];
   const currentStage = STAGE_KEYS_V4.includes(rawCurrentStage) ? rawCurrentStage : 'schedule';
   const rawUnlockedStages = arr(workflowState?.unlockedStages);
   const unlockedStages = rawUnlockedStages.length

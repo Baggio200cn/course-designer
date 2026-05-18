@@ -208,12 +208,57 @@ const STAGE_TITLE = {
   report:   '教学实施报告',
 };
 
+// v4.3.3 Codex Round 5 #5（2026-05-18）：单一来源 · artifact type → 显示标签
+//   workbench / 教师日志 / 历史 modal 等多处用，全部 require 这个常量
+const ARTIFACT_TYPE_LABEL = {
+  // schedule
+  schedule_table:        '📅 教学进度表',
+  schedule_export_word:  '📅 进度表 Word',
+  // design
+  design_doc:            '🎯 教学设计',
+  design_infographic:    '🎯 设计信息图',
+  design_export_word:    '🎯 设计 Word',
+  // ppt
+  ppt_outline:           '📊 PPT 大纲',
+  ppt_page_image:        '📊 PPT 页图',
+  ppt_export_file:       '📊 PPT 文件',
+  // lecture
+  lecture_drafts:        '🎤 讲稿草稿',
+  lecture_final:         '🎤 正式讲稿',
+  lecture_export_word:   '🎤 讲稿 Word',
+  // quiz (v4.3.3 新)
+  quiz_set:              '📝 在线测验',
+  // homework (v4.3.3 新)
+  homework_set:          '📚 课后作业',
+  // video（v4.3.3 主类型是 video_prompt，micro_video_plan 是 legacy alias）
+  video_prompt:          '🎬 微课视频方案',
+  micro_video_plan:      '🎬 微课视频方案（老）',  // legacy 兼容
+  // report
+  implementation_report: '📝 实施报告',
+};
+
+// v4.3.3 Codex Round 5 #5：stage → 所有相关 artifact types（含 legacy alias）
+//   workbench 用于 stage 分组展示
+const ARTIFACT_TYPES_BY_STAGE = {
+  schedule: ['schedule_table', 'schedule_export_word'],
+  design:   ['design_doc', 'design_infographic', 'design_export_word'],
+  ppt:      ['ppt_outline', 'ppt_page_image', 'ppt_export_file'],
+  lecture:  ['lecture_final', 'lecture_drafts', 'lecture_export_word'],
+  quiz:     ['quiz_set'],
+  homework: ['homework_set'],
+  // video: 新主类型 video_prompt，老 micro_video_plan 作为 legacy alias
+  video:    ['video_prompt', 'micro_video_plan'],
+  report:   ['implementation_report'],
+};
+
 module.exports = {
   STAGE_ORDER,
   STAGE_ORDER_LEGACY_V3,    // 暴露旧 4 阶段供需要的代码读（不要写入）
   STAGE_REQUIREMENTS,
   STAGE_PRIMARY_TYPE,       // v4.3.3 新增 · 单一来源
   STAGE_TITLE,              // v4.3.3 新增 · 单一来源
+  ARTIFACT_TYPE_LABEL,      // v4.3.3 Codex Round 5 #5 新增 · 单一来源
+  ARTIFACT_TYPES_BY_STAGE,  // v4.3.3 Codex Round 5 #5 新增 · 单一来源
   computeUnlockedStages,
   validateStageTransition,
   isArtifactConfirmed,
