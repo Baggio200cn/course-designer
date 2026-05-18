@@ -1041,6 +1041,8 @@ export default function V2App() {
                                                                 // 每项 { url, message, kind: 'timeout'|'login_wall'|'render_error'|'content_too_short' }
   const [showApi, setShowApi] = useState(false);
   const [showWorkbench, setShowWorkbench] = useState(false);  // A3：教师日志显示开关
+  // v4.3.3 Codex Round 4 #1：单一来源契约（IPC 拉 contracts.js 内容）
+  const [stageContracts, setStageContracts] = useState(null);
   const [apiForm, setApiForm] = useState(API_FORM);
   const [assistantStatus, setAssistantStatus] = useState('请选择一个笔记本，先完成 V2 阶段冒烟。');
   const [busyKey, setBusyKey] = useState('');
@@ -1421,6 +1423,12 @@ export default function V2App() {
     if (!isDesktop) return;
     loadNotebookList();
     loadApiForm();
+    // v4.3.3 Codex Round 4 #1：mount 时拉契约常量，让 STAGE_ORDER/PRIMARY_TYPE/TITLE 来自后端
+    if (typeof api.getStageContractsV2 === 'function') {
+      api.getStageContractsV2().then((res) => {
+        if (res?.success) setStageContracts(res.data);
+      }).catch((e) => console.warn('[stageContracts] 拉取失败，用本地 fallback:', e));
+    }
   }, [isDesktop]);
 
   useEffect(() => {
@@ -1531,13 +1539,13 @@ export default function V2App() {
       window.alert('❌ 强制解锁 API 未注入 — 请完整重启 Electron（preload 已更新）');
       return;
     }
-    // v4.3.3 Codex #1 · 8 阶段链（必须与 src/main/v2/contracts.js STAGE_ORDER 严格一致）
-    // TODO(D11.2)：通过 IPC 拉 contracts.STAGE_ORDER，避免前后端漂移
-    const STAGE_TITLE = {
+    // v4.3.3 Codex Round 4 #1：优先用后端单一来源契约（stageContracts 在 mount 时 IPC 拉）；
+    //   stageContracts 未就绪时回退到本地常量（与 contracts.js 严格一致，仅作 fallback）
+    const STAGE_TITLE = stageContracts?.STAGE_TITLE || {
       schedule: '教学进度表', design: '教学设计', ppt: '教学课件', lecture: '课堂讲稿',
       quiz: '在线测验', homework: '课后作业', video: '微课视频', report: '教学实施报告',
     };
-    const STAGE_ORDER = ['schedule', 'design', 'ppt', 'lecture', 'quiz', 'homework', 'video', 'report'];
+    const STAGE_ORDER = stageContracts?.STAGE_ORDER || ['schedule', 'design', 'ppt', 'lecture', 'quiz', 'homework', 'video', 'report'];
     const idx = STAGE_ORDER.indexOf(fromStage);
     if (idx < 0 || idx >= STAGE_ORDER.length - 1) {
       window.alert(`${STAGE_TITLE[fromStage] || fromStage} 已是最后阶段，无需解锁下游`);

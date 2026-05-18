@@ -1,5 +1,17 @@
 /**
- * e2e-full-course-flow.js — 真 P0 端到端冒烟测试（2026-05-16 v4.1.4）
+ * e2e-full-course-flow.js — 端到端冒烟测试（v4.1.4 老脚本）
+ *
+ * ⚠ Codex Round 4 #5 标注（2026-05-18 v4.3.3）：
+ *   这是 v4.1.4 时期的 5 stage 老脚本，仅覆盖 schedule → design → lecture → ppt → 持久化。
+ *   不覆盖 v4.3.3 新增的 quiz / homework / 8 阶段顺序变化 / per-lesson 模型 / dirty 信号传播。
+ *
+ *   v4.3.3+ 推荐用：
+ *     - scripts/verify-contracts-v8.js（35 测试·8 阶段契约）
+ *     - scripts/verify-workflow-integration-v8.js（14 测试·runtime/workbench/migration 集成）
+ *     - scripts/smoke-test-real-ark.js（真实 endpoint 烟雾）
+ *
+ *   本脚本保留作向后兼容参考。TODO(D14.3 或 v4.4.0)：写 `scripts/e2e-v8-full-8stage.js`
+ *   覆盖完整 8 阶段链（需 mock 多节课 + quiz/homework + 8 阶段解锁）。
  *
  * 目标：用 mock AI 跑完整 5 stage 链路（schedule → design → lecture → ppt → 持久化往返）
  * 重点检查"上游修改下游炸"的字段透传：每个 stage 之间的 normalizer / validator 不丢字段

@@ -182,6 +182,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   reportExportPdfV2: (payload) => ipcRenderer.invoke('v2:reportExportPdf', payload),
 
   // ═══ Session 上下文 + 操作日志 + 工作台 ═══
+  // v4.3.3 Codex Round 4 #1：单一来源契约
+  getStageContractsV2: () => ipcRenderer.invoke('v2:getStageContracts'),
   getSessionContextV2: (notebookId) => ipcRenderer.invoke('v2:getSessionContext', notebookId),
   updateSessionContextV2: (payload) => ipcRenderer.invoke('v2:updateSessionContext', payload),
   switchActiveLessonV2: (payload) => ipcRenderer.invoke('v2:switchActiveLesson', payload),

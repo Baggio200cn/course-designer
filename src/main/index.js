@@ -339,7 +339,8 @@ function syncFrameworkArtifacts(notebookId, options = {}) {
     options.unlockLecture ? [...(workflow.unlockedStages || []), 'lecture'] : workflow.unlockedStages
   );
   db.upsertWorkflowState(notebookId, {
-    currentStage: options.nextStage || workflow.currentStage || 'framework',
+    // v4.3.3 Codex Round 4 #2：framework fallback 最后一处也清掉（D14.2 触底）
+    currentStage: options.nextStage || workflow.currentStage || 'schedule',
     unlockedStages,
     currentArtifactRefs: {
       frameworkJsonId: jsonArtifact.id,

@@ -14,6 +14,9 @@
 
 'use strict';
 
+// v4.3.3 Codex Round 4 #1：单一来源 · STAGE_PRIMARY_TYPE 从 contracts.js 引用
+const { STAGE_PRIMARY_TYPE: CONTRACTS_PRIMARY_TYPE } = require('../v2/contracts');
+
 const STAGE_TYPES = {
   schedule: ['schedule_table', 'schedule_export_word'],
   design: ['design_doc', 'design_infographic', 'design_export_word'],
@@ -27,14 +30,16 @@ const STAGE_TYPES = {
   report: ['implementation_report'],
 };
 
-const STAGE_PRIMARY_TYPE = {
+// v4.3.3 Codex Round 4 #1：不再本地定义，从 contracts.js 单一来源拉
+//   旧代码留作 fallback 仅在 contracts 加载失败时启用
+const STAGE_PRIMARY_TYPE = CONTRACTS_PRIMARY_TYPE || {
   schedule: 'schedule_table',
   design: 'design_doc',
   lecture: 'lecture_final',
   ppt: 'ppt_outline',
   quiz: 'quiz_set',
   homework: 'homework_set',
-  video: 'video_prompt',         // v4.3.3 Codex #3：统一为真实产物 type
+  video: 'video_prompt',
   report: 'implementation_report',
 };
 

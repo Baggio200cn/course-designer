@@ -100,7 +100,21 @@ function register(ipcMain, getDeps) {
     }
   });
 
-  // workbench:getStats 已在 src/main/ipc/workbench.handlers.js 注册（2026-05-16 v4.2.0 重写为 6-stage 版本）
+  // workbench:getStats 已在 src/main/ipc/workbench.handlers.js 注册
+
+  // v4.3.3 Codex Round 4 #1：暴露契约常量给前端，避免 V2App 硬编码 STAGE_ORDER 漂移
+  ipcMain.handle('v2:getStageContracts', async () => {
+    try {
+      const { STAGE_ORDER, STAGE_REQUIREMENTS, STAGE_PRIMARY_TYPE, STAGE_TITLE } = require('../../v2/contracts');
+      return {
+        success: true,
+        data: { STAGE_ORDER, STAGE_REQUIREMENTS, STAGE_PRIMARY_TYPE, STAGE_TITLE },
+      };
+    } catch (e) {
+      console.error('[v2:getStageContracts]', e);
+      return { success: false, error: e.message };
+    }
+  });
 }
 
 module.exports = { register };
