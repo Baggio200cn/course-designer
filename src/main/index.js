@@ -190,8 +190,10 @@ function ensureWorkflowStateForNotebook(notebookId) {
   const notebook = db.getNotebookById(notebookId);
   if (!notebook) return null;
   const existing = db.getWorkflowState(notebookId) || getDefaultWorkflowState(notebookId);
-  const currentStage = notebook.currentStage || existing.currentStage || 'framework';
-  const unlockedStages = normalizeUnlockedStages(existing.unlockedStages || ['framework']);
+  // v4.3.3 Codex Round 3 #4：framework 已退役，老 notebook 字段若残留也回归 schedule
+  const rawCurrentStage = notebook.currentStage || existing.currentStage || 'schedule';
+  const currentStage = rawCurrentStage === 'framework' ? 'schedule' : rawCurrentStage;
+  const unlockedStages = normalizeUnlockedStages(existing.unlockedStages || ['schedule']);
   const next = db.upsertWorkflowState(notebookId, {
     ...existing,
     currentStage,
@@ -524,11 +526,12 @@ function syncWorkflowStageAvailability(notebookId, options = {}) {
   const workflow = ensureWorkflowStateForNotebook(notebookId) || getDefaultWorkflowState(notebookId);
   const artifacts = db.listArtifacts({ notebookId });
   const unlockedStages = normalizeUnlockedStages(computeUnlockedStages(artifacts));
-  const previousUnlocked = normalizeUnlockedStages(workflow.unlockedStages || ['framework']);
-  const preferredStage = String(options.preferredStage || workflow.currentStage || 'framework').trim();
+  // v4.3.3 Codex Round 3 #4：framework fallback 全清，统一改 schedule
+  const previousUnlocked = normalizeUnlockedStages(workflow.unlockedStages || ['schedule']);
+  const preferredStage = String(options.preferredStage || workflow.currentStage || 'schedule').trim();
   const nextStage = unlockedStages.includes(preferredStage)
     ? preferredStage
-    : unlockedStages[unlockedStages.length - 1] || 'framework';
+    : unlockedStages[unlockedStages.length - 1] || 'schedule';
   const nextWorkflow = db.upsertWorkflowState(notebookId, {
     currentStage: nextStage,
     unlockedStages

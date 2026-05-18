@@ -260,11 +260,16 @@ function register(ipcMain, getDeps) {
       if (!artifact) return { success: false, error: '未找到该 artifact' };
 
       const stage = artifact.stage || inferStageFromType(artifact.type);
+      // v4.3.3 Codex Round 3 #3：补 quiz_set / homework_set / video_prompt（新主类型）
+      //   micro_video_plan 作为 legacy alias 仍保留兼容老 artifact
       const fieldMap = {
         design_doc: 'activeDesignArtifactId',
         lecture_final: 'activeLectureArtifactId',
         ppt_outline: 'activePptOutlineId',
-        micro_video_plan: 'activeMicroVideoId',
+        quiz_set: 'activeQuizId',
+        homework_set: 'activeHomeworkId',
+        video_prompt: 'activeMicroVideoId',
+        micro_video_plan: 'activeMicroVideoId',  // legacy
         implementation_report: 'activeReportId',
       };
       const sessionField = fieldMap[artifact.type];

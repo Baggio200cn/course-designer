@@ -594,7 +594,8 @@ function createV2Runtime(deps = {}) {
             : (quality.warnings || []);
 
           return {
-            output: { unlockedStage: 'ppt', forceAccepted: isForceAccepted },
+            // v4.3.3 Codex Round 3 #2：lecture 后下游是 quiz（不再是 ppt 老顺序）
+            output: { unlockedStage: 'quiz', forceAccepted: isForceAccepted },
             warnings: finalWarnings,
             outputArtifactIds: [draftsArtifact?.id, finalArtifact?.id].filter(Boolean),
             metadata: { quality, forceAccepted: isForceAccepted, conflictDecision: conflictDecision.resolution },
@@ -810,7 +811,8 @@ function createV2Runtime(deps = {}) {
             : (quality.warnings || []);
 
           return {
-            output: { unlockedStage: 'video', pageCount: normalized.pptPages.length, forceAccepted: pptForceAccepted },
+            // v4.3.3 Codex Round 3 #2：ppt 后下游是 lecture（不再是 video 老顺序）
+            output: { unlockedStage: 'lecture', pageCount: normalized.pptPages.length, forceAccepted: pptForceAccepted },
             warnings: finalWarnings,
             outputArtifactIds: [outlineArtifact?.id, ...pageArtifacts.map((item) => item?.id)].filter(Boolean),
             metadata: { quality, forceAccepted: pptForceAccepted },

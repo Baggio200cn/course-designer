@@ -40,7 +40,7 @@
 | ④ 课堂讲稿 | `lecture_final` | **PPT 骨架 100% 主权重** + 素材 80% 深度 | 逐页教师口播稿 |
 | ⑤ 在线测验 ⭐NEW | `quiz_set` | PPT 每页 + 讲稿 | 每页 1-2 题 + 综合题（5 种题型）|
 | ⑥ 课后作业 ⭐NEW | `homework_set` | 讲稿 + PPT | 3-5 道作业，含 deliverables + 评分标准 |
-| ⑦ 微课视频 | `micro_video_plan` | 讲稿 | 脚本+分镜+即梦提示词+拍摄+剪辑 |
+| ⑦ 微课视频 | `video_prompt`（旧 `micro_video_plan` 已废，但 workbench 仍兼容读老数据） | 讲稿 | 脚本+分镜+即梦提示词+拍摄+剪辑 |
 | ⑧ 教学实施报告 | `implementation_report` | 前 7 阶段全部产物 | AI 汇总 + 老师手填实施成效 |
 
 ---
@@ -152,8 +152,12 @@ npm run build  # vite build && electron-builder → dist/驭课Agent-v4.3.3-setu
 ### 验证脚本（H4 必须保留）
 
 ```bash
-# stage 转换契约校验（现仍叫 v6，v4.4.0 会升级为 v8 覆盖 quiz/homework）
-node scripts/verify-contracts-v6.js
+# v4.3.3 8 阶段契约自检（35/35 测试覆盖 STAGE_ORDER / REQUIREMENTS / PRIMARY_TYPE / unlock 链 / video type 一致性）
+node scripts/verify-contracts-v8.js
+
+# 老 v6 自检脚本（v4.3.3 仍保留作向后兼容参考，已不再适配 8 阶段，会有部分失败）
+# node scripts/verify-contracts-v6.js
+
 node scripts/verify-design-service.js
 node scripts/verify-ppt-images-pipeline.js
 node scripts/verify-schedule-service.js
@@ -178,7 +182,7 @@ ARK_API_KEY=xxx ARK_TEXT_ENDPOINT=ep-m-xxx npm run smoke
 
 - D11.2: V2App.jsx 4500 LOC 完整拆分（router + StageRouter + per-stage component）
 - D14.2: 删 `runtime.js` 老 framework 方法（仍被 lecture.handlers v3 老路径引用）
-- 验证脚本升级：`verify-contracts-v6.js` → `verify-contracts-v8.js`（覆盖 quiz/homework + 8 阶段解锁链 + video type 一致性）
+- ~~验证脚本升级：`verify-contracts-v6.js` → `verify-contracts-v8.js`~~ ✅ 已落地（v4.3.3 Codex Round 3 响应 · 35/35 测试通过）
 
 详见 `.claude/notes/2026-05-18-audit-v4.3.0-to-4.3.3.md`
 
