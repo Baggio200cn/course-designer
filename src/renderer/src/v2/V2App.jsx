@@ -1353,8 +1353,12 @@ export default function V2App() {
       setVideoArtifacts(arr(data.videoData?.artifacts));
     }
 
-    // v4.3.3 Codex Round 8 #2：拉 quiz/homework artifact 列表（让 stageArtifacts 真聚合）
-    //   失败不再静默吞 —— 用 console.warn 可观测，避免阶段卡片悄悄不准
+    // v4.3.3 Codex Round 9 #3：quiz/homework IPC 完整降级（含 api 函数不存在分支）
+    //   3 个分支全部清空 artifacts + warn：
+    //   (a) api 函数不存在  →  preload 没注入（dev 没重启 / 老版本 .exe）→ 清空 + warn
+    //   (b) IPC success=false →  后端返回失败 → 清空 + warn
+    //   (c) IPC 抛错       →  通信异常 → 清空 + warn
+    //   避免任何降级路径留旧数据
     if (typeof api.quizListV2 === 'function') {
       try {
         const quizRes = await api.quizListV2(notebookId);
@@ -1362,12 +1366,15 @@ export default function V2App() {
           setQuizArtifacts(arr(quizRes.data?.quizzes || quizRes.data));
         } else {
           console.warn(`[loadNotebookContext] quizListV2 返回失败:`, quizRes?.error || quizRes);
-          setQuizArtifacts([]);  // 显式清空，避免遗留老数据
+          setQuizArtifacts([]);
         }
       } catch (e) {
         console.warn(`[loadNotebookContext] quizListV2 异常:`, e?.message || e);
         setQuizArtifacts([]);
       }
+    } else {
+      console.warn('[loadNotebookContext] api.quizListV2 未注入（preload 旧版本或 dev 未重启）→ quiz artifacts 清空');
+      setQuizArtifacts([]);
     }
     if (typeof api.homeworkListV2 === 'function') {
       try {
@@ -1382,6 +1389,9 @@ export default function V2App() {
         console.warn(`[loadNotebookContext] homeworkListV2 异常:`, e?.message || e);
         setHomeworkArtifacts([]);
       }
+    } else {
+      console.warn('[loadNotebookContext] api.homeworkListV2 未注入（preload 旧版本或 dev 未重启）→ homework artifacts 清空');
+      setHomeworkArtifacts([]);
     }
 
     // Phase-9：4 个新阶段的数据回填（驭课 Agent v4.0.0）

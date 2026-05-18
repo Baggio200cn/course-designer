@@ -159,12 +159,20 @@ npm run build  # vite build && electron-builder → dist/驭课Agent-v4.3.3-setu
 **A 类 · 发布门禁（一键命令，全绿才允许发版）**
 
 ```bash
-# 一键跑全部 A 类验证（推荐）
-npm run verify:gate
-# 或拆开跑（CI 单步可见）
+# A 类快速门禁（开发期常跑·覆盖契约 + 集成）
+npm run verify:gate           # 70 测试 = verify:contracts (35) + verify:integration (35)
+
+# 完整发版门禁（包含 build，发版前跑这个）
+npm run verify:release        # gate + vite build + electron-builder
+
+# 拆开跑（CI 单步可见）
 npm run verify:contracts      # 35/35 · STAGE_ORDER / REQUIREMENTS / PRIMARY_TYPE / unlock 链 / video type 一致性
-npm run verify:integration    # 25/25 · runtime + workbench + migration + IPC + V2App stageContracts + setActiveArtifact + mock 集成
+npm run verify:integration    # 35/35 · runtime + workbench + migration + IPC + V2App stageContracts + setActiveArtifact + mock 集成 + Round 7/8 治理收口防回归
 ```
+
+**职责分工**：
+- `verify:gate` = **快速门禁**（开发期、PR、CI 普通分支必跑）
+- `verify:release` = **发版门禁**（gate + build，发安装包前跑，任一失败即 exit 1）
 
 **B 类 · scripts/legacy/**（v4.1.x / v4.2.x 老脚本 + 断言落后于 v4.3.3 新契约的服务单元）：
 

@@ -445,6 +445,60 @@ test('package.json 含 verify:release（gate + build 串联）', () => {
     'verify:release 缺 build 步骤（vite build 或 electron-builder）');
 });
 
+// ── 13. v4.3.3 Codex Round 9 防回归（README 同步 + api 缺失降级）────────────
+console.log('\n【13】Round 9 治理收口·README 一致 + 完整降级');
+
+test('README 主文档同步 verify:integration 35 测试（不再是老 25）', () => {
+  const readme = fs.readFileSync(path.resolve(__dirname, '..', 'README.md'), 'utf8');
+  // 不应再出现 "verify:integration ... 25/25" 的老描述
+  const oldDesc = /verify:integration[^\n]{0,80}25\s*\/\s*25/;
+  assert(!oldDesc.test(readme), 'README 仍写 verify:integration 25/25（应至少 35）');
+  // 应明确 35/35 或 35 测试
+  const newDesc = /verify:integration[^\n]{0,200}35\s*\/\s*35/;
+  assert(newDesc.test(readme), 'README 没更新 verify:integration 到 35/35');
+});
+
+test('README 主文档把 verify:release 写进主推荐（不只 verify:gate）', () => {
+  const readme = fs.readFileSync(path.resolve(__dirname, '..', 'README.md'), 'utf8');
+  // 用 ### 验证脚本 作为锚（确保抓到正文 section 不是目录结构）
+  const sectionStart = readme.search(/###\s+验证脚本/);
+  assert(sectionStart >= 0, '找不到「### 验证脚本」section');
+  // 取这个 section 到下一个 ### 之间的内容
+  const afterSection = readme.slice(sectionStart);
+  const nextSection = afterSection.search(/\n###\s+(?!验证脚本)/);
+  const blockText = nextSection > 0 ? afterSection.slice(0, nextSection) : afterSection;
+
+  assert(/npm\s+run\s+verify:release/.test(blockText), 'README 验证脚本 section 未提到 npm run verify:release');
+  const hasJobSplit = /职责|发版门禁|快速门禁/.test(blockText);
+  assert(hasJobSplit, 'README 验证脚本 section 缺 verify:gate vs verify:release 职责说明');
+});
+
+test('V2App quiz/homework IPC api 缺失也清空 artifacts（Round 9 #3 完整降级）', () => {
+  const lines = v2AppSrc.split('\n');
+  // 找到 quizListV2 块，检查里面的 else 分支
+  let inBlock = false;
+  let blockText = [];
+  lines.forEach((l) => {
+    if (/typeof\s+api\.quizListV2/.test(l)) {
+      inBlock = true;
+    }
+    if (inBlock) {
+      blockText.push(l);
+      // 块结束启发：遇到 'Phase-9' 注释或下一个独立 if
+      if (/Phase-9|scheduleRes\?\.success/.test(l)) inBlock = false;
+    }
+  });
+  const blockStr = blockText.join('\n');
+  // 必须有 else 分支
+  assert(/}\s*else\s*\{/.test(blockStr), 'quizListV2 检查后没有 else 分支（api 缺失时降级丢失）');
+  // else 分支必须含 setQuizArtifacts([]) 和 console.warn
+  // 简化匹配：检查在整段里两类调用都有
+  const hasQuizWarn = (blockStr.match(/console\.warn[^\n]*quizListV2/g) || []).length >= 2;
+  const hasHwWarn = (blockStr.match(/console\.warn[^\n]*homeworkListV2/g) || []).length >= 2;
+  assert(hasQuizWarn, 'quizListV2 应有至少 2 处 warn（失败/异常/不存在）');
+  assert(hasHwWarn, 'homeworkListV2 应有至少 2 处 warn（失败/异常/不存在）');
+});
+
 // ── 9. framework fallback 残留扫描（防回归）──────────────────────────────
 console.log('\n【9】framework fallback 残留扫描');
 const indexSrc = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'index.js'), 'utf8');
