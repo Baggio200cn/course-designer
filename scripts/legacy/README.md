@@ -22,10 +22,11 @@ v4.3.3 起项目用 **8 阶段架构**（schedule → design → ppt → lecture
 
 | 用途 | 当前正版脚本 |
 |---|---|
-| 契约内部验证（35 测试）| `scripts/verify-contracts-v8.js` ✅ 必跑 |
-| 集成验证 · runtime + workbench + migration（14 测试）| `scripts/verify-workflow-integration-v8.js` ✅ 必跑 |
-| 真实 ARK endpoint 烟雾 | `scripts/smoke-test-real-ark.js`（手动跑，需 API Key）|
-| 设计 / PPT / 进度服务 | `scripts/verify-design-service.js` / `verify-ppt-images-pipeline.js` / `verify-schedule-service.js` |
+| 契约内部验证（35 测试）| `scripts/verify-contracts-v8.js` ✅ 必跑 · `npm run verify:contracts` |
+| 集成验证 · runtime + workbench + migration（31 测试 · v4.3.3 Round 7 扩充）| `scripts/verify-workflow-integration-v8.js` ✅ 必跑 · `npm run verify:integration` |
+| 一键发布门禁（A 类全跑）| `npm run verify:gate` 或 `npm run verify:release`（含 build） |
+| 真实 ARK endpoint 烟雾 | `scripts/smoke-test-real-ark.js`（手动跑，需 API Key）· `npm run smoke` |
+| 设计 / PPT / 进度服务断言（v4.4.0 重写）| ⚠ 已移到 `scripts/legacy/`（断言基于 v4.2 期望，v4.3.3 下预期失败）|
 
 ## 何时该删
 

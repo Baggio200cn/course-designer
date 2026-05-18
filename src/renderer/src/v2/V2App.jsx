@@ -1353,19 +1353,36 @@ export default function V2App() {
       setVideoArtifacts(arr(data.videoData?.artifacts));
     }
 
-    // v4.3.3 Codex Round 7 #3：拉 quiz/homework artifact 列表（让 stageArtifacts 真聚合）
-    try {
-      if (typeof api.quizListV2 === 'function') {
+    // v4.3.3 Codex Round 8 #2：拉 quiz/homework artifact 列表（让 stageArtifacts 真聚合）
+    //   失败不再静默吞 —— 用 console.warn 可观测，避免阶段卡片悄悄不准
+    if (typeof api.quizListV2 === 'function') {
+      try {
         const quizRes = await api.quizListV2(notebookId);
-        if (quizRes?.success) setQuizArtifacts(arr(quizRes.data?.quizzes || quizRes.data));
+        if (quizRes?.success) {
+          setQuizArtifacts(arr(quizRes.data?.quizzes || quizRes.data));
+        } else {
+          console.warn(`[loadNotebookContext] quizListV2 返回失败:`, quizRes?.error || quizRes);
+          setQuizArtifacts([]);  // 显式清空，避免遗留老数据
+        }
+      } catch (e) {
+        console.warn(`[loadNotebookContext] quizListV2 异常:`, e?.message || e);
+        setQuizArtifacts([]);
       }
-    } catch (_) { /* ignore */ }
-    try {
-      if (typeof api.homeworkListV2 === 'function') {
+    }
+    if (typeof api.homeworkListV2 === 'function') {
+      try {
         const hwRes = await api.homeworkListV2(notebookId);
-        if (hwRes?.success) setHomeworkArtifacts(arr(hwRes.data?.homeworks || hwRes.data));
+        if (hwRes?.success) {
+          setHomeworkArtifacts(arr(hwRes.data?.homeworks || hwRes.data));
+        } else {
+          console.warn(`[loadNotebookContext] homeworkListV2 返回失败:`, hwRes?.error || hwRes);
+          setHomeworkArtifacts([]);
+        }
+      } catch (e) {
+        console.warn(`[loadNotebookContext] homeworkListV2 异常:`, e?.message || e);
+        setHomeworkArtifacts([]);
       }
-    } catch (_) { /* ignore */ }
+    }
 
     // Phase-9：4 个新阶段的数据回填（驭课 Agent v4.0.0）
     if (scheduleRes?.success) {

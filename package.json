@@ -14,7 +14,8 @@
     "verify:contracts": "node scripts/verify-contracts-v8.js",
     "verify:integration": "node scripts/verify-workflow-integration-v8.js",
     "verify:gate": "node scripts/verify-contracts-v8.js && node scripts/verify-workflow-integration-v8.js",
-    "verify:all": "node scripts/verify-contracts-v8.js && node scripts/verify-workflow-integration-v8.js && echo \"OK: A 类发布门禁全过\""
+    "verify:all": "node scripts/verify-contracts-v8.js && node scripts/verify-workflow-integration-v8.js && echo \"OK: A 类发布门禁全过\"",
+    "verify:release": "node scripts/verify-contracts-v8.js && node scripts/verify-workflow-integration-v8.js && vite build && electron-builder"
   },
   "keywords": [
     "electron",

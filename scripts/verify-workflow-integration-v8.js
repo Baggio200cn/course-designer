@@ -385,6 +385,66 @@ test('scripts/legacy/README.md 列出全部 7 个 legacy 脚本', () => {
   });
 });
 
+// ── 12. v4.3.3 Codex Round 8 防回归（文档一致性 / 静默吞错 / 发布门禁含 build）─
+console.log('\n【12】Round 8 治理收口·文档一致 + 可观测 + verify:release');
+
+test('scripts/legacy/README.md 集成测试数量已更新（不再是 14，至少 25）', () => {
+  const md = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'legacy', 'README.md'), 'utf8');
+  // 不应再出现 "14 测试" 的老描述
+  assert(!/集成验证[^（]*（14 测试/.test(md), 'legacy README 仍写 14 测试（应至少 25/31）');
+  // 应出现新数量（25 或 31 或 verify:integration 引用）
+  const hasNewCount = /\b(25|31)\s*测试/.test(md) || /verify:integration/.test(md);
+  assert(hasNewCount, 'legacy README 没更新集成测试数量或没指向 npm run verify:integration');
+});
+
+test('scripts/legacy/README.md 不再写"服务脚本在 scripts/ 主目录"', () => {
+  const md = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'legacy', 'README.md'), 'utf8');
+  // 旧描述：服务验证脚本路径写成 scripts/verify-design-service.js 等（暗示主目录）
+  //   v4.3.3 Round 7 后已迁 legacy/。如果还出现这种"主目录"暗示就违规
+  //   注意：本文件本身就在 scripts/legacy/，所以 scripts/verify-... 路径只能是说明老路径
+  //   合法引用方式："已移到 scripts/legacy/" 或 "v4.4.0 重写后会移回"
+  const offendingPattern = /\| 设计 \/ PPT \/ 进度服务断言 \|.*scripts\/verify-design-service\.js \//;
+  assert(!offendingPattern.test(md), 'legacy README 仍隐含服务脚本在主目录');
+});
+
+test('V2App quiz/homework IPC 失败不再静默 (catch _ 改 console.warn)', () => {
+  const lines = v2AppSrc.split('\n');
+  let foundQuizLoad = false;
+  let silentCatchInLoader = false;
+  let hasWarnInLoader = false;
+  let inQuizHomeworkBlock = false;
+  lines.forEach((l) => {
+    if (/quizListV2/.test(l) || /homeworkListV2/.test(l)) {
+      foundQuizLoad = true;
+      inQuizHomeworkBlock = true;
+    }
+    if (inQuizHomeworkBlock) {
+      // 危险模式：catch (_) { /* ignore */ } 静默吞
+      if (/catch\s*\(\s*_\s*\)\s*\{\s*\/\*\s*ignore\s*\*\/\s*\}/.test(l)) {
+        silentCatchInLoader = true;
+      }
+      // 好模式：console.warn
+      if (/console\.warn/.test(l)) hasWarnInLoader = true;
+      // 块结束启发：遇到注释 // Phase 或 // v4 等其他业务块标记
+      if (/^\s*\/\/\s*Phase/.test(l) || /Phase-9：4/.test(l)) inQuizHomeworkBlock = false;
+    }
+  });
+  assert(foundQuizLoad, 'V2App 没找到 quizListV2/homeworkListV2 调用');
+  assert(!silentCatchInLoader, 'quiz/homework IPC 仍用 catch(_) {/*ignore*/} 静默吞错');
+  assert(hasWarnInLoader, 'quiz/homework IPC 失败应有 console.warn 可观测');
+});
+
+test('package.json 含 verify:release（gate + build 串联）', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8'));
+  const cmd = pkg.scripts && pkg.scripts['verify:release'];
+  assert(cmd, 'package.json 缺 verify:release');
+  // 必须串联 contracts + integration + build (vite + electron-builder)
+  assert(cmd.includes('verify-contracts-v8'), 'verify:release 缺 verify-contracts-v8');
+  assert(cmd.includes('verify-workflow-integration-v8'), 'verify:release 缺 verify-workflow-integration-v8');
+  assert(cmd.includes('vite build') || cmd.includes('electron-builder'),
+    'verify:release 缺 build 步骤（vite build 或 electron-builder）');
+});
+
 // ── 9. framework fallback 残留扫描（防回归）──────────────────────────────
 console.log('\n【9】framework fallback 残留扫描');
 const indexSrc = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'index.js'), 'utf8');
