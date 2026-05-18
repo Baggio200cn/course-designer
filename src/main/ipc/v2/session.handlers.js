@@ -10,16 +10,13 @@
  *   v2:switchActiveLesson       切节课（同步切对应 design/lecture/ppt）
  *   v2:setActiveArtifact        切某类 artifact 当前版本（如切到某个 design 版本）
  *
- * ⚠ TODO(D12) · 2026-05-18 v4.3.3 Sprint B
- *   当前 SimpleDb 没有真正实现 getSessionContext / updateSessionContext / switchActiveLesson /
- *   setActiveArtifact 这 4 个方法。所有 handler 走 typeof db.xxx === 'function' 检查兜底返回 null。
- *   这意味着：
- *     - 老师切节课 → SessionContext 在前端能用，但**刷新后丢**（DB 没存）
- *     - 跨 stage 一致性靠前端 useEffect 自己保持
- *   D12 必须：
- *     1. 在 db-simple.js 真正加 sessions 表 + 4 个方法
- *     2. 在每个 setX 后做 db._writeData() 持久化
- *     3. 前端用 useSession 替代分散 useState
+ * ✅ D12 已落地（2026-05-18 v4.3.3 Sprint B）
+ *   db-simple.js 真实实现 getSessionContext / updateSessionContext / switchActiveLesson / setActiveArtifact
+ *   数据存到 data.sessions[notebookId] = { activeLessonNumber, activeDesignArtifactId, ... }
+ *   每次 update 自动 _writeData 持久化，刷新不丢
+ *
+ * 仍待 D11 在前端实现：
+ *   用 useSession() hook 替代散落在 V2App.jsx 的 selectedDesignArtifactId 等 useState
  */
 
 'use strict';

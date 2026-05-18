@@ -473,15 +473,24 @@ class DatabaseManager {
     const now = new Date().toISOString();
     const item = {
       id: Date.now() + Math.floor(Math.random() * 10000),
+      // v4.3.3 D13（2026-05-18）：schemaVersion 用于跨版本迁移检测
+      //   1 = v4.3.3 起的"标准 schema"（带 sourceArtifactIds / lessonNumber / status / confirmedAt / dirty）
+      //   未来 schema 变化时 bump 这个 + 写 migration
+      schemaVersion: Number(artifactData.schemaVersion) || 1,
       notebookId: artifactData.notebookId,
       type: artifactData.type || 'unknown',
-      stage: artifactData.stage || 'framework',
+      // v4.3.3 D14 兼容：framework 默认值已退役，但向后兼容老 artifact，新建 stage 必须显式传
+      stage: artifactData.stage || 'unknown',
       title: artifactData.title || artifactData.type || '未命名产物',
       content: artifactData.content ?? null,
       format: artifactData.format || 'json',
       status: artifactData.status || 'generated',
       version: Number(artifactData.version) || 1,
       confirmed: Boolean(artifactData.confirmed),
+      // v4.3.3 D13：dirty 信号 · 上游 artifact 变化时下游标 dirty=true 提示老师重算
+      dirty: Boolean(artifactData.dirty),
+      dirtyReason: artifactData.dirtyReason || null,
+      dirtyAt: artifactData.dirty ? now : null,
       // Phase-6 M2.1：用户保护锁
       // 默认策略：显式传入则取传入值；未传时与 confirmed 同步（confirm 自动锁，符合 Q2 选项 C）
       lockedByUser: artifactData.lockedByUser !== undefined
@@ -1379,10 +1388,150 @@ class DatabaseManager {
     return removed;
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  //  v4.3.3 D13 · artifact dirty 信号传播（2026-05-18）
+  //  当上游 stage artifact 改变（confirm / update content），下游 stage 的现有 artifact
+  //  自动标 dirty=true，提示老师"上游改了，需要重算"。但不删除老 artifact。
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * 上游某个 stage confirm 或 content 变化后，把下游所有 stage artifact 标 dirty
+   * @param {number} notebookId
+   * @param {string} upstreamStage - 上游 stage key（如 'lecture'）
+   * @param {string} [reason] - 触发原因
+   */
+  markDownstreamDirty(notebookId, upstreamStage, reason = 'upstream changed') {
+    const STAGE_ORDER = ['schedule', 'design', 'ppt', 'lecture', 'quiz', 'homework', 'video', 'report'];
+    const upstreamIdx = STAGE_ORDER.indexOf(upstreamStage);
+    if (upstreamIdx < 0) return { affected: 0 };  // 未知 stage
+    const downstreamStages = STAGE_ORDER.slice(upstreamIdx + 1);
+    if (downstreamStages.length === 0) return { affected: 0 };
+    const data = this._readData();
+    data.artifacts = Array.isArray(data.artifacts) ? data.artifacts : [];
+    const now = new Date().toISOString();
+    let affected = 0;
+    data.artifacts = data.artifacts.map((a) => {
+      if (Number(a.notebookId) !== Number(notebookId)) return a;
+      if (!downstreamStages.includes(a.stage)) return a;
+      // 已 dirty 就不重复标，但更新 reason
+      if (a.dirty) return { ...a, dirtyReason: reason, dirtyAt: now };
+      affected += 1;
+      return { ...a, dirty: true, dirtyReason: reason, dirtyAt: now };
+    });
+    this._writeData(data);
+    return { affected, downstreamStages };
+  }
+
+  /**
+   * 显式清 dirty（老师重算 / 老师"沿用"上游变化时调用）
+   */
+  clearArtifactDirty(artifactId) {
+    const data = this._readData();
+    data.artifacts = Array.isArray(data.artifacts) ? data.artifacts : [];
+    const idx = data.artifacts.findIndex((a) => Number(a.id) === Number(artifactId));
+    if (idx < 0) return null;
+    data.artifacts[idx] = {
+      ...data.artifacts[idx],
+      dirty: false,
+      dirtyReason: null,
+      dirtyAt: null,
+      updatedAt: new Date().toISOString(),
+    };
+    this._writeData(data);
+    return data.artifacts[idx];
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  //  v4.3.3 D12 · SessionContext 真持久化（2026-05-18）
+  //  之前所有 4 个 method 不存在，session.handlers 兜底返 null
+  //  现在落到 data.sessions[notebookId] = { activeLessonNumber, activeDesignArtifactId, ... }
+  // ═══════════════════════════════════════════════════════════════
+
+  getSessionContext(notebookId) {
+    const id = Number(notebookId);
+    if (!Number.isFinite(id) || id <= 0) return null;
+    const data = this._readData();
+    data.sessions = data.sessions && typeof data.sessions === 'object' ? data.sessions : {};
+    return data.sessions[id] || null;
+  }
+
+  /**
+   * 浅合并 patch 进现有 session
+   * @param {number} notebookId
+   * @param {object} patch - { activeLessonNumber, activeDesignArtifactId, activeLectureArtifactId, activePptOutlineId, activeQuizId, activeHomeworkId, activeMicroVideoId, activeReportId, lastStageKey, ... }
+   */
+  updateSessionContext(notebookId, patch = {}) {
+    const id = Number(notebookId);
+    if (!Number.isFinite(id) || id <= 0) return null;
+    const data = this._readData();
+    data.sessions = data.sessions && typeof data.sessions === 'object' ? data.sessions : {};
+    const existing = data.sessions[id] || {};
+    const next = {
+      ...existing,
+      ...patch,
+      notebookId: id,
+      updatedAt: new Date().toISOString(),
+    };
+    data.sessions[id] = next;
+    this._writeData(data);
+    return next;
+  }
+
+  /**
+   * 切节课：找出该 notebook 下第 N 节的最新 design / lecture / ppt / quiz / homework / micro_video artifact id
+   * 并把它们写进 session，让所有 stage 切到第 N 节时数据一致
+   */
+  switchActiveLesson(notebookId, lessonNumber) {
+    const id = Number(notebookId);
+    const ln = Number(lessonNumber);
+    if (!Number.isFinite(id) || id <= 0) return null;
+    if (!Number.isFinite(ln) || ln <= 0) return null;
+    const allArtifacts = this.listArtifacts({ notebookId: id }) || [];
+    const pickLatestForLesson = (type, stage) => {
+      const match = allArtifacts.filter((a) =>
+        a.type === type && a.stage === stage
+        && Number(a.metadata?.lessonNumber) === ln
+      );
+      if (match.length === 0) return null;
+      return match.sort((a, b) =>
+        new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt)
+      )[0]?.id || null;
+    };
+    const patch = {
+      activeLessonNumber: ln,
+      activeDesignArtifactId: pickLatestForLesson('design_doc', 'design'),
+      activeLectureArtifactId: pickLatestForLesson('lecture_final', 'lecture'),
+      activePptOutlineId: pickLatestForLesson('ppt_outline', 'ppt'),
+      activeQuizId: pickLatestForLesson('quiz_set', 'quiz'),
+      activeHomeworkId: pickLatestForLesson('homework_set', 'homework'),
+      activeMicroVideoId: pickLatestForLesson('micro_video_plan', 'video'),
+    };
+    return this.updateSessionContext(id, patch);
+  }
+
+  /**
+   * 单独切某类 artifact（如老师在历史版本里挑了不同 design）
+   */
+  setActiveArtifact(notebookId, kind, artifactId) {
+    const id = Number(notebookId);
+    if (!Number.isFinite(id) || id <= 0) return null;
+    const fieldMap = {
+      design: 'activeDesignArtifactId',
+      lecture: 'activeLectureArtifactId',
+      ppt: 'activePptOutlineId',
+      quiz: 'activeQuizId',
+      homework: 'activeHomeworkId',
+      microVideo: 'activeMicroVideoId',
+      report: 'activeReportId',
+    };
+    const field = fieldMap[kind];
+    if (!field) return null;
+    return this.updateSessionContext(id, { [field]: Number(artifactId) || null });
+  }
+
   close() {
   }
 
-  // 浜嬪姟锛堢畝鍖栫増锛岀洿鎺ユ墽琛岋級
   transaction(callback) {
     return callback();
   }
