@@ -1,7 +1,7 @@
 /**
- * ReportStage — 教学实施报告阶段（驭课 Agent v4.0.0 / Phase-9 C-4）
+ * ReportStage — 教学实施报告阶段（驭课 Agent v4.3.3 8 阶段流程）
  *
- * 6 阶段的最终阶段，无下游解锁。
+ * 8 阶段的最终阶段，无下游解锁。
  *
  * UI 三视图：📝 文字预览 / ✏️ 编辑（含老师手填）/ { } JSON
  * 导出 4 格式：📄 Word / 📋 Markdown / 🌐 HTML / 📕 PDF

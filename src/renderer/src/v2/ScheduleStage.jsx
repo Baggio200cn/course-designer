@@ -132,7 +132,7 @@ export default function ScheduleStage({
         <div className="v2-panel">
           <div className="v2-panel-head">
             <h3>教学进度表</h3>
-            <span className="v2-hint">AI 按你填的【总学时 ÷ 每次课学时】算出实际次课数（含章节/方法/重难点/实训），是 7 阶段工作流的起点。</span>
+            <span className="v2-hint">AI 按你填的【总学时 ÷ 每次课学时】算出实际次课数（含章节/方法/重难点/实训），是 8 阶段工作流的起点。</span>
           </div>
           <div className="v2-status-box">
             <span>助手状态</span>

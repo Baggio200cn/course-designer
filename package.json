@@ -10,7 +10,11 @@
     "pack": "electron-builder --dir",
     "dist": "vite build && electron-builder",
     "start": "electron .",
-    "smoke": "node scripts/smoke-test-real-ark.js"
+    "smoke": "node scripts/smoke-test-real-ark.js",
+    "verify:contracts": "node scripts/verify-contracts-v8.js",
+    "verify:integration": "node scripts/verify-workflow-integration-v8.js",
+    "verify:gate": "node scripts/verify-contracts-v8.js && node scripts/verify-workflow-integration-v8.js",
+    "verify:all": "node scripts/verify-contracts-v8.js && node scripts/verify-workflow-integration-v8.js && echo \"OK: A 类发布门禁全过\""
   },
   "keywords": [
     "electron",

@@ -1122,6 +1122,9 @@ export default function V2App() {
     report: null, artifactId: null, confirmed: false,
   });
   const [reportArtifacts, setReportArtifacts] = useState([]);
+  // v4.3.3 Codex Round 7 #3：quiz/homework artifact 真聚合（不再空数组占位）
+  const [quizArtifacts, setQuizArtifacts] = useState([]);
+  const [homeworkArtifacts, setHomeworkArtifacts] = useState([]);
 
   const [stageRuntimeMeta, setStageRuntimeMeta] = useState({
     framework: { quality: null, operations: [] },  // legacy
@@ -1148,20 +1151,19 @@ export default function V2App() {
     : ['schedule'];
   const busy = Boolean(busyKey);
   const currentRuntimeMeta = stageRuntimeMeta[currentStage] || { quality: null, operations: [] };
-  // v4.3.3 Codex Round 6 #2：补齐 8 阶段聚合（之前缺 schedule/design/quiz/homework/report
-  //   → 阶段卡片 confirmedCount 漏算，尤其 report 确认后会卡在"处理中"不显示"已完成"）
-  //   quiz/homework 没有独立 state（按需 IPC list 拉），暂用空数组占位，stageCards 自身从 artifacts 查
+  // v4.3.3 Codex Round 7 #3：8 阶段真聚合（quiz/homework 不再空数组占位）
+  //   每个 stage 都从对应 state 拉真 artifact 列表，让 confirmedCount / stageCards 准确
   const stageArtifacts = useMemo(() => ({
     framework: frameworkArtifacts,       // legacy 兼容
     schedule: scheduleArtifacts,
     design: designArtifacts,
     ppt: pptArtifacts,
     lecture: lectureArtifacts,
-    quiz: [],                             // v4.3.3 新增 · stageCards 内部会从 artifacts 取 quiz_set
-    homework: [],                         // v4.3.3 新增
+    quiz: quizArtifacts,                 // v4.3.3 Round 7：真 quiz_set artifact 列表
+    homework: homeworkArtifacts,         // v4.3.3 Round 7：真 homework_set artifact 列表
     video: videoArtifacts,
     report: reportArtifacts,
-  }), [frameworkArtifacts, scheduleArtifacts, designArtifacts, pptArtifacts, lectureArtifacts, videoArtifacts, reportArtifacts]);
+  }), [frameworkArtifacts, scheduleArtifacts, designArtifacts, pptArtifacts, lectureArtifacts, quizArtifacts, homeworkArtifacts, videoArtifacts, reportArtifacts]);
   const stageCards = useMemo(() => (
     STAGES.map((item) => ({
       ...item,
@@ -1350,6 +1352,20 @@ export default function V2App() {
       });
       setVideoArtifacts(arr(data.videoData?.artifacts));
     }
+
+    // v4.3.3 Codex Round 7 #3：拉 quiz/homework artifact 列表（让 stageArtifacts 真聚合）
+    try {
+      if (typeof api.quizListV2 === 'function') {
+        const quizRes = await api.quizListV2(notebookId);
+        if (quizRes?.success) setQuizArtifacts(arr(quizRes.data?.quizzes || quizRes.data));
+      }
+    } catch (_) { /* ignore */ }
+    try {
+      if (typeof api.homeworkListV2 === 'function') {
+        const hwRes = await api.homeworkListV2(notebookId);
+        if (hwRes?.success) setHomeworkArtifacts(arr(hwRes.data?.homeworks || hwRes.data));
+      }
+    } catch (_) { /* ignore */ }
 
     // Phase-9：4 个新阶段的数据回填（驭课 Agent v4.0.0）
     if (scheduleRes?.success) {
@@ -3964,7 +3980,7 @@ export default function V2App() {
             <textarea rows={3} value={createForm.description} onChange={(e) => setCreateForm((prev) => ({ ...prev, description: e.target.value }))} placeholder="简要描述本课程的定位、内容范围和能力培养目标（也可写先修课程要求）" />
 
             <div className="v2-section-divider">
-              <span>② 课程特征（填写越详细，6 阶段 AI 生成质量越高）</span>
+              <span>② 课程特征（填写越详细，8 阶段 AI 生成质量越高）</span>
             </div>
 
             {/* AI 建议入口 */}
@@ -4063,7 +4079,7 @@ export default function V2App() {
               <div>
                 <label className="v2-label">
                   课程标准（可选）
-                  <span className="v2-label-hint">AI 生成 6 阶段产物时优先对齐该标准（教材已在上方填）</span>
+                  <span className="v2-label-hint">AI 生成 8 阶段产物时优先对齐该标准（教材已在上方填）</span>
                 </label>
                 <input
                   value={createForm.teachingMaterials}

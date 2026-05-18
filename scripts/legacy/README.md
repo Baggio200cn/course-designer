@@ -10,9 +10,13 @@ v4.3.3 起项目用 **8 阶段架构**（schedule → design → ppt → lecture
 
 | 文件 | 老断言基础 | 失败原因（v4.3.3 下） |
 |---|---|---|
-| `verify-contracts-v6.js` | 6 阶段 STAGE_ORDER | 8 阶段升级后，6 阶段断言会失败 3 项（25/28） |
+| `verify-contracts-v6.js` | 6 阶段 STAGE_ORDER | 8 阶段升级后断言失败 3 项（25/28） |
 | `e2e-full-course-flow.js` | v4.1.4 单 lecture 模型 | 多节课模型 + quiz/homework 字段透传不覆盖（29/46） |
-| `stress-test-design-first-workflow.js` | 6 阶段顺序 | STAGE_ORDER 断言会失败 1 项（59/60） |
+| `stress-test-design-first-workflow.js` | 6 阶段顺序 | STAGE_ORDER 断言失败 1 项（59/60） |
+| `verify-design-service.js` | lessonMeta.topic 可选 | v4.3.3 加 topic 必填校验，断言失败 1 项（20/21） |
+| `verify-schedule-service.js` | totalHours=72 默认 + minutesPerHour 可选 | H14 反模板化 + minutesPerHour 必填，断言失败 5 项（22/27） |
+| `verify-ppt-images-pipeline.js` | 封面 vision 失败时 paused=true | v4.3.3 改为软警告，断言失败 1 项（7/8） |
+| `smoke-boot.js` | 启动检查 v2:lessonGenerateABC 通道 | ABC 三稿流程已废（D6.2），通道不再注册 → 1 项失败 |
 
 ## v4.3.3+ 用哪些脚本
 

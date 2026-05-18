@@ -156,25 +156,22 @@ npm run build  # vite build && electron-builder → dist/驭课Agent-v4.3.3-setu
 
 ### 验证脚本
 
-**A 类 · 发布门禁验证（v4.3.3 必跑，发版前全绿才算正确）**
+**A 类 · 发布门禁（一键命令，全绿才允许发版）**
 
 ```bash
-# 契约自检（35/35 测试·STAGE_ORDER / REQUIREMENTS / PRIMARY_TYPE / unlock 链 / video type 一致性）
-node scripts/verify-contracts-v8.js
-
-# 集成验证（22/22 测试·runtime / workbench / migration / IPC 暴露 / V2App stageContracts / setActiveArtifact）
-node scripts/verify-workflow-integration-v8.js
+# 一键跑全部 A 类验证（推荐）
+npm run verify:gate
+# 或拆开跑（CI 单步可见）
+npm run verify:contracts      # 35/35 · STAGE_ORDER / REQUIREMENTS / PRIMARY_TYPE / unlock 链 / video type 一致性
+npm run verify:integration    # 25/25 · runtime + workbench + migration + IPC + V2App stageContracts + setActiveArtifact + mock 集成
 ```
 
-**B 类 · 业务服务单元测试**（基于具体业务逻辑断言，部分脚本断言基于老契约 v4.2.0 期望，
-v4.3.3 下会有预期失败——这些**不属于契约链失败**，团队不要把它们计入发布门禁）：
+**B 类 · scripts/legacy/**（v4.1.x / v4.2.x 老脚本 + 断言落后于 v4.3.3 新契约的服务单元）：
 
 ```bash
-node scripts/verify-design-service.js        # 20/21 (1 预期失败 · lessonMeta.topic 必填)
-node scripts/verify-ppt-images-pipeline.js   # 7/8  (1 预期失败 · 封面 vision paused)
-node scripts/verify-schedule-service.js      # 22/27 (5 预期失败 · 旧 72 兜底 + minutesPerHour 新必填)
-node scripts/smoke-boot.js                   # 1 预期失败 · v2:lessonGenerateABC 已废
-# TODO(D14.3 / v4.4.0): 改写以上 8 个断言适配 v4.3.3 新契约
+# ⚠ 这些全部移到 scripts/legacy/，仅历史参考，不要跑
+# 见 scripts/legacy/README.md
+# v4.4.0 改写后会移回 scripts/ 主目录
 ```
 
 **C 类 · 手动验证（需要环境）**
@@ -183,8 +180,6 @@ node scripts/smoke-boot.js                   # 1 预期失败 · v2:lessonGenera
 # 真实 endpoint 烟雾测试（手动跑，需要 ARK API Key）
 ARK_API_KEY=xxx ARK_TEXT_ENDPOINT=ep-m-xxx npm run smoke
 ```
-
-**D 类 · scripts/legacy/**（v4.1.x / v4.2.x 老脚本，**完全不要跑**，见 `scripts/legacy/README.md`）
 
 ---
 
