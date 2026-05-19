@@ -723,6 +723,79 @@ test('prompts/design.md 要求模型输出 designIntent（不能退回 evaluatio
   assert(/designIntent/.test(src), 'prompts/design.md 未要求 designIntent 字段');
 });
 
+// ── 【17】Round 13 治理收口·mock E2E 8 阶段闭环 + validator 严格模式 + video_prompt 校验 + report prompt 8 阶段对齐 ──
+console.log('\n【17】Round 13 治理收口·mock E2E 8 阶段闭环 + validator strict + video_prompt validator + report prompt 8 阶段');
+
+test('run-e2e-v8.js · mock 8 阶段闭环（含 schedule）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'e2e', 'run-e2e-v8.js'), 'utf8');
+  // schedule 阶段必须有显式登记
+  assert(/recordStage\(['"]schedule['"]/.test(src),
+    'run-e2e-v8.js mock 路径未登记 schedule 阶段（Codex Round 13 P1.1）');
+  // 标题必须是"8 stage"不再是"7 stage"
+  assert(/8 stage|8 阶段/.test(src), 'run-e2e-v8.js 标题未升级到 8 阶段');
+  assert(!/1 节完整 7 stage/.test(src), 'run-e2e-v8.js 仍残留"7 stage"老标题');
+});
+
+test('run-e2e-v8.js · validator strict 模式（默认计入 SUMMARY.errors）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'e2e', 'run-e2e-v8.js'), 'utf8');
+  assert(/allowValidatorWarnings/.test(src),
+    'run-e2e-v8.js 缺 --allow-validator-warnings 开关（Codex Round 13 P1.2）');
+  assert(/!ARGS\.allowValidatorWarnings[\s\S]{0,200}SUMMARY\.errors\.push/.test(src),
+    'run-e2e-v8.js 未在 strict 模式下把 validator 失败计入 SUMMARY.errors');
+});
+
+test('artifact-validator · video_prompt 校验已注册', () => {
+  const v = require(path.resolve(__dirname, '..', 'src', 'main', 'services', 'artifact-validator.service.js'));
+  assert(typeof v.VALIDATORS.video_prompt === 'function',
+    'artifact-validator 缺 video_prompt 校验（Codex Round 13 P1.3）');
+});
+
+test('artifact validator · video_prompt 校验关键字段（durationSec / storyboard / jimengPrompts）', () => {
+  const v = require(path.resolve(__dirname, '..', 'src', 'main', 'services', 'artifact-validator.service.js'));
+  // 健康样本应 valid
+  const good = {
+    type: 'video_prompt', schemaVersion: 1, dirty: false,
+    metadata: { lessonNumber: 1 },
+    content: {
+      durationSec: 60,
+      storyboard: [
+        { shotNumber: 1, duration: 20, visualDescription: '开场主讲教师镜头', cameraAngle: '中景' },
+        { shotNumber: 2, duration: 20, visualDescription: '主体讲解配合 PPT', cameraAngle: '近景' },
+        { shotNumber: 3, duration: 20, visualDescription: '收尾画面与号召', cameraAngle: '中景' },
+      ],
+      jimengPrompts: [
+        { shotNumber: 1, prompt: '开场提示词描述' },
+        { shotNumber: 2, prompt: '主体提示词描述' },
+        { shotNumber: 3, prompt: '收尾提示词描述' },
+      ],
+    },
+  };
+  const r = v.validateArtifact(good);
+  assert(r.valid, `健康 video_prompt 应 valid，实际 issues: ${r.issues.join(' | ')}`);
+  // 病态样本应 invalid（缺 durationSec）
+  const bad = { ...good, content: { ...good.content, durationSec: 0 } };
+  const r2 = v.validateArtifact(bad);
+  assert(!r2.valid, '缺 durationSec 的 video_prompt 应 invalid');
+});
+
+test('run-e2e-v8.js · video 阶段使用 video_prompt validator', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'e2e', 'run-e2e-v8.js'), 'utf8');
+  assert(/runStage\(['"]video['"][\s\S]{0,500}['"]video_prompt['"]/.test(src),
+    'run-e2e-v8.js video 阶段未传 video_prompt validator');
+});
+
+test('report.service prompt · 从"上游 5 个 artifact"升级到"上游阶段产物 hint"（8 阶段对齐）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'services', 'report.service.js'), 'utf8');
+  assert(!/基于上游 5 个 artifact/.test(src),
+    'report.service prompt 仍是老版"上游 5 个 artifact"（Codex Round 13 P2）');
+  assert(/上游阶段产物 hint/.test(src),
+    'report.service prompt 未升级到"上游阶段产物 hint"');
+  // 8 阶段产物枚举应明确出现
+  ['教学进度表', '教学设计', 'PPT 大纲', '讲稿', '测验', '作业', '微课视频方案'].forEach((k) => {
+    assert(src.includes(k), `report.service prompt 缺关键字"${k}"（8 阶段对齐）`);
+  });
+});
+
 // ── 结果汇总 ─────────────────────────────────────────────────────────────
 console.log(`\n═══ 结果：${pass}/${pass + fail} 通过 ═══`);
 if (fail > 0) {

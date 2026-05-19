@@ -114,6 +114,54 @@ const VALIDATORS = {
     return issues;
   },
 
+  // video_prompt（v4.3.3 Codex Round 13 P1.3）：durationSec / storyboard / jimengPrompts 必有 + 数量匹配 + 时长范围
+  video_prompt(artifact) {
+    const issues = [];
+    const c = artifact.content || {};
+    // 1. durationSec 必须是正数（30-180 秒合理区间）
+    if (typeof c.durationSec !== 'number' || c.durationSec <= 0) {
+      issues.push(`durationSec 缺失或非正数（实际: ${c.durationSec}）`);
+    } else if (c.durationSec < 30 || c.durationSec > 300) {
+      issues.push(`durationSec ${c.durationSec} 秒偏离合理区间 30-300 秒`);
+    }
+    // 2. storyboard 必须是非空数组
+    const sb = Array.isArray(c.storyboard) ? c.storyboard : [];
+    if (sb.length === 0) {
+      issues.push('storyboard 数组为空');
+    } else {
+      if (sb.length < 3 || sb.length > 12) {
+        issues.push(`storyboard 镜头数 ${sb.length} 偏离合理区间 3-12 个`);
+      }
+      sb.forEach((s, i) => {
+        if (typeof s.shotNumber !== 'number') issues.push(`镜头${i + 1}: shotNumber 缺失`);
+        if (typeof s.duration !== 'number' || s.duration <= 0) issues.push(`镜头${i + 1}: duration 缺失或非正数`);
+        if (!s.visualDescription || String(s.visualDescription).length < 3) issues.push(`镜头${i + 1}: visualDescription 缺失或过短`);
+        if (!s.cameraAngle) issues.push(`镜头${i + 1}: cameraAngle 缺失`);
+      });
+    }
+    // 3. jimengPrompts 必须是数组 + 数量与 storyboard 一致
+    const jp = Array.isArray(c.jimengPrompts) ? c.jimengPrompts : [];
+    if (jp.length === 0) {
+      issues.push('jimengPrompts 数组为空');
+    } else {
+      if (jp.length !== sb.length) {
+        issues.push(`jimengPrompts 数量 ${jp.length} 与 storyboard ${sb.length} 不一致`);
+      }
+      jp.forEach((p, i) => {
+        if (!p.prompt || String(p.prompt).length < 3) issues.push(`即梦提示词${i + 1}: prompt 缺失或过短`);
+      });
+    }
+    // 4. 总时长与 durationSec 误差范围（±10 秒或 ±20%）
+    const totalShot = sb.reduce((sum, s) => sum + (Number(s.duration) || 0), 0);
+    if (totalShot > 0 && typeof c.durationSec === 'number' && c.durationSec > 0) {
+      const tol = Math.max(10, c.durationSec * 0.2);
+      if (Math.abs(totalShot - c.durationSec) > tol) {
+        issues.push(`storyboard 总时长 ${totalShot} 秒与 durationSec ${c.durationSec} 偏离超 ${tol.toFixed(0)} 秒`);
+      }
+    }
+    return issues;
+  },
+
   // implementation_report：必须含上游 sourceArtifactIds
   implementation_report(artifact) {
     const issues = [];

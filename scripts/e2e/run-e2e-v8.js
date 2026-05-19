@@ -34,9 +34,13 @@ function parseArgs() {
     notebookName: '',
     dryRun: false,
     skipStages: [],
+    // v4.3.3 Codex Round 13 P1.2：validator 失败默认计入 errors（让退出码 ≠ 0），
+    // 可用 --allow-validator-warnings 退回旧行为（只记录不阻断）
+    allowValidatorWarnings: false,
   };
   process.argv.slice(2).forEach((arg) => {
     if (arg === '--dry-run' || arg === '--mock') args.dryRun = true;
+    else if (arg === '--allow-validator-warnings') args.allowValidatorWarnings = true;
     else if (arg.startsWith('--db-path=')) args.dbPath = arg.split('=')[1];
     else if (arg.startsWith('--out-dir=')) args.outDir = arg.split('=')[1];
     else if (arg.startsWith('--lessons=')) args.lessons = arg.split('=')[1].split(',').map((s) => Number(s.trim())).filter(Boolean);
@@ -71,27 +75,44 @@ log('OUT:', ARGS.outDir);
 log('LESSONS:', ARGS.lessons.join(','));
 log('MOCK:', ARGS.dryRun ? 'YES' : 'NO');
 log('SKIP:', ARGS.skipStages.join(',') || '(none)');
+log('VALIDATOR-FAIL-MODE:', ARGS.allowValidatorWarnings ? 'warnings-only' : 'strict（默认 · 校验失败计入 errors）');
 
 // ── mock AI 客户端（dry-run 时使用）────────────────────────────────────
 function makeMockAiClient() {
   return {
     async chatJson({ systemPrompt, userPrompt, responseFormat }) {
-      // 根据 systemPrompt 关键字猜返回类型
-      const isDesign = /教学设计专家|fivePhase|preInClass/.test(systemPrompt);
-      const isPpt = /PPT 大纲|pptOutline|页型/.test(systemPrompt);
-      const isLecture = /讲稿|教师讲述/.test(systemPrompt);
+      // v4.3.3 Codex Round 13：detection 顺序按"独特关键字"先行，避免 video/report 提示词
+      // 含"PPT 大纲""教师讲述"等被 isPpt/isLecture 误捕。微课视频 prompt 必含"微课视频策划专家"。
+      const isVideo = /微课视频策划专家|jimengPrompts|分镜表|即梦提示词/.test(systemPrompt);
+      const isReport = /教学实施报告/.test(systemPrompt);
       const isQuiz = /出题专家|sourcePageNumber/.test(systemPrompt);
       const isHomework = /作业设计专家|deliverables/.test(systemPrompt);
-      const isVideo = /微课视频|jimengPrompts/.test(systemPrompt);
-      const isReport = /教学实施报告/.test(systemPrompt);
+      const isDesign = /教学设计专家|fivePhase|preInClass/.test(systemPrompt);
+      const isPpt = /PPT 大纲生成|pptOutline|页型/.test(systemPrompt);
+      // isLecture 放最后兜底（避免抢走 video / report 中含"教师讲述"的提示词）
+      const isLecture = /讲稿|教师讲述/.test(systemPrompt);
 
+      if (isVideo) return JSON.stringify({
+        courseTitle: 'mock', videoTopic: 'mock', duration: 60,
+        narrationScript: { intro: { text: 'mock intro', duration: 10 }, body: [{ section: '核心', narration: 'mock body', duration: 40 }], outro: { text: 'mock outro', duration: 10 } },
+        storyboard: [
+          { shotNumber: 1, duration: 10, type: 'intro', visualDescription: '开场主讲教师镜头', cameraAngle: '中景' },
+          { shotNumber: 2, duration: 40, type: 'content', visualDescription: '主体讲解配合 PPT 切镜', cameraAngle: '近景' },
+          { shotNumber: 3, duration: 10, type: 'outro', visualDescription: '收尾画面与配音', cameraAngle: '中景' },
+        ],
+        jimengPrompts: [
+          { shotNumber: 1, prompt: 'mock 即梦提示词 1' },
+          { shotNumber: 2, prompt: 'mock 即梦提示词 2' },
+          { shotNumber: 3, prompt: 'mock 即梦提示词 3' },
+        ],
+        shootingGuide: { setup: 'mock' }, editingGuide: { tools: 'mock' },
+      });
+      if (isReport) return JSON.stringify({ courseName: 'mock', school: 'mock', teachingObjectives: 'mock objectives' });
       if (isQuiz) return JSON.stringify({ questions: [{ id: 'q1', sourcePageNumber: 1, type: 'single', stem: 'mock 题干', options: [{ key: 'A', text: '选项A' }, { key: 'B', text: '选项B' }], correctAnswer: 'A', explanation: 'mock 解析', difficulty: 2, knowledgePoint: 'mock' }] });
       if (isHomework) return JSON.stringify({ tasks: [{ id: 'hw1', type: 'reading', title: 'mock 作业1', description: '阅读 mock 资料', deliverables: 'mock 提交', estimatedMinutes: 90, knowledgePoints: ['mock'], evaluationCriteria: ['mock criterion 1', 'mock criterion 2', 'mock criterion 3'] }, { id: 'hw2', type: 'practice', title: 'mock 作业2', description: '练习 mock', deliverables: 'mock 报告', estimatedMinutes: 60, knowledgePoints: ['mock'], evaluationCriteria: ['mock criterion 1', 'mock criterion 2', 'mock criterion 3'] }] });
       if (isDesign) return JSON.stringify({ lessonMeta: { topic: 'mock', lessonNumber: 1 }, courseInfo: { courseName: 'mock' }, fivePhases: { preInClass: 'mock', inClassOpening: 'mock', inClassExploration: 'mock', inClassApplication: 'mock', postClass: 'mock' }, evaluation: { rules: [] } });
       if (isPpt) return JSON.stringify({ pages: [{ pageNumber: 1, pageType: '封面', title: 'mock' }] });
       if (isLecture) return '## 第 1 页·《Mock》\n**教师讲述：** mock 讲稿内容\n**课堂动作附栏：**\n- 教师：mock';
-      if (isVideo) return JSON.stringify({ courseTitle: 'mock', videoTopic: 'mock', duration: 60, narrationScript: { intro: { text: 'mock', duration: 10 }, body: [{ text: 'mock', duration: 30 }], outro: { text: 'mock', duration: 10 } }, storyboard: [{ shotNumber: 1, duration: 60, type: 'content', visualDescription: 'mock', cameraAngle: '中景' }], jimengPrompts: [{ shotNumber: 1, prompt: 'mock' }], shootingGuide: { setup: 'mock' }, editingGuide: { tools: 'mock' } });
-      if (isReport) return JSON.stringify({ courseName: 'mock', school: 'mock', teachingObjectives: 'mock objectives' });
       return '{}';
     },
     async chatVision() { return 'mock vision'; },
@@ -118,11 +139,11 @@ function recordStage(name, status, durationMs, extra = {}) {
   //   - mock AI 客户端（CI 跑得通）
   //   - 配合 P3 validator 做后置检查
 
-  // v4.3.3 Codex Round 11 #1：mock E2E 扩展到 1 节完整 7 stage 闭环
-  //   design → ppt → lecture → quiz → homework → video → report
-  //   每 stage 跑 artifact-validator 后置检查，summary 包含 validator pass/fail
+  // v4.3.3 Codex Round 13 P1.1：mock E2E 扩展到完整 8 stage 闭环
+  //   schedule → design → ppt → lecture → quiz → homework → video → report
+  //   每 stage 跑 artifact-validator 后置检查；validator 失败默认计入 errors（strict）
   if (ARGS.dryRun) {
-    log('═══ mock 模式 · 1 节完整 7 stage 闭环 ═══');
+    log('═══ mock 模式 · 1 节完整 8 stage 闭环（schedule→design→ppt→lecture→quiz→homework→video→report）═══');
     const aiClient = makeMockAiClient();
     const { validateArtifact } = require('../../src/main/services/artifact-validator.service');
 
@@ -169,7 +190,15 @@ function recordStage(name, status, durationMs, extra = {}) {
             log(`  ✓ validator pass (${name})`);
           } else {
             log(`  ⚠ validator issues: ${validatorResult.issues.slice(0, 3).join(' | ')}`);
-            // mock 模式下 validator issue 不阻断流程，但要记录
+            // v4.3.3 Codex Round 13 P1.2：默认 strict 模式·validator 失败计入 SUMMARY.errors
+            // 允许 --allow-validator-warnings 退回旧行为（只记录不阻断）
+            if (!ARGS.allowValidatorWarnings) {
+              SUMMARY.errors.push({
+                stage: name,
+                kind: 'validator',
+                error: `artifact validator 失败（${validatorResult.issues.length} 条）: ${validatorResult.issues.join(' | ')}`,
+              });
+            }
           }
         }
         recordStage(name, 'ok', dur, { validatorValid: validatorResult?.valid, validatorIssues: validatorResult?.issues || [] });
@@ -182,6 +211,23 @@ function recordStage(name, status, durationMs, extra = {}) {
         return null;
       }
     }
+
+    // Stage 1 schedule（教学进度表）：老师上传 Word 解析后的产物，mock 模式直接构造
+    //   schedule_table 在 8 阶段中是起点，无 service 调用（解析在 schedule.handlers）
+    //   v4.3.3 暂未在 artifact-validator 注册 schedule_table；本步仅登记 stage，
+    //   未来补 schedule_table validator 时此处自动接入 runStage 包装
+    const mockSchedule = {
+      courseName: ctx.courseName,
+      semester: '2026 春',
+      totalWeeks: 18,
+      lessonsPerWeek: 1,
+      weeks: [
+        { weekNumber: 1, lessonNumber: 1, topic: ctx.lessonMeta.topic, chapter: ctx.lessonMeta.chapter, theoryHours: ctx.lessonMeta.theoryHours, practiceHours: ctx.lessonMeta.practiceHours },
+      ],
+    };
+    fs.writeFileSync(path.join(ARGS.outDir, '01-schedule-mock.json'), JSON.stringify(mockSchedule, null, 2));
+    log('✓ schedule 构造 (mock) · 进度表 1/18 周登记');
+    recordStage('schedule', 'ok', 0, { weeks: 18, lessonsLoaded: 1 });
 
     // Stage 2 design
     const { generate: generateDesign } = require('../../src/main/services/design.service');
@@ -233,7 +279,7 @@ function recordStage(name, status, durationMs, extra = {}) {
       lectureScript: mockLecture.finalScript,
     }), 'homework_set');
 
-    // Stage 7 video
+    // Stage 7 video（v4.3.3 Codex Round 13 P1.3：接入 video_prompt validator）
     const { generate: generateVideo } = require('../../src/main/services/micro-video.service');
     const microVideo = await runStage('video', () => generateVideo({
       aiClient,
@@ -241,7 +287,7 @@ function recordStage(name, status, durationMs, extra = {}) {
       videoTopic: ctx.lessonMeta.topic,
       pptOutline: mockPpt,
       courseContext: { ...ctx.notebook, lessonNumber: 1 },
-    }), null);  // micro_video_plan validator 未定义（v4.3.3 type 是 video_prompt 但 validator 未覆盖）
+    }), 'video_prompt');
 
     // Stage 8 report
     const { generate: generateReport } = require('../../src/main/services/report.service');
@@ -255,7 +301,7 @@ function recordStage(name, status, durationMs, extra = {}) {
       courseContext: ctx.notebook,
     }), 'implementation_report');
 
-    log('═══ mock 7 stage 闭环完成 ═══');
+    log('═══ mock 8 stage 闭环完成（schedule→design→ppt→lecture→quiz→homework→video→report）═══');
   } else {
     log('⚠ 真实 AI 模式：本 driver 暂只实现 mock 验证脚手架');
     log('   完整真实跑请用 scripts/e2e/e2e-4lessons-parallel-real.js（v4.3.3 Round 10 归档）');
