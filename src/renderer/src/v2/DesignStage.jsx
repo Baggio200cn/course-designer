@@ -1023,7 +1023,8 @@ function DesignTextView({ design }) {
             <thead>
               <tr>
                 <th style={thStyle}>环节</th><th style={thStyle}>时长</th>
-                <th style={thStyle}>教师活动</th><th style={thStyle}>学生活动</th><th style={thStyle}>评价</th>
+                {/* 2026-05-19 v4.3.3 Codex Round 12：预览表头"评价"→"设计意图"，与编辑区/Word 导出对齐 */}
+                <th style={thStyle}>教师活动</th><th style={thStyle}>学生活动</th><th style={thStyle}>设计意图</th>
               </tr>
             </thead>
             <tbody>
@@ -1033,7 +1034,8 @@ function DesignTextView({ design }) {
                   <td style={tdCenterStyle}>{p.duration || '—'}</td>
                   <td style={tdStyle}>{p.teacherActions || '—'}</td>
                   <td style={tdStyle}>{p.studentActions || '—'}</td>
-                  <td style={tdStyle}>{p.evaluation || '—'}</td>
+                  {/* 优先 designIntent；老数据 evaluation 兼容（与后端 design.service 迁移逻辑一致） */}
+                  <td style={tdStyle}>{p.designIntent || p.evaluation || '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -1097,7 +1099,7 @@ function DesignEditor({ design, updateField }) {
         </div>
       </Section>
 
-      <Section title="课中 5 段法 · 老师可改各段时长 / 教师活动 / 学生活动 / 评价">
+      <Section title="课中 5 段法 · 老师可改各段时长 / 教师活动 / 学生活动 / 设计意图">
         {/* 2026-05-15 老师反馈 4.5：原 1×4 横排太挤（每列只有 ~150px），改为 卡片标题 + 段时长一行 + 三列大块 textarea */}
         {arr(design.inClass?.phases).map((ph, i) => (
           <div key={i} style={{

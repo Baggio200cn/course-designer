@@ -666,6 +666,63 @@ test('runner.js · failed 累加路径含 invalid + 异常两类', () => {
   assert(typeof runner.runMigrations === 'function', 'runner.runMigrations 必须 export');
 });
 
+// ── 【16】Round 12 治理收口·课中 5 段法"评价"→"设计意图"字段改名残留扫描 ───────────────
+// 老师反馈："编辑时是'设计意图'，预览时又变成'评价'" —— 前端预览模板漏改
+// 防回归范围：仅限"课中 5 段法教学过程表"的最后一列表头；"考核评价"等正常术语不受影响
+console.log('\n【16】Round 12 治理收口·课中 5 段法"评价"→"设计意图"字段改名残留扫描');
+
+test('DesignStage.jsx 预览表头：课中 5 段法最后一列不得是"评价"', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'DesignStage.jsx'), 'utf8');
+  // 定位课中 5 段法预览表（"环节" 起头到下一个 </table>）
+  const m = src.match(/<th[^>]*>环节<\/th>[\s\S]{0,1500}?<\/thead>/);
+  assert(m, '找不到课中 5 段法预览表 thead 区段');
+  const tableHead = m[0];
+  assert(/<th[^>]*>设计意图<\/th>/.test(tableHead),
+    '课中 5 段法预览表头最后一列应为"设计意图"');
+  // 表头里不允许出现"评价"作为列名（排除"考核评价/评价标准"——它们在另一表）
+  assert(!/<th[^>]*>评价<\/th>/.test(tableHead),
+    '课中 5 段法预览表头仍含 <th>评价</th> · 字段改名未同步');
+});
+
+test('DesignStage.jsx 预览内容读取顺序：designIntent || evaluation', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'DesignStage.jsx'), 'utf8');
+  // 课中 5 段法预览体（map((p, i)) 区段）必须先读 designIntent
+  assert(/p\.designIntent\s*\|\|\s*p\.evaluation/.test(src),
+    '预览内容未按 designIntent || evaluation 顺序读取');
+  // 不允许"裸"读 p.evaluation（即没有 designIntent 兜底前置）
+  assert(!/\{p\.evaluation\s*\|\|/.test(src),
+    '预览仍存在 {p.evaluation || ...} 裸读 · 应改为 designIntent 优先');
+});
+
+test('DesignStage.jsx 编辑区 Section 标题不再以"评价"结尾', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'DesignStage.jsx'), 'utf8');
+  assert(!/课中 5 段法[^"']*评价"/.test(src),
+    'Section 标题"课中 5 段法 ... 评价"未改为"... 设计意图"');
+  assert(/课中 5 段法[^"']*设计意图/.test(src),
+    'Section 标题应含"设计意图"');
+});
+
+test('design-word.js 导出表头：课中 5 段法最后一列是"设计意图" + 内容优先 designIntent', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'export', 'design-word.js'), 'utf8');
+  assert(/cell\('设计意图'/.test(src),
+    'Word 导出表头未含"设计意图"');
+  assert(/ph\.designIntent\s*\|\|\s*ph\.evaluation/.test(src),
+    'Word 导出内容未按 designIntent || evaluation 顺序');
+});
+
+test('design.service.js 仍含 evaluation→designIntent 老数据兼容迁移', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'services', 'design.service.js'), 'utf8');
+  assert(/designIntent/.test(src) && /evaluation/.test(src),
+    'design.service 缺 designIntent / evaluation 兼容字段（破坏老数据加载）');
+});
+
+test('prompts/design.md 要求模型输出 designIntent（不能退回 evaluation 命名）', () => {
+  const p = path.resolve(__dirname, '..', 'prompts', 'design.md');
+  if (!fs.existsSync(p)) return; // prompts 目录可能在 .gitignore 中
+  const src = fs.readFileSync(p, 'utf8');
+  assert(/designIntent/.test(src), 'prompts/design.md 未要求 designIntent 字段');
+});
+
 // ── 结果汇总 ─────────────────────────────────────────────────────────────
 console.log(`\n═══ 结果：${pass}/${pass + fail} 通过 ═══`);
 if (fail > 0) {
