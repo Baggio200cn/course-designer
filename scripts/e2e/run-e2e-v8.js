@@ -312,16 +312,37 @@ function recordStage(name, status, durationMs, extra = {}) {
     }), 'video_prompt');
 
     // Stage 8 report
+    // v4.3.3 Codex Round 15 P1.2：补传 scheduleData/quizData/homeworkData，
+    // 让 mock E2E 真正验证"报告吃 8 阶段上游"路径
     const { generate: generateReport } = require('../../src/main/services/report.service');
-    await runStage('report', () => generateReport({
+    const reportProduct = await runStage('report', () => generateReport({
       aiClient,
       courseName: ctx.courseName,
+      scheduleData: mockSchedule,
       designData: design,
       pptData: mockPpt,
       lectureData: mockLecture,
+      quizData: quizSet,
+      homeworkData: homeworkSet,
       microVideoData: microVideo,
       courseContext: ctx.notebook,
     }), 'implementation_report');
+
+    // v4.3.3 Codex Round 15 P1.2：后置断言 · 报告 _stats.upstreamSummary 必须显示 7 个上游全 true
+    if (reportProduct) {
+      const us = reportProduct._stats?.upstreamSummary || {};
+      const required = ['hasSchedule', 'hasDesign', 'hasPpt', 'hasLecture', 'hasQuiz', 'hasHomework', 'hasMicroVideo'];
+      const missing = required.filter((k) => !us[k]);
+      if (missing.length > 0) {
+        const msg = `报告 upstreamSummary 缺字段为 true：${missing.join(',')}（mock 已传入所有 7 阶段数据，但 service 未识别）`;
+        log(`  ⚠ ${msg}`);
+        if (!ARGS.allowValidatorWarnings) {
+          SUMMARY.errors.push({ stage: 'report', kind: 'upstream-summary', error: msg });
+        }
+      } else {
+        log('  ✓ 报告 upstreamSummary 已确认吃到 7 阶段（schedule/design/ppt/lecture/quiz/homework/video）');
+      }
+    }
 
     log('═══ mock 8 stage 闭环完成（schedule→design→ppt→lecture→quiz→homework→video→report）═══');
   } else {

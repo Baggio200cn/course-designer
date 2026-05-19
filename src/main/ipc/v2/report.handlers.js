@@ -50,15 +50,27 @@ function register(ipcMain, getDeps) {
       if (!notebook) return { success: false, error: 'Notebook not found' };
 
       // v4.3.3 Codex Round 14 P1.1：取上游 7 阶段 confirmed artifact 作为 hint
+      // v4.3.3 Codex Round 15 P1.1：保留 artifact 对象（不只 .content），用其 id 组装 sourceArtifactIds 写报告血缘
       // schedule / design / ppt / lecture / quiz / homework / video
       const allArtifacts = typeof db.listArtifacts === 'function' ? db.listArtifacts({ notebookId }) : [];
-      const scheduleData = pickLatestConfirmed(allArtifacts, 'schedule_table', 'schedule')?.content || null;
-      const designData = pickLatestConfirmed(allArtifacts, 'design_doc', 'design')?.content || null;
-      const pptData = pickLatestConfirmed(allArtifacts, 'ppt_outline', 'ppt')?.content || null;
-      const lectureData = pickLatestConfirmed(allArtifacts, 'lecture_final', 'lecture')?.content || null;
-      const quizData = pickLatestConfirmed(allArtifacts, 'quiz_set', 'quiz')?.content || null;
-      const homeworkData = pickLatestConfirmed(allArtifacts, 'homework_set', 'homework')?.content || null;
-      const microVideoData = pickLatestConfirmed(allArtifacts, 'video_prompt', 'video')?.content || null;
+      const scheduleArt = pickLatestConfirmed(allArtifacts, 'schedule_table', 'schedule') || null;
+      const designArt = pickLatestConfirmed(allArtifacts, 'design_doc', 'design') || null;
+      const pptArt = pickLatestConfirmed(allArtifacts, 'ppt_outline', 'ppt') || null;
+      const lectureArt = pickLatestConfirmed(allArtifacts, 'lecture_final', 'lecture') || null;
+      const quizArt = pickLatestConfirmed(allArtifacts, 'quiz_set', 'quiz') || null;
+      const homeworkArt = pickLatestConfirmed(allArtifacts, 'homework_set', 'homework') || null;
+      const microVideoArt = pickLatestConfirmed(allArtifacts, 'video_prompt', 'video') || null;
+      const scheduleData = scheduleArt?.content || null;
+      const designData = designArt?.content || null;
+      const pptData = pptArt?.content || null;
+      const lectureData = lectureArt?.content || null;
+      const quizData = quizArt?.content || null;
+      const homeworkData = homeworkArt?.content || null;
+      const microVideoData = microVideoArt?.content || null;
+      // v4.3.3 Codex Round 15 P1.1：上游血缘 ID 列表（artifact-validator implementation_report 必检）
+      const upstreamArtifactIds = [scheduleArt, designArt, pptArt, lectureArt, quizArt, homeworkArt, microVideoArt]
+        .map((a) => a?.id)
+        .filter((id) => Number.isFinite(id) && id > 0);
 
       const config = resolveProviderConfig({ payload, db });
       const aiClient = createAiClientByConfig(config);
@@ -102,11 +114,24 @@ function register(ipcMain, getDeps) {
         content: result.data.report,
         confirmed: false,
         status: 'draft',
+        // v4.3.3 Codex Round 15 P1.1：写血缘 · 让 implementation_report validator 通过
+        sourceArtifactIds: upstreamArtifactIds,
         metadata: {
           generatedBy: 'report.service',
           phase: 'phase-9',
           upstreamCount: result.data.report._stats?.upstreamCount,
           upstreamSummary: result.data.report._stats?.upstreamSummary,
+          // 留存详细血缘类型映射，便于未来诊断
+          upstreamArtifactIds,
+          upstreamArtifactTypes: {
+            schedule: scheduleArt?.id || null,
+            design: designArt?.id || null,
+            ppt: pptArt?.id || null,
+            lecture: lectureArt?.id || null,
+            quiz: quizArt?.id || null,
+            homework: homeworkArt?.id || null,
+            video: microVideoArt?.id || null,
+          },
         },
       });
 

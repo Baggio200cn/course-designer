@@ -440,9 +440,10 @@ async function generate({
     hintBlocks.join('\n\n'),
     '',
     '## 任务',
-    // v4.3.3 Codex Round 13 P2：从"上游 5 个 artifact"升级到"上游阶段产物 hint"，
-    // 与 8 阶段工作流（schedule→design→ppt→lecture→quiz→homework→video→report）对齐
-    '基于上游阶段产物 hint（可纳入：教学进度表 / 教学设计 / PPT 大纲 / 讲稿 / 测验 / 作业 / 微课视频方案，按本节实际生成情况），生成教学实施报告 JSON。',
+    // v4.3.3 Codex Round 15 P2：升级注释 · 直接说"上游 7 阶段"（不再保留老说法），
+    // 8 阶段工作流：schedule → design → ppt → lecture → quiz → homework → video → report
+    // report 阶段消费上游 7 阶段（前 7 个）产物，按本节实际生成情况汇总；缺失字段允许留空但不得编造。
+    '基于上游 7 阶段产物 hint（可纳入：教学进度表 / 教学设计 / PPT 大纲 / 讲稿 / 测验 / 作业 / 微课视频方案，按本节实际生成情况），生成教学实施报告 JSON。',
     '严格遵守：',
     '- AI 自动汇总区基于上游 hint 提炼，**禁止超出已有数据**',
     '- 缺失的上游阶段（如本节未生成 quiz/homework）允许相关汇总字段留空，**不得编造**',

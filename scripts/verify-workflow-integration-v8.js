@@ -895,12 +895,81 @@ test('Round 14 P2.2 · report.handlers 顶部注释升级到上游 7 阶段', ()
     'report.handlers 注释未升级到"上游 7 阶段产物"');
 });
 
+// ── 【19】Round 15 治理收口·真实报告血缘 + mock 报告吃 8 阶段 + 全工程老注释扫描 ────────
+console.log('\n【19】Round 15 治理收口·真实报告血缘 + mock 报告吃 8 阶段 + 全工程老注释扫描');
+
+test('Round 15 P1.1 · report.handlers createArtifact 写 sourceArtifactIds', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'ipc', 'v2', 'report.handlers.js'), 'utf8');
+  // 必须组装 upstreamArtifactIds 数组
+  assert(/upstreamArtifactIds\s*=\s*\[[\s\S]{0,500}scheduleArt[\s\S]{0,500}\.map\(/.test(src),
+    'report.handlers 未组装 upstreamArtifactIds（从 7 个 artifact 对象 .id 提取）');
+  // createArtifact 必须传 sourceArtifactIds: upstreamArtifactIds
+  assert(/createArtifact\(\{[\s\S]*?sourceArtifactIds:\s*upstreamArtifactIds[\s\S]*?\}\)/.test(src),
+    'report.handlers createArtifact 未传 sourceArtifactIds（Codex Round 15 P1.1）');
+});
+
+test('Round 15 P1.1 · report.handlers 保留 7 个上游 artifact 对象（不只 .content）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'ipc', 'v2', 'report.handlers.js'), 'utf8');
+  ['scheduleArt', 'designArt', 'pptArt', 'lectureArt', 'quizArt', 'homeworkArt', 'microVideoArt'].forEach((v) => {
+    assert(new RegExp(`const\\s+${v}\\s*=`).test(src),
+      `report.handlers 缺 ${v}（保留 artifact 对象用于写血缘）`);
+  });
+});
+
+test('Round 15 P1.2 · mock E2E generateReport 调用补传 scheduleData/quizData/homeworkData', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'e2e', 'run-e2e-v8.js'), 'utf8');
+  // generateReport({...}) 块中必须包含 scheduleData / quizData / homeworkData 三个 key
+  const m = src.match(/generateReport\(\{[\s\S]{0,2000}?\}\)/);
+  assert(m, '未找到 generateReport 调用块');
+  const callBlock = m[0];
+  ['scheduleData:', 'quizData:', 'homeworkData:'].forEach((k) => {
+    assert(callBlock.includes(k),
+      `run-e2e-v8.js generateReport 调用未传 ${k}（Codex Round 15 P1.2）`);
+  });
+});
+
+test('Round 15 P1.2 · mock E2E 后置断言 upstreamSummary hasSchedule/hasQuiz/hasHomework', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'e2e', 'run-e2e-v8.js'), 'utf8');
+  // 必须含 reportProduct._stats.upstreamSummary 后置检查（hasSchedule + hasQuiz + hasHomework 必有）
+  assert(/reportProduct[\s\S]{0,500}upstreamSummary/.test(src),
+    'run-e2e-v8.js 缺 report 后置 upstreamSummary 检查');
+  ['hasSchedule', 'hasQuiz', 'hasHomework'].forEach((k) => {
+    assert(new RegExp(`['"]${k}['"]`).test(src),
+      `run-e2e-v8.js 后置检查未提到 ${k}`);
+  });
+});
+
+test('Round 15 P2 · 全 src/main 扫描"前 5 阶段 / 上游 5 个 artifact"残留', () => {
+  // 用 glob 扫 src/main/**.{js} 的内容（不含 legacy/）
+  function walk(dir) {
+    const out = [];
+    fs.readdirSync(dir, { withFileTypes: true }).forEach((d) => {
+      if (d.name === 'legacy' || d.name === 'node_modules') return;
+      const p = path.join(dir, d.name);
+      if (d.isDirectory()) out.push(...walk(p));
+      else if (/\.(js|jsx|ts|tsx)$/.test(d.name)) out.push(p);
+    });
+    return out;
+  }
+  const srcRoot = path.resolve(__dirname, '..', 'src', 'main');
+  const files = walk(srcRoot);
+  const pattern = /(上游\s*5\s*个\s*artifact|前\s*5\s*阶段|前\s*5\s*个\s*阶段|AI\s*汇总前\s*5|前\s*5\s*个\s*artifact)/;
+  const hits = [];
+  files.forEach((f) => {
+    const txt = fs.readFileSync(f, 'utf8');
+    if (pattern.test(txt)) hits.push(path.relative(srcRoot, f));
+  });
+  assert(hits.length === 0,
+    `仍有 ${hits.length} 处文件残留"前 5 阶段 / 上游 5 个 artifact"老说法：${hits.join(', ')}`);
+});
+
 test('report.service prompt · 从"上游 5 个 artifact"升级到"上游阶段产物 hint"（8 阶段对齐）', () => {
   const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'services', 'report.service.js'), 'utf8');
   assert(!/基于上游 5 个 artifact/.test(src),
     'report.service prompt 仍是老版"上游 5 个 artifact"（Codex Round 13 P2）');
-  assert(/上游阶段产物 hint/.test(src),
-    'report.service prompt 未升级到"上游阶段产物 hint"');
+  // Round 13 用 "上游阶段产物 hint"；Round 15 P2 进一步明确为 "上游 7 阶段产物 hint"——两种说法都算合规
+  assert(/上游\s*7?\s*阶段产物 hint/.test(src),
+    'report.service prompt 未升级到"上游阶段产物 hint"或"上游 7 阶段产物 hint"');
   // 8 阶段产物枚举应明确出现
   ['教学进度表', '教学设计', 'PPT 大纲', '讲稿', '测验', '作业', '微课视频方案'].forEach((k) => {
     assert(src.includes(k), `report.service prompt 缺关键字"${k}"（8 阶段对齐）`);
