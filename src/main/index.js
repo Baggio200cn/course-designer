@@ -1325,33 +1325,9 @@ function createWindow() {
   });
 }
 app.whenReady().then(() => {
-  // ── v4.3.3 数据迁移（P0-1 修复） ────────────────────────────────────
-  //   每次启动扫一遍 src/main/migrations/*.js，识别老版本"丢失"的 artifact
-  try {
-    const fs = require('fs');
-    const migrationDir = path.join(__dirname, 'migrations');
-    if (fs.existsSync(migrationDir)) {
-      const migrationFiles = fs.readdirSync(migrationDir)
-        .filter((f) => f.endsWith('.js'))
-        .sort();
-      migrationFiles.forEach((f) => {
-        try {
-          const m = require(path.join(migrationDir, f));
-          if (typeof m.run === 'function') {
-            const result = m.run(db, console);
-            if (result?.recoverableCount > 0) {
-              console.warn(`[migrations] ⚠ ${result.recoverableCount} 个 artifact 可恢复，教师日志页可查看`);
-            }
-          }
-        } catch (e) {
-          console.error(`[migrations] ${f} 加载失败:`, e.message);
-        }
-      });
-    }
-  } catch (e) {
-    console.error('[migrations] 整体加载失败（不阻塞 app）:', e.message);
-  }
-
+  // v4.3.3 Codex Round 10 P0 修复（2026-05-19）：
+  //   migration 必须在 db 实例化之后跑（原先这里 db 是 undefined → 全部跳过）
+  //   实际执行点已挪到 db = new DatabaseManager() 之后（见下文 line ~1384）
   protocol.handle('local-img', async (request) => {
     try {
       const urlObj = new URL(String(request.url || ''));
@@ -1382,6 +1358,20 @@ app.whenReady().then(() => {
     }
   });
   db = new DatabaseManager();
+
+  // v4.3.3 Codex Round 10 P0：migration 必须在 db 实例化后跑（曾经写在前面 → "db 不可用" 全跳过）
+  try {
+    const { runMigrations } = require('./migrations/runner');
+    const migrationDir = path.join(__dirname, 'migrations');
+    const result = runMigrations(db, { migrationDir, log: console });
+    console.log('[migrations] runner result:', JSON.stringify({
+      success: result.success, total: result.total,
+      executed: result.executed, skipped: result.skipped, failed: result.failed,
+    }));
+  } catch (e) {
+    console.error('[migrations] runner 加载失败（不阻塞 app）:', e.message);
+  }
+
   backendEventBus = createBackendEventBus({ db });
   artifactTracker = createArtifactTracker({
     db,

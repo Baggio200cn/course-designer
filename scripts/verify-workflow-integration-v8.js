@@ -519,6 +519,103 @@ test('db-simple.js 默认 workflowState 是 schedule（不是 framework）', () 
   assert(offending.length === 0, `db-simple.js 仍有 ${offending.length} 处非注释 framework 默认值：${offending.join(' | ')}`);
 });
 
+// ── 14. v4.3.3 Codex Round 10 防回归 ────────────────────────────────────
+console.log('\n【14】Round 10 治理收口·migration runner + service 统一 + PPT pageNumber + validator');
+
+test('migrations/runner.js 存在且 export runMigrations', () => {
+  const runnerPath = path.resolve(__dirname, '..', 'src', 'main', 'migrations', 'runner.js');
+  assert(fs.existsSync(runnerPath), 'migrations/runner.js 不存在（P0 修复缺）');
+  const runner = require(runnerPath);
+  assert(typeof runner.runMigrations === 'function', 'runner.runMigrations 不是函数');
+});
+
+test('index.js 把 migration 调用挪到 db 实例化后', () => {
+  const indexSrc = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'index.js'), 'utf8');
+  const dbInitIdx = indexSrc.search(/db\s*=\s*new\s+DatabaseManager/);
+  const runMigIdx = indexSrc.search(/runMigrations\s*\(/);
+  assert(dbInitIdx >= 0 && runMigIdx >= 0 && runMigIdx > dbInitIdx,
+    `runMigrations 必须在 db init 后 · dbInit@${dbInitIdx} runMig@${runMigIdx}`);
+});
+
+test('design.service 支持 notebook 参数 + resolveCourseContext export', () => {
+  const ds = require(path.resolve(__dirname, '..', 'src', 'main', 'services', 'design.service.js'));
+  assert(typeof ds.resolveCourseContext === 'function', 'design.service 未 export resolveCourseContext');
+  const dsSrc = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'services', 'design.service.js'), 'utf8');
+  assert(/notebook\s*=\s*null/.test(dsSrc), 'design.service.generate 签名未含 notebook 参数');
+});
+
+test('service 返回结构统一含 data.product（design/quiz/homework/video/report）', () => {
+  const services = ['design', 'quiz', 'homework', 'micro-video', 'report'];
+  services.forEach((s) => {
+    const fname = s === 'quiz' ? 'quiz.service.js'
+                : s === 'homework' ? 'homework.service.js'
+                : s === 'micro-video' ? 'micro-video.service.js'
+                : s + '.service.js';
+    const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'services', fname), 'utf8');
+    assert(/data:\s*\{\s*product:/.test(src), `${fname} 缺 data.product 返回（P1.2 未做）`);
+  });
+});
+
+test('ppt-pipeline-v2 确定性写入 pageNumber', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'script', 'ppt-pipeline-v2.js'), 'utf8');
+  assert(/pages\.forEach\(\(p, i\)\s*=>\s*\{\s*p\.pageNumber/.test(src),
+    'ppt-pipeline-v2 缺 pages.forEach((p, i) => { p.pageNumber = ... }');
+});
+
+test('micro-video.service 新增 durationSec 字段（保留 duration legacy）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'services', 'micro-video.service.js'), 'utf8');
+  assert(/durationSec:\s*declaredDuration/.test(src), 'micro-video 缺 durationSec 字段');
+});
+
+test('report.service 支持 lessonArtifacts 多节合并参数', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'services', 'report.service.js'), 'utf8');
+  assert(/lessonArtifacts\s*=\s*null/.test(src), 'report.service.generate 签名未含 lessonArtifacts');
+  assert(/aggregateLessonArtifacts/.test(src), 'report.service 未实现 aggregateLessonArtifacts');
+});
+
+test('artifact-validator.service 存在 + 校验 5 种 artifact', () => {
+  const v = require(path.resolve(__dirname, '..', 'src', 'main', 'services', 'artifact-validator.service.js'));
+  assert(typeof v.validateArtifact === 'function', 'validateArtifact 不是函数');
+  assert(v.VALIDATORS.ppt_outline, '缺 ppt_outline validator');
+  assert(v.VALIDATORS.lecture_final, '缺 lecture_final validator');
+  assert(v.VALIDATORS.quiz_set, '缺 quiz_set validator');
+  assert(v.VALIDATORS.homework_set, '缺 homework_set validator');
+  assert(v.VALIDATORS.implementation_report, '缺 implementation_report validator');
+});
+
+test('artifact validator · 真实 quiz_set 应 valid', () => {
+  const v = require(path.resolve(__dirname, '..', 'src', 'main', 'services', 'artifact-validator.service.js'));
+  const goodArt = {
+    type: 'quiz_set', schemaVersion: 1, dirty: false,
+    metadata: { lessonNumber: 1 },
+    content: { questions: [
+      { sourcePageNumber: 1, type: 'single', stem: 'mock', correctAnswer: 'A' },
+    ]},
+  };
+  const r = v.validateArtifact(goodArt);
+  assert(r.valid, `应 valid，实际 issues: ${r.issues.join(' | ')}`);
+});
+
+test('artifact validator · 缺 schemaVersion 应 invalid', () => {
+  const v = require(path.resolve(__dirname, '..', 'src', 'main', 'services', 'artifact-validator.service.js'));
+  const r = v.validateArtifact({ type: 'quiz_set', content: { questions: [{ sourcePageNumber: 1, type: 'single', stem: 'x', correctAnswer: 'A' }] } });
+  assert(!r.valid, '缺 schemaVersion 应 invalid');
+  assert(r.issues.some((i) => /schemaVersion/.test(i)), 'issues 应提到 schemaVersion');
+});
+
+test('package.json 含 verify:e2e:mock + verify:migrations + verify:release', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8'));
+  ['verify:migrations', 'verify:e2e:mock', 'verify:release'].forEach((s) => {
+    assert(pkg.scripts && pkg.scripts[s], `package.json 缺 ${s}`);
+  });
+});
+
+test('verify:gate 含 verify-migrations-runner-v8.js', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8'));
+  assert(/verify-migrations-runner-v8/.test(pkg.scripts['verify:gate']),
+    'verify:gate 未串联 verify-migrations-runner-v8');
+});
+
 // ── 结果汇总 ─────────────────────────────────────────────────────────────
 console.log(`\n═══ 结果：${pass}/${pass + fail} 通过 ═══`);
 if (fail > 0) {

@@ -131,20 +131,23 @@ async function generateHomeworkFromLecture({ aiClient, lessonMeta = {}, pptPages
     })).filter((t) => t.title.length > 0);
 
     const totalMinutes = normalized.reduce((s, t) => s + t.estimatedMinutes, 0);
+    const homeworkSet = {
+      metadata: {
+        lessonNumber: lessonMeta.lessonNumber,
+        topic: lessonMeta.topic,
+        chapter: lessonMeta.chapter,
+        totalTasks: normalized.length,
+        totalEstimatedMinutes: totalMinutes,
+        estimatedHours: Math.round(totalMinutes / 60 * 10) / 10,
+        generatedAt: new Date().toISOString(),
+      },
+      tasks: normalized,
+    };
+    // v4.3.3 Codex Round 10 P1.2：统一返回结构 { success, data: { product } }
     return {
       success: true,
-      homeworkSet: {
-        metadata: {
-          lessonNumber: lessonMeta.lessonNumber,
-          topic: lessonMeta.topic,
-          chapter: lessonMeta.chapter,
-          totalTasks: normalized.length,
-          totalEstimatedMinutes: totalMinutes,
-          estimatedHours: Math.round(totalMinutes / 60 * 10) / 10,
-          generatedAt: new Date().toISOString(),
-        },
-        tasks: normalized,
-      },
+      data: { product: homeworkSet, homeworkSet, raw: '' },
+      homeworkSet,
     };
   } catch (err) {
     return { success: false, error: `AI 出作业失败：${err.message}` };

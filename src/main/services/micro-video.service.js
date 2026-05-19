@@ -190,7 +190,10 @@ function normalizeMicroVideo(parsed, ctx = {}) {
   return {
     courseTitle: String(safe.courseTitle || ctx.courseName || '微课').trim(),
     videoTopic: String(safe.videoTopic || '本节核心要点').trim(),
-    duration: declaredDuration,
+    // v4.3.3 Codex Round 10 P2.1：明确单位 · durationSec 是新主路径
+    //   duration 保留作 legacy alias（v4.4.0 起可只读 durationSec）
+    durationSec: declaredDuration,
+    duration: declaredDuration,             // legacy alias
     targetAudience: String(safe.targetAudience || ctx.audience || '中职学生').trim(),
     narrationScript,
     storyboard,
@@ -292,7 +295,8 @@ async function generate({ aiClient, courseName, videoTopic = '', pptOutline = nu
     audience: courseContext.audience,
   });
 
-  return { success: true, data: { microVideo, raw: rawText } };
+  // v4.3.3 Codex Round 10 P1.2：data.product 主路径 · microVideo 作 legacy alias
+  return { success: true, data: { product: microVideo, microVideo, raw: rawText } };
 }
 
 // ── 自检 ────────────────────────────────────────────────────────────────

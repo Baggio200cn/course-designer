@@ -383,6 +383,13 @@ async function generateOutline({
     console.log(`[ppt-pipeline-v2] AI 大纲去重：剔除 ${droppedCount} 张重复页，最终 ${pages.length} 页`);
   }
 
+  // v4.3.3 Codex Round 10 P1.3：确定性写入 pageNumber（不依赖下游 normalizer 推断）
+  //   raw.pages 也用同一份引用，避免数据漂移
+  pages.forEach((p, i) => { p.pageNumber = Number(p.pageNumber) || i + 1; });
+  if (parsed && Array.isArray(parsed.pages)) {
+    parsed.pages = pages;
+  }
+
   return { pages, raw: parsed };
 }
 
@@ -759,9 +766,13 @@ async function generatePptPlanV2(params) {
 
   emit('all-done', { totalPages: pages.length, exerciseInserted });
 
+  // v4.3.3 Codex Round 10 P1.3：最终 return 前再做一次 pageNumber 确定性写入
+  //   保险：即使上游 page detail 生成漏掉，最终输出 100% 有 pageNumber
+  pages.forEach((p, i) => { p.pageNumber = Number(p.pageNumber) || i + 1; });
+
   return {
     pages,
-    rawPlan: { pages, mainAccentColor },
+    rawPlan: { pages, mainAccentColor },   // rawPlan.pages 同引用，避免漂移
     pageCount: pages.length,
     pipeline: 'v2-two-stage',
     mode,                  // 'design-first' | 'lecture-fallback'

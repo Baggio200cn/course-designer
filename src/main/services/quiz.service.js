@@ -137,6 +137,20 @@ async function generateQuizFromPpt({ aiClient, lessonMeta = {}, pptPages = [], l
     if (questions.length === 0) {
       return { success: false, error: 'AI 返回 0 道题，请检查 PPT 是否有有效内容' };
     }
+    // v4.3.3 Codex Round 10 P1.3：sourcePageNumber 必须有效（>=1 来自页 / =0 综合题）
+    // 当前 prompt 已要求 AI 输出 sourcePageNumber，但 PPT artifact 现有确定性 pageNumber 后
+    // 可在此校验，发现 AI 漏给时 warn（不阻断，因 0=综合题是合法值）
+    const validPageNumbers = new Set(pptPages.map((p) => Number(p.pageNumber) || 0).filter((n) => n > 0));
+    let invalidSourceCount = 0;
+    questions.forEach((q) => {
+      const n = Number(q.sourcePageNumber);
+      if (n > 0 && validPageNumbers.size > 0 && !validPageNumbers.has(n)) {
+        invalidSourceCount += 1;
+      }
+    });
+    if (invalidSourceCount > 0) {
+      console.warn(`[quiz.service] ⚠ ${invalidSourceCount} 道题的 sourcePageNumber 不在 PPT 页范围内（valid: ${[...validPageNumbers].join(',')}）`);
+    }
     // 规范化每道题
     const normalized = questions.map((q, idx) => ({
       id: String(q.id || `q${idx + 1}`),
@@ -153,18 +167,22 @@ async function generateQuizFromPpt({ aiClient, lessonMeta = {}, pptPages = [], l
       knowledgePoint: String(q.knowledgePoint || '').trim(),
     })).filter((q) => q.stem.length > 0);
 
+    const quizSet = {
+      metadata: {
+        lessonNumber: lessonMeta.lessonNumber,
+        topic: lessonMeta.topic,
+        chapter: lessonMeta.chapter,
+        totalQuestions: normalized.length,
+        generatedAt: new Date().toISOString(),
+      },
+      questions: normalized,
+    };
+    // v4.3.3 Codex Round 10 P1.2：统一返回结构 { success, data: { product } }
+    // 老 `result.quizSet` 字段保留作 legacy alias 兼容（v4.4.0 可删）
     return {
       success: true,
-      quizSet: {
-        metadata: {
-          lessonNumber: lessonMeta.lessonNumber,
-          topic: lessonMeta.topic,
-          chapter: lessonMeta.chapter,
-          totalQuestions: normalized.length,
-          generatedAt: new Date().toISOString(),
-        },
-        questions: normalized,
-      },
+      data: { product: quizSet, quizSet, raw: '' },
+      quizSet,
     };
   } catch (err) {
     return { success: false, error: `AI 出题失败：${err.message}` };

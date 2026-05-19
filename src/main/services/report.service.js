@@ -232,6 +232,39 @@ function normalizeReport(parsed, ctx = {}) {
  * @param {Object} [params.microVideoData]- video_prompt artifact
  * @param {Object} [params.courseContext]
  */
+/**
+ * v4.3.3 Codex Round 10 P2.3：把 lessonArtifacts[] 数组聚合成 single-lesson 形状
+ *   每项格式：{ lessonNumber, designData, pptData, lectureData, quizData, homeworkData, videoData }
+ *   策略：以最后一节作为代表（兜底字段），但 hint blocks 拼接所有节摘要
+ */
+function aggregateLessonArtifacts(lessonArtifacts) {
+  if (!Array.isArray(lessonArtifacts) || lessonArtifacts.length === 0) {
+    return { aggregated: null, summaries: [] };
+  }
+  const last = lessonArtifacts[lessonArtifacts.length - 1] || {};
+  const summaries = lessonArtifacts.map((la) => ({
+    lessonNumber: la.lessonNumber,
+    topic: la.designData?.lessonMeta?.topic
+         || la.pptData?.lessonMeta?.topic
+         || la.lectureData?.lessonMeta?.topic
+         || `第 ${la.lessonNumber} 节`,
+    pptPageCount: la.pptData?.pages?.length || la.pptData?.pptPages?.length || 0,
+    lectureChars: (la.lectureData?.finalScript || '').length,
+    quizQuestions: la.quizData?.questions?.length || 0,
+    homeworkTasks: la.homeworkData?.tasks?.length || 0,
+    videoDurationSec: la.videoData?.durationSec || la.videoData?.duration || 0,
+  }));
+  return {
+    aggregated: {
+      designData: last.designData || null,
+      pptData: last.pptData || null,
+      lectureData: last.lectureData || null,
+      microVideoData: last.videoData || null,
+    },
+    summaries,
+  };
+}
+
 async function generate({
   aiClient,
   courseName,
@@ -240,6 +273,9 @@ async function generate({
   lectureData = null,
   pptData = null,
   microVideoData = null,
+  // v4.3.3 Codex Round 10 P2.3：新增 lessonArtifacts 数组（多节合并模式）
+  //   传入后会聚合每节产物 + 把每节摘要拼进 prompt hint
+  lessonArtifacts = null,
   courseContext = {},
 }) {
   if (!aiClient || typeof aiClient.chatJson !== 'function') {
@@ -249,10 +285,37 @@ async function generate({
     return { success: false, error: '课程名（courseName）不能为空' };
   }
 
+  // v4.3.3 Codex Round 10 P2.3：合并 lessonArtifacts 兜底单节字段
+  let lessonSummaries = [];
+  if (Array.isArray(lessonArtifacts) && lessonArtifacts.length > 0) {
+    const aggResult = aggregateLessonArtifacts(lessonArtifacts);
+    lessonSummaries = aggResult.summaries;
+    if (aggResult.aggregated) {
+      if (!designData) designData = aggResult.aggregated.designData;
+      if (!pptData) pptData = aggResult.aggregated.pptData;
+      if (!lectureData) lectureData = aggResult.aggregated.lectureData;
+      if (!microVideoData) microVideoData = aggResult.aggregated.microVideoData;
+    }
+  }
+
   const systemPrompt = loadPrompt('report');
 
   // ── 把上游 artifact 拼成 hint 块 ──
   const hintBlocks = [];
+
+  // v4.3.3 Codex Round 10 P2.3：多节抽样总览（如果传了 lessonArtifacts）
+  if (lessonSummaries.length > 0) {
+    const lines = ['## 多节抽样总览（每节核心产出量）', '本报告基于 ' + lessonSummaries.length + ' 节抽样数据生成：'];
+    lessonSummaries.forEach((s) => {
+      lines.push(
+        `· 第 ${s.lessonNumber} 节《${s.topic}》：` +
+        `PPT ${s.pptPageCount} 页 · 讲稿 ${s.lectureChars} 字 · ` +
+        `测验 ${s.quizQuestions} 题 · 作业 ${s.homeworkTasks} 道 · ` +
+        `微课 ${s.videoDurationSec} 秒`
+      );
+    });
+    hintBlocks.push(lines.join('\n'));
+  }
 
   if (designData) {
     const objs = designData.teachingObjectives || {};
@@ -371,7 +434,8 @@ async function generate({
     hasMicroVideo: !!microVideoData,
   });
 
-  return { success: true, data: { report, raw: rawText } };
+  // v4.3.3 Codex Round 10 P1.2：data.product 主路径 · report 作 legacy alias
+  return { success: true, data: { product: report, report, raw: rawText } };
 }
 
 // ── 自检 ────────────────────────────────────────────────────────────────

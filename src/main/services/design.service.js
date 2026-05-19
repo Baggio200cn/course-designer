@@ -284,7 +284,32 @@ function arr(value, maxLen) {
  * @param {Object} [params.scheduleData]  - 上游进度表
  * @param {Object} [params.courseContext] - 课程上下文
  */
-async function generate({ aiClient, courseName, lessonMeta = {}, scheduleData = null, courseContext = {} }) {
+/**
+ * v4.3.3 Codex Round 10 P1.1（2026-05-19）：resolveCourseContext 工具
+ *   优先级：显式 courseContext > notebook 字段 > 空值
+ *   minutesPerHour 仍必填（不允许回 45/90 默认值）— H14 反模板化
+ */
+function resolveCourseContext({ notebook = null, courseContext = {} } = {}) {
+  const merged = { ...(courseContext || {}) };
+  if (notebook && typeof notebook === 'object') {
+    // 列举所有用到的字段，notebook 优先级低于 courseContext
+    const FIELDS = [
+      'minutesPerHour', 'totalHours', 'hoursPerSession',
+      'school', 'teacher', 'semester', 'className', 'textbook',
+      'industryScenarios', 'jobTargets', 'learnerProfile', 'softwareTools',
+    ];
+    FIELDS.forEach((k) => {
+      if (merged[k] === undefined || merged[k] === null || merged[k] === '') {
+        if (notebook[k] !== undefined && notebook[k] !== null && notebook[k] !== '') {
+          merged[k] = notebook[k];
+        }
+      }
+    });
+  }
+  return merged;
+}
+
+async function generate({ aiClient, courseName, lessonMeta = {}, scheduleData = null, courseContext = {}, notebook = null }) {
   if (!aiClient || typeof aiClient.chatJson !== 'function') {
     return { success: false, error: '未提供有效的 AI 客户端（缺少 chatJson 方法）' };
   }
@@ -295,6 +320,10 @@ async function generate({ aiClient, courseName, lessonMeta = {}, scheduleData = 
     return { success: false, error: '本节主题（lessonMeta.topic）不能为空' };
   }
 
+  // v4.3.3 Codex Round 10 P1.1：自动从 notebook 兜底取 courseContext 字段
+  //   这样 caller 直接传 { notebook } 就能跑，不再必须显式构造 courseContext
+  courseContext = resolveCourseContext({ notebook, courseContext });
+
   // Phase-9.5：学时校验（警告但不阻断）
   const hourCheck = validateLessonHours(lessonMeta.theoryHours, lessonMeta.practiceHours);
   if (hourCheck.warnings.length > 0) {
@@ -302,7 +331,7 @@ async function generate({ aiClient, courseName, lessonMeta = {}, scheduleData = 
   }
 
   const systemPrompt = loadPrompt('design');
-  // T8 修复（2026-05-17）：1 学时 = N 分钟由老师按学校标准配置，无兜底
+  // T8 修复（2026-05-17）：1 学时 = N 分钟由老师按学校标准配置，无兜底（H14 反模板化）
   const minutesPerHour = Number(courseContext.minutesPerHour) || 0;
   if (minutesPerHour <= 0) {
     return { success: false, error: '缺少"1 学时分钟数"（minutesPerHour）。请在创建笔记本时填写学校标准（如 40 / 45 / 50）。' };
@@ -397,7 +426,8 @@ async function generate({ aiClient, courseName, lessonMeta = {}, scheduleData = 
     lessonMeta,
   });
 
-  return { success: true, data: { design, raw: rawText } };
+  // v4.3.3 Codex Round 10 P1.2：data.product 是新主路径 · design 保留作 legacy alias
+  return { success: true, data: { product: design, design, raw: rawText } };
 }
 
 // ── 自检 ────────────────────────────────────────────────────────────────────
@@ -538,5 +568,6 @@ module.exports = {
   REQUIRED_PHASES,
   validateLessonHours,    // Phase-9.5：供前端/handler 学时校验复用
   normalizeLessonMeta,
+  resolveCourseContext,   // v4.3.3 Codex Round 10 P1.1：供其他 service / handler 复用
   _internal: { parseDesignJson, normalizeDesign, loadPrompt },
 };
