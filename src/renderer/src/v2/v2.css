@@ -2946,3 +2946,167 @@ textarea, input, select {
   word-break: break-word;
 }
 
+/* ─────────────────────────────────────────────────────────────
+ * v4.3.3 新版 UI · 2026-05-20
+ *   ① 顶栏 + 启动屏 logo（绿底金马·驭字）
+ *   ② 4 个预览页面（DesignStage / PptStage / LectureStage / ReportStage）
+ *      最大化按钮 + 排版升级（字号 +1、line-height 1.7、padding 加大）
+ * ───────────────────────────────────────────────────────────── */
+
+/* ─── 顶栏 brand 区（logo + 文字标题）── */
+.v2-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.v2-brand-logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* ─── 启动屏 hero logo（HomeView）── */
+.v2-home-logo {
+  width: 96px;
+  height: 96px;
+  border-radius: 18px;
+  box-shadow: 0 6px 24px rgba(20, 80, 40, 0.25);
+  display: block;
+  margin: 0 auto 18px;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* ─── 预览全屏覆盖层 ── */
+.v2-preview-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: #f6f7f9;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+.v2-preview-fullscreen .v2-preview-fs-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #fff;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+.v2-preview-fullscreen .v2-preview-fs-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #1f2937;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.v2-preview-fullscreen .v2-preview-fs-body {
+  flex: 1;
+  max-width: 1100px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 28px 36px 60px;
+  background: #fff;
+  box-shadow: 0 0 24px rgba(0, 0, 0, 0.06);
+  min-height: 100%;
+}
+
+/* 预览页面通用排版升级（字号 +1，行高 1.7） */
+.v2-preview-fullscreen .v2-preview-fs-body,
+.v2-preview-enhanced {
+  font-size: 15px;
+  line-height: 1.75;
+  color: #1f2937;
+}
+.v2-preview-fullscreen .v2-preview-fs-body h2,
+.v2-preview-enhanced h2 {
+  font-size: 22px;
+  line-height: 1.4;
+  margin: 24px 0 14px;
+}
+.v2-preview-fullscreen .v2-preview-fs-body h3,
+.v2-preview-enhanced h3 {
+  font-size: 18px;
+  line-height: 1.5;
+  margin: 22px 0 12px;
+}
+.v2-preview-fullscreen .v2-preview-fs-body h4,
+.v2-preview-enhanced h4 {
+  font-size: 16px;
+  line-height: 1.55;
+  margin: 18px 0 10px;
+}
+.v2-preview-fullscreen .v2-preview-fs-body table,
+.v2-preview-enhanced table {
+  width: 100%;
+  font-size: 14px;
+  line-height: 1.65;
+}
+.v2-preview-fullscreen .v2-preview-fs-body th,
+.v2-preview-fullscreen .v2-preview-fs-body td,
+.v2-preview-enhanced th,
+.v2-preview-enhanced td {
+  padding: 10px 12px;
+  vertical-align: top;
+}
+.v2-preview-fullscreen .v2-preview-fs-body p,
+.v2-preview-enhanced p {
+  margin: 10px 0;
+}
+.v2-preview-fullscreen .v2-preview-fs-body ul,
+.v2-preview-fullscreen .v2-preview-fs-body ol,
+.v2-preview-enhanced ul,
+.v2-preview-enhanced ol {
+  padding-left: 24px;
+  margin: 10px 0;
+}
+
+/* 工具栏上的"最大化预览"按钮 */
+.v2-preview-fs-toggle {
+  border: 1px solid #d1d5db;
+  background: #fff;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #374151;
+}
+.v2-preview-fs-toggle:hover {
+  border-color: #2563eb;
+  color: #2563eb;
+  background: #f3f8ff;
+}
+.v2-preview-fs-toggle .icon {
+  font-size: 15px;
+}
+
+/* ESC 提示条 */
+.v2-preview-fs-esc-hint {
+  font-size: 12px;
+  color: #6b7280;
+  background: #f3f4f6;
+  padding: 2px 10px;
+  border-radius: 12px;
+}
+
+/* 响应式：小窗口时全屏 body 内边距收紧 */
+@media (max-width: 900px) {
+  .v2-preview-fullscreen .v2-preview-fs-body {
+    padding: 20px 18px 40px;
+    font-size: 14.5px;
+  }
+}
+

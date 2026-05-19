@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+// v4.3.3 新版 · 应用 logo（绿底金马·驭字）— 由 scripts/icon/rebuild-icons.js 生成
+import logoSrc from '../assets/logo.png';
 // P1.1d 删除（2026-05-17）：FrameworkStage / WorkflowPauseModal 整 v3 framework + Agent 自动模式下线
 // import FrameworkStage from './FrameworkStage';   // 已删
 // import WorkflowPauseModal from './WorkflowPauseModal';  // 已删
@@ -987,6 +989,8 @@ function HomeView({ notebooks, onSelect, onCreateClick, onApiClick }) {
   return (
     <main className="v2-home">
       <section className="v2-home-hero">
+        {/* v4.3.3 新版 · 启动屏 hero logo */}
+        <img src={logoSrc} alt="驭课 Agent" className="v2-home-logo" draggable={false} />
         <h2>驭课 Agent · 8 阶段工作流</h2>
         <p>从教学进度表起步，依次完成 教学进度表 → 教学设计 → 教学课件 → 课堂讲稿 → 在线测验 → 课后作业 → 微课视频 → 教学实施报告（v4.3.3 新工作流）。</p>
         <div className="v2-inline-actions">
@@ -3296,7 +3300,11 @@ export default function V2App() {
    <SessionProvider api={api} notebookId={selectedNotebookId}>
     <div className="v2-shell">
       <header className="v2-topbar">
-        <h1>驭课 <span className="v2-title-agent">Agent</span> <span className="v2-title-version">v4.3.3</span></h1>
+        {/* v4.3.3 新版 · logo（绿底金马·驭字）替换文字 title */}
+        <div className="v2-brand">
+          <img src={logoSrc} alt="驭课 Agent" className="v2-brand-logo" draggable={false} />
+          <h1>驭课 <span className="v2-title-agent">Agent</span> <span className="v2-title-version">v4.3.3</span></h1>
+        </div>
         <div className="v2-topbar-actions">
           {/* Phase-7.7 A3：「教师日志」入口 */}
           <button className="v2-btn v2-btn-secondary" onClick={() => setShowWorkbench(true)} title="跨课程统计：你已开发的所有课程进度概览 + 经验沉淀">📊 教师日志</button>

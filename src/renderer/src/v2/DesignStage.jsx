@@ -15,6 +15,8 @@
  */
 import React, { useState, useEffect } from 'react';
 import ArtifactPanel from './ArtifactPanel';
+// v4.3.3 新版 · 预览全屏 + 排版升级（老师反馈）
+import { PreviewFullscreen, PreviewFullscreenToggle } from './PreviewFullscreen';
 
 const REQUIRED_PHASES = ['导入新课', '知识讲授', '实操练习', '互查反馈', '总结升华'];
 
@@ -53,6 +55,8 @@ export default function DesignStage({
 }) {
   const design = designState.design || null;
   const [viewMode, setViewMode] = useState('text');  // text | edit | json
+  // v4.3.3 新版：预览最大化（老师反馈）
+  const [previewFs, setPreviewFs] = useState(false);
   // 2026-05-15 P2-4：回收站状态
   const [recycleBin, setRecycleBin] = useState([]);
   const [showRecycleBin, setShowRecycleBin] = useState(false);
@@ -862,10 +866,18 @@ export default function DesignStage({
                   className={`v2-btn v2-btn-xs ${viewMode === 'json' ? 'v2-btn-primary' : 'v2-btn-secondary'}`}
                   onClick={() => setViewMode('json')}
                 >{ } JSON</button>
+                {/* v4.3.3 新版 · 最大化预览按钮（仅在文字预览模式下显示） */}
+                {viewMode === 'text' && (
+                  <PreviewFullscreenToggle isFullscreen={previewFs} onToggle={setPreviewFs} />
+                )}
               </div>
             </div>
 
-            {viewMode === 'text' && <DesignTextView design={design} />}
+            {viewMode === 'text' && (
+              <div className="v2-preview-enhanced">
+                <DesignTextView design={design} />
+              </div>
+            )}
             {viewMode === 'edit' && <DesignEditor design={design} updateField={updateField} />}
             {viewMode === 'json' && (
               <textarea
@@ -953,6 +965,15 @@ export default function DesignStage({
           dt={dt}
         />
       </div>
+      {/* v4.3.3 新版 · 最大化预览覆盖层（fullscreen 时显示，复用 DesignTextView） */}
+      {previewFs && design && (
+        <PreviewFullscreen
+          title={`教学设计预览 · ${design.lessonMeta?.topic || ''}`}
+          onClose={() => setPreviewFs(false)}
+        >
+          <DesignTextView design={design} />
+        </PreviewFullscreen>
+      )}
     </section>
   );
 }

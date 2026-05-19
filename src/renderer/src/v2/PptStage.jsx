@@ -1,5 +1,7 @@
 import React from 'react';
 import { buildPptTextFramework, PPT_TEMPLATE_PRESETS } from './stage-helpers';
+// v4.3.3 新版 · PPT 网格最大化预览（老师反馈：视觉预览不能撑满）
+import { PreviewFullscreen, PreviewFullscreenToggle } from './PreviewFullscreen';
 
 /* ─────────────────────────────────────────────
    PerPageRegenerate — 2026-05-16 v4.1.4 Phase 2
@@ -1227,6 +1229,8 @@ export default function PptStage({
   //     ② 📊 列表表格：紧凑表格一行一页，扫完 N 页快
   //     ③ 🖼 视觉预览：原 16:9 缩略图（看真实 PPT 视觉效果）
   const [gridViewMode, setGridViewMode] = React.useState('cards');   // 'cards' | 'list' | 'preview'
+  // v4.3.3 新版：PPT 网格最大化预览（老师反馈撑满窗口）
+  const [pptPreviewFs, setPptPreviewFs] = React.useState(false);
   const renderGrid = () => {
     if (pages.length === 0) {
       return (
@@ -1260,6 +1264,10 @@ export default function PptStage({
           >{v.label}</button>
         ))}
         <span style={{ marginLeft: 'auto', fontSize: 11, color: '#94A3B8' }}>共 {pages.length} 页 · 点击任一页进入精修</span>
+        {/* v4.3.3 新版 · 最大化预览（视觉预览 / 信息卡片视图下都可触发） */}
+        <span style={{ marginLeft: 8 }}>
+          <PreviewFullscreenToggle isFullscreen={pptPreviewFs} onToggle={setPptPreviewFs} />
+        </span>
       </div>
     );
 
@@ -1867,6 +1875,43 @@ export default function PptStage({
       {renderExternalReferences()}
       {editMode ? renderEditor() : renderGrid()}
       {/* P6 删除（2026-05-18）：renderExerciseModal 整段下线，动态练习移到 Step 5 独立 stage */}
+
+      {/* v4.3.3 新版 · PPT 大纲最大化预览（撑满窗口 · 信息卡片视图下大字号阅读） */}
+      {pptPreviewFs ? (
+        <PreviewFullscreen
+          title={`PPT 大纲预览 · 共 ${pages.length} 页`}
+          onClose={() => setPptPreviewFs(false)}
+        >
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
+            {pages.map((page) => {
+              const keyPoints = Array.isArray(page.keyContent)
+                ? page.keyContent.filter(Boolean)
+                : String(page.keyContent || '').split('\n').filter(Boolean);
+              return (
+                <div key={page.id} style={{
+                  background: '#fff', border: '1px solid #e5e7eb', borderLeft: `4px solid ${page.accentColor || '#2563eb'}`,
+                  borderRadius: 8, padding: 16, minHeight: 220,
+                }}>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 6 }}>
+                    P{page.pageNumber} · {page.pageType || '—'}
+                  </div>
+                  <h4 style={{ margin: '4px 0 10px', fontSize: 17, fontWeight: 700, color: '#1f2937', lineHeight: 1.4 }}>
+                    {page.title || '（未命名）'}
+                  </h4>
+                  {page.subtitle ? (
+                    <div style={{ fontSize: 13, color: '#4b5563', marginBottom: 8 }}>{page.subtitle}</div>
+                  ) : null}
+                  {keyPoints.length > 0 ? (
+                    <ul style={{ margin: '6px 0 0', paddingLeft: 20, fontSize: 14, lineHeight: 1.7, color: '#374151' }}>
+                      {keyPoints.map((kp, i) => <li key={i}>{kp}</li>)}
+                    </ul>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </PreviewFullscreen>
+      ) : null}
     </div>
   );
 }

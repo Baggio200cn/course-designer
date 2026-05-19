@@ -14,6 +14,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import ArtifactPanel from './ArtifactPanel';
 import LectureChatPanel from './LectureChatPanel';   // v4.3.0 D6.3
+// v4.3.3 新版 · 预览全屏（讲稿正式稿大屏阅读模式）
+import { PreviewFullscreen, PreviewFullscreenToggle } from './PreviewFullscreen';
 
 const DEFAULT_LESSON = {
   lessonNumber: 1,
@@ -53,6 +55,8 @@ export default function LectureStage({
   shorten,
 }) {
   // ── 节课列表 + 当前编辑节课 ─────────────────────────────────────
+  // v4.3.3 新版：讲稿最大化预览
+  const [lecturePreviewFs, setLecturePreviewFs] = useState(false);
   const [lessons, setLessons] = useState([]);     // [{id, lessonNumber, topic, theoryHours, ...}]
   const [usedHours, setUsedHours] = useState(0);
   const [currentLessonId, setCurrentLessonId] = useState(null);   // 编辑中的节课 artifact id；null=新建
@@ -1039,7 +1043,17 @@ export default function LectureStage({
         <div className="v2-panel">
           <div className="v2-panel-head">
             <h3>⑤ 正式稿预览 · ⑥ AI 对话修改</h3>
-            <span className="v2-hint">下方文本框 = 正式稿；右侧 AI 对话框可对它做局部修改</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span className="v2-hint">下方文本框 = 正式稿；右侧 AI 对话框可对它做局部修改</span>
+              {/* v4.3.3 新版 · 讲稿最大化阅读模式（带大字号 + 行距）*/}
+              {lessonForm.finalScript ? (
+                <PreviewFullscreenToggle
+                  isFullscreen={lecturePreviewFs}
+                  onToggle={setLecturePreviewFs}
+                  label="最大化阅读"
+                />
+              ) : null}
+            </div>
           </div>
           <div style={{
             marginTop: 8, padding: 12,
@@ -1529,6 +1543,24 @@ export default function LectureStage({
             </div>
           </div>
         </div>
+      ) : null}
+
+      {/* v4.3.3 新版 · 讲稿最大化阅读模式（大字号 + 行距 1.75） */}
+      {lecturePreviewFs && lessonForm.finalScript ? (
+        <PreviewFullscreen
+          title={`讲稿正式稿 · 第 ${lessonForm.lessonNumber || '?'} 节《${lessonForm.topic || ''}》 · ${lessonForm.finalScript.length} 字`}
+          onClose={() => setLecturePreviewFs(false)}
+        >
+          <pre style={{
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            fontFamily: '-apple-system, "PingFang SC", "Microsoft YaHei", sans-serif',
+            fontSize: 16,
+            lineHeight: 1.85,
+            color: '#1f2937',
+            margin: 0,
+          }}>{lessonForm.finalScript}</pre>
+        </PreviewFullscreen>
       ) : null}
     </section>
   );

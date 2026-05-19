@@ -12,6 +12,8 @@
  */
 import React, { useState, useEffect } from 'react';
 import ArtifactPanel from './ArtifactPanel';
+// v4.3.3 新版 · 报告最大化预览
+import { PreviewFullscreen, PreviewFullscreenToggle } from './PreviewFullscreen';
 
 const OUTCOME_LABELS = {
   studentEngagement: '学生参与度',
@@ -48,6 +50,8 @@ export default function ReportStage({
 }) {
   const report = reportState.report || null;
   const [viewMode, setViewMode] = useState('preview');  // preview | edit | json
+  // v4.3.3 新版：报告最大化预览
+  const [previewFs, setPreviewFs] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [exportingFormat, setExportingFormat] = useState(null);
@@ -191,10 +195,18 @@ export default function ReportStage({
                   className={`v2-btn v2-btn-xs ${viewMode === 'json' ? 'v2-btn-primary' : 'v2-btn-secondary'}`}
                   onClick={() => setViewMode('json')}
                 >{ } JSON</button>
+                {/* v4.3.3 新版 · 报告最大化预览 */}
+                {viewMode === 'preview' && (
+                  <PreviewFullscreenToggle isFullscreen={previewFs} onToggle={setPreviewFs} />
+                )}
               </div>
             </div>
 
-            {viewMode === 'preview' && <ReportPreview report={report} />}
+            {viewMode === 'preview' && (
+              <div className="v2-preview-enhanced">
+                <ReportPreview report={report} />
+              </div>
+            )}
             {viewMode === 'edit'    && (
               <ReportEditor
                 report={report}
@@ -269,6 +281,16 @@ export default function ReportStage({
           dt={dt}
         />
       </div>
+
+      {/* v4.3.3 新版 · 报告最大化预览（撑满窗口 + 大字号 + 1.75 行距） */}
+      {previewFs && report ? (
+        <PreviewFullscreen
+          title={`教学实施报告预览 · ${report.courseName || '本课程'}`}
+          onClose={() => setPreviewFs(false)}
+        >
+          <ReportPreview report={report} />
+        </PreviewFullscreen>
+      ) : null}
     </section>
   );
 }
