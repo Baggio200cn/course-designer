@@ -168,6 +168,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveMicroVideoV2: (payload) => ipcRenderer.invoke('v2:saveMicroVideo', payload),
   confirmMicroVideoV2: (payload) => ipcRenderer.invoke('v2:confirmMicroVideo', payload),
   getMicroVideoDataV2: (notebookId) => ipcRenderer.invoke('v2:getMicroVideoData', notebookId),
+  // v4.3.3 测试报告 #4 修复：微课方案 Word 导出
+  exportMicroVideoWordV2: (payload) => ipcRenderer.invoke('v2:exportMicroVideoWord', payload),
   getVideoStageDataV2: (notebookId) => ipcRenderer.invoke('v2:getVideoStageData', notebookId),
   saveVideoStageV2: (payload) => ipcRenderer.invoke('v2:saveVideoStage', payload),
 

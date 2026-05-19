@@ -2,17 +2,21 @@
  * v2 微课视频整套方案 handlers（Phase-9 阶段 C-3）
  *
  * 处理的 channel：
- *   v2:generateMicroVideo   生成完整方案（AI 调用）
- *   v2:saveMicroVideo       保存方案（老师手改后）
- *   v2:confirmMicroVideo    确认（解锁下游 report 阶段）
- *   v2:getMicroVideoData    读取当前 notebookId 的微课方案
+ *   v2:generateMicroVideo     生成完整方案（AI 调用）
+ *   v2:saveMicroVideo         保存方案（老师手改后）
+ *   v2:confirmMicroVideo      确认（解锁下游 report 阶段）
+ *   v2:getMicroVideoData      读取当前 notebookId 的微课方案
+ *   v2:exportMicroVideoWord   导出 Word（v4.3.3 测试报告 #4 修复 · 2026-05-20）
  *
  * artifact_type='video_prompt'，stage='video'
  * 注意：与 v3.x 老 video.handlers.js 并存——前端 D 阶段切到新接口后，老 handler 自然废弃
  */
 
+const path = require('path');
+const { dialog } = require('electron');
 const microVideoSvc = require('../../services/micro-video.service');
 const { resolveProviderConfig, createAiClientByConfig } = require('../../api/provider-config');
+const { exportMicroVideoWord } = require('../../export/micro-video-word');
 
 function register(ipcMain, getDeps) {
   // ── 生成 ───────────────────────────────────────────────────────────
@@ -186,6 +190,80 @@ function register(ipcMain, getDeps) {
       };
     } catch (error) {
       console.error('[v2:getMicroVideoData] 异常：', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  // ── 导出 Word（v4.3.3 测试报告 #4 修复 · 2026-05-20）─────────────────
+  //   老师在 MicroVideoStage 点"导出 Word" → 这条 IPC → 弹保存对话框 → 写 docx
+  //   按 video_prompt 真实 schema（narrationScript / storyboard / jimengPrompts）渲染
+  ipcMain.handle('v2:exportMicroVideoWord', async (event, payload = {}) => {
+    const { db, mainWindow } = getDeps();
+    try {
+      if (!db) throw new Error('Database not initialized');
+      const notebookId = Number(payload.notebookId);
+      if (!Number.isFinite(notebookId) || notebookId <= 0) {
+        return { success: false, error: 'notebookId 无效' };
+      }
+      const notebook = db.getNotebookById(notebookId);
+      if (!notebook) return { success: false, error: 'Notebook not found' };
+
+      // 取最新 video_prompt artifact（优先 confirmed，否则取 latest）
+      const items = typeof db.listArtifacts === 'function' ? db.listArtifacts({ notebookId }) : [];
+      const videos = items
+        .filter((a) => a.type === 'video_prompt' && a.stage === 'video')
+        .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+      const target = videos.find((a) => a.confirmed) || videos[0];
+      if (!target || !target.content) {
+        return { success: false, error: '尚未生成微课视频方案（video_prompt artifact 不存在）' };
+      }
+
+      const microVideo = target.content;
+      const videoTopic = microVideo.videoTopic || microVideo.courseTitle || '';
+      const lessonNumber = target.metadata?.lessonNumber || microVideo.lessonNumber || null;
+
+      const defaultName = `${notebook.name || '课程'}-微课视频方案${lessonNumber ? `-L${lessonNumber}` : ''}.docx`;
+      const picked = await dialog.showSaveDialog(mainWindow || null, {
+        title: '导出微课视频方案 Word',
+        defaultPath: defaultName,
+        filters: [{ name: 'Word 文档', extensions: ['docx'] }],
+      });
+      if (picked.canceled || !picked.filePath) return { cancelled: true };
+      const outputPath = picked.filePath.endsWith('.docx') ? picked.filePath : `${picked.filePath}.docx`;
+
+      try {
+        await exportMicroVideoWord({
+          microVideo,
+          outputPath,
+          courseName: notebook.name || '课程',
+          lessonNumber,
+          videoTopic,
+        });
+      } catch (e) {
+        // Schema 守卫报错（修复 C）— 把信息给老师，不静默生成空文档
+        console.error('[v2:exportMicroVideoWord] 渲染失败：', e);
+        return { success: false, error: `导出失败：${e.message}` };
+      }
+
+      // 登记产物 artifact（便于"我的产物"面板看到导出历史）
+      if (typeof db.createArtifact === 'function') {
+        db.createArtifact({
+          notebookId,
+          type: 'video_export_docx',
+          stage: 'video',
+          title: `${notebook.name || '课程'}·微课视频方案 Word 导出`,
+          content: { filePath: outputPath },
+          format: 'docx',
+          status: 'exported',
+          confirmed: true,
+          storagePath: outputPath,
+          previewText: path.basename(outputPath),
+          sourceArtifactIds: [target.id],
+        });
+      }
+      return { success: true, data: { filePath: outputPath } };
+    } catch (error) {
+      console.error('[v2:exportMicroVideoWord] 异常：', error);
       return { success: false, error: error.message };
     }
   });

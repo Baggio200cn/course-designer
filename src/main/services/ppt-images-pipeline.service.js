@@ -319,9 +319,32 @@ async function runConsistencyPhase(coverImagePath, styleAnchor, pageResults, dep
   const { qualityVisionService } = deps;
   const successPages = pageResults.filter(r => r.status === PAGE_STATUS.SUCCESS && r.imagePath);
 
-  if (successPages.length < 3 || !qualityVisionService) {
-    // 样本太少或无 vision，跳过
-    return { consistencyScore: 8, sampleCount: 0, lowConsistencyCount: 0, needsPause: false, skipped: true };
+  // v4.3.3 测试报告未达标 #2 修复 · 2026-05-20：
+  //   旧实现 silently 返回 consistencyScore=8 + skipped=true，让 caller 误以为"审核过了"。
+  //   现在区分 3 类"未运行"原因 + 显式 consistencyEnabled 标志，便于 UI 与日志诊断。
+  if (!qualityVisionService) {
+    console.warn('[ppt-images-pipeline] ⚠ Phase 3 一致性审核未启用：deps.qualityVisionService 缺失（生产 IPC 未接入流水线 / 测试模式）');
+    return {
+      consistencyScore: null,             // null = 未评分（不再假装 8）
+      sampleCount: 0,
+      lowConsistencyCount: 0,
+      needsPause: false,
+      skipped: true,
+      consistencyEnabled: false,
+      skipReason: 'no-quality-vision-service',
+    };
+  }
+  if (successPages.length < 3) {
+    console.warn(`[ppt-images-pipeline] ⚠ Phase 3 一致性审核样本太少（${successPages.length} < 3），本次跳过`);
+    return {
+      consistencyScore: null,
+      sampleCount: successPages.length,
+      lowConsistencyCount: 0,
+      needsPause: false,
+      skipped: true,
+      consistencyEnabled: true,           // 服务在位，仅因样本不足跳过——下次重跑可能能跑
+      skipReason: 'samples-below-minimum',
+    };
   }
 
   emit('phase', { phase: PHASE.CONSISTENCY, message: '一致性复核...' });
@@ -358,6 +381,8 @@ async function runConsistencyPhase(coverImagePath, styleAnchor, pageResults, dep
     sampleCount: samples.length,
     lowConsistencyCount: lowCount,
     needsPause: lowRatio > 0.25,
+    consistencyEnabled: true,             // v4.3.3 修复 D：真实跑过审核才标 true
+    skipped: false,
   };
 }
 
@@ -464,6 +489,11 @@ async function runPptImagesPipeline(input, deps = {}) {
     totalGenerated, needsReviewCount, failedCount,
     consistencyScore: phase3.consistencyScore,
     consistencySampleCount: phase3.sampleCount,
+    // v4.3.3 测试报告未达标 #2 修复 · 2026-05-20：
+    //   暴露真实"是否做过审核"，UI 能准确显示，老师不再被 score=8 假数据误导
+    consistencyEnabled: phase3.consistencyEnabled === true,
+    consistencySkipped: phase3.skipped === true,
+    consistencySkipReason: phase3.skipReason || null,
   };
 }
 

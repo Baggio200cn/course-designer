@@ -3798,6 +3798,7 @@ export default function V2App() {
                 dt={dt}
                 api={api}
                 courseName={selectedNotebook?.name}
+                notebookId={selectedNotebookId}
               />
             ) : null}
 

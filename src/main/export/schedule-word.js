@@ -75,12 +75,46 @@ function arr(v) { return Array.isArray(v) ? v : []; }
  * @param {Object} params.schedule  — 来自 schedule.service 的 normalize 数据
  * @param {string} params.outputPath
  */
-async function exportScheduleWord({ schedule, outputPath }) {
+/**
+ * Schema 守卫（v4.3.3 测试报告修复 C · 2026-05-20）：
+ *   测试报告 Bug #1 暴露：caller 把数据写到 schedule.rows + lessonNumber/theoryHours/homeworkCount
+ *   字段名，但导出器读 schedule.schedule[].{session,hours,homework}，结果表格主体空白。
+ *   这里硬拒绝：若 schedule.schedule 不存在但 schedule.rows 存在，明确提示字段名不对，
+ *   不再静默生成只有表头的空 docx。
+ */
+function assertScheduleSchema(schedule) {
   if (!schedule || typeof schedule !== 'object') {
-    throw new Error('schedule 内容为空');
+    throw new Error('[exportScheduleWord] schedule 参数必须是对象（不能为空）');
   }
+  // 老/错字段名识别：若 schedule.rows 存在但 schedule.schedule 不存在，明显是 caller 写错
+  if (Array.isArray(schedule.rows) && !Array.isArray(schedule.schedule)) {
+    throw new Error(
+      '[exportScheduleWord] 检测到老字段名 schedule.rows · 正确字段应为 schedule.schedule[]。' +
+      ' 同时把行内字段 lessonNumber/theoryHours/homeworkCount 改为 session/hours/homework。' +
+      ' 详见 v4.3.3 测试报告 Bug #1。'
+    );
+  }
+  if (!Array.isArray(schedule.schedule)) {
+    throw new Error('[exportScheduleWord] 缺 schedule.schedule[] 数组（教学进度表主体）');
+  }
+  if (schedule.schedule.length === 0) {
+    throw new Error('[exportScheduleWord] schedule.schedule[] 为空，无法导出进度表');
+  }
+  // 行级字段名守卫：抽样首行，发现老字段名同样抛
+  const r0 = schedule.schedule[0] || {};
+  if (('lessonNumber' in r0 || 'theoryHours' in r0 || 'homeworkCount' in r0) &&
+      !('session' in r0) && !('hours' in r0) && !('homework' in r0)) {
+    throw new Error(
+      '[exportScheduleWord] schedule.schedule[0] 仍是老字段名 lessonNumber/theoryHours/homeworkCount，' +
+      ' 应改为 session/hours/homework（v4.3.3 测试报告 Bug #1）'
+    );
+  }
+}
+
+async function exportScheduleWord({ schedule, outputPath }) {
+  assertScheduleSchema(schedule);
   if (!outputPath) {
-    throw new Error('outputPath 必填');
+    throw new Error('[exportScheduleWord] outputPath 必填');
   }
 
   const header = schedule.header || {};
@@ -264,4 +298,4 @@ function chunkPairs(items) {
   return out;
 }
 
-module.exports = { exportScheduleWord };
+module.exports = { exportScheduleWord, assertScheduleSchema };

@@ -22,6 +22,7 @@ export default function MicroVideoStage({
   dt,
   api,
   courseName,
+  notebookId,
 }) {
   const mv = microVideoState.microVideo || null;
   const storyboard = mv?.storyboard || [];
@@ -76,6 +77,29 @@ export default function MicroVideoStage({
               复制即梦提示词
             </button>
             <button className="v2-btn v2-btn-secondary" onClick={handleOpenJimeng}>打开即梦</button>
+            {/* v4.3.3 测试报告 #4 修复 · 2026-05-20：导出 Word（按 video_prompt 真实 schema 渲染 5 大段） */}
+            <button
+              className="v2-btn v2-btn-secondary"
+              onClick={async () => {
+                if (!mv) return;
+                try {
+                  const res = await api.exportMicroVideoWordV2?.({ notebookId });
+                  if (res?.success) {
+                    alert(`✅ 已导出：\n${res.data?.filePath}`);
+                  } else if (res?.cancelled) {
+                    // 用户取消保存对话框，不报警
+                  } else {
+                    alert(`❌ 导出失败：${res?.error || '未知错误'}`);
+                  }
+                } catch (e) {
+                  alert(`❌ 导出失败：${e.message}`);
+                }
+              }}
+              disabled={!mv || storyboard.length === 0}
+              title="把当前方案按真实 schema 渲染成 Word（含旁白脚本/分镜表/即梦提示词/拍摄+剪辑指南）"
+            >
+              📄 导出 Word
+            </button>
           </div>
         </div>
 

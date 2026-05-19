@@ -248,6 +248,14 @@ function httpGet(url) {
     let settled = false;
     const done = (fn, val) => { if (!settled) { settled = true; fn(val); } };
 
+    // v4.3.3 测试报告 Bug #2 修复 · 2026-05-20：环境守卫
+    //   非 Electron 环境 require('electron') 返回字符串，net=undefined → net.request 抛
+    //   "Cannot read properties of undefined" 而不是友好提示。这里平静抛出可识别错误。
+    if (!net || typeof net.request !== 'function') {
+      done(reject, Object.assign(new Error('当前运行环境不支持 net.request（非 Electron）'), { kind: 'electron-net-unavailable' }));
+      return;
+    }
+
     const request = net.request({ url, method: 'GET', redirect: 'follow' });
     request.setHeader('User-Agent', DEFAULT_USER_AGENT);
     request.setHeader('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8');
@@ -557,6 +565,20 @@ async function extractFromUrl(url, options = {}) {
     return {
       success: false,
       error: `httpGet 内容不足${httpError ? `（${httpError}）` : ''}，且 skipBrowser=true 跳过了浏览器渲染。`,
+    };
+  }
+
+  // v4.3.3 测试报告 Bug #2 修复 · 2026-05-20：环境守卫
+  //   非 Electron 环境（Node 脚本 / e2e）实例化 BrowserWindow 会抛 "BrowserWindow is not a constructor"
+  //   现在平静降级：返回 success=false + errorKind='browserwindow-unavailable'，
+  //   让 caller 知道是环境限制而不是网络/页面问题。
+  if (typeof BrowserWindow !== 'function') {
+    console.warn(`[web-extractor] BrowserWindow 不可用（非 Electron 环境），跳过第 3 层渲染：${target}`);
+    return {
+      success: false,
+      error: `httpGet 抓取内容不足${httpError ? `（${httpError}）` : ''}，且当前运行环境（Node 脚本 / 非 Electron）不支持 BrowserWindow 渲染。\n建议：① 在 Electron UI 主进程里运行；或 ② 浏览器手动打开此页面 → 复制正文 → 粘贴到下方文本框。`,
+      errorKind: 'browserwindow-unavailable',
+      url: target,
     };
   }
 

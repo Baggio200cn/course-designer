@@ -79,9 +79,45 @@ function cell(text, override = {}, opts = {}) {
   });
 }
 
+/**
+ * Schema 守卫（v4.3.3 测试报告修复 C · 2026-05-20）：
+ *   测试报告交付问题 #5 暴露：caller 写老字段名 lessonOverview/objectivesAchievement/
+ *   teachingHighlights 等，但 exportReportWord 读 implementationOutcomes.{studentEngagement,
+ *   workCompletion,skillTransfer,industryAlignment,ideologicalImpact} +
+ *   reflectionAndImprovement.{achievements,issues,improvements,futurePlans} +
+ *   preInClassPostFlow.{preInClass,inClassPhases,postClass}。
+ *   结果所有字段被认为"未填"，生成几乎空白的 docx。
+ *   这里硬拒绝：检测老字段名 → throw；缺关键字段（implementationOutcomes/
+ *   reflectionAndImprovement/preInClassPostFlow 三选一存在）→ throw。
+ */
+function assertReportSchema(report) {
+  if (!report || typeof report !== 'object') {
+    throw new Error('[exportReportWord] report 参数必须是对象（不能为空）');
+  }
+  // 老/错字段名识别
+  const LEGACY = ['lessonOverview', 'objectivesAchievement', 'teachingHighlights'];
+  const legacyHit = LEGACY.filter((k) => k in report);
+  if (legacyHit.length >= 2) {
+    throw new Error(
+      `[exportReportWord] 检测到老字段名（${legacyHit.join(' / ')}）· 正确 schema 应使用 ` +
+      'implementationOutcomes（5 项）+ reflectionAndImprovement（4 项）+ preInClassPostFlow。' +
+      ' 详见 v4.3.3 测试报告交付问题 #5。'
+    );
+  }
+  // 关键字段三选一必有
+  const hasOutcomes = !!report.implementationOutcomes;
+  const hasReflection = !!report.reflectionAndImprovement;
+  const hasFlow = !!report.preInClassPostFlow;
+  if (!hasOutcomes && !hasReflection && !hasFlow) {
+    throw new Error(
+      '[exportReportWord] report 缺关键字段：implementationOutcomes / reflectionAndImprovement / preInClassPostFlow 至少需要一个'
+    );
+  }
+}
+
 async function exportReportWord({ report, outputPath }) {
-  if (!report) throw new Error('report 内容为空');
-  if (!outputPath) throw new Error('outputPath 必填');
+  assertReportSchema(report);
+  if (!outputPath) throw new Error('[exportReportWord] outputPath 必填');
 
   const children = [];
 
@@ -444,4 +480,5 @@ module.exports = {
   exportReportHtml,
   exportReportPdf,
   buildReportHtml,
+  assertReportSchema,   // v4.3.3 测试报告修复 C · 防字段错配
 };
