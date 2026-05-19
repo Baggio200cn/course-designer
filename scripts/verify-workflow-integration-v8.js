@@ -636,11 +636,12 @@ test('migrations/runner.js · invalid migration 计入 failed（防错放）', (
 
 test('run-e2e-v8.js · mock 模式覆盖 7 阶段闭环（design/ppt/lecture/quiz/homework/video/report）', () => {
   const src = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'e2e', 'run-e2e-v8.js'), 'utf8');
-  // runStage 包裹（design/quiz/homework/video/report）或 recordStage 显式登记（ppt/lecture mock 构造）都算覆盖
+  // runStage 包裹（async service）/ recordStage 显式登记（schedule legacy）/ runMockStage 包裹（mock 构造）都算覆盖
   ['design', 'ppt', 'lecture', 'quiz', 'homework', 'video', 'report'].forEach((stage) => {
     const reA = new RegExp(`runStage\\(['"]${stage}['"]`);
     const reB = new RegExp(`recordStage\\(['"]${stage}['"]`);
-    assert(reA.test(src) || reB.test(src),
+    const reC = new RegExp(`runMockStage\\(['"]${stage}['"]`);
+    assert(reA.test(src) || reB.test(src) || reC.test(src),
       `run-e2e-v8.js mock 路径未覆盖 stage=${stage}（Codex Round 11 P1 #1）`);
   });
 });
@@ -728,8 +729,8 @@ console.log('\n【17】Round 13 治理收口·mock E2E 8 阶段闭环 + validato
 
 test('run-e2e-v8.js · mock 8 阶段闭环（含 schedule）', () => {
   const src = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'e2e', 'run-e2e-v8.js'), 'utf8');
-  // schedule 阶段必须有显式登记
-  assert(/recordStage\(['"]schedule['"]/.test(src),
+  // schedule 阶段必须有显式登记（recordStage 或 runMockStage 都算）
+  assert(/recordStage\(['"]schedule['"]/.test(src) || /runMockStage\(['"]schedule['"]/.test(src),
     'run-e2e-v8.js mock 路径未登记 schedule 阶段（Codex Round 13 P1.1）');
   // 标题必须是"8 stage"不再是"7 stage"
   assert(/8 stage|8 阶段/.test(src), 'run-e2e-v8.js 标题未升级到 8 阶段');
@@ -782,6 +783,116 @@ test('run-e2e-v8.js · video 阶段使用 video_prompt validator', () => {
   const src = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'e2e', 'run-e2e-v8.js'), 'utf8');
   assert(/runStage\(['"]video['"][\s\S]{0,500}['"]video_prompt['"]/.test(src),
     'run-e2e-v8.js video 阶段未传 video_prompt validator');
+});
+
+// ── 【18】Round 14 治理收口·report handler/service 8 阶段对齐 + ppt/lecture strict + schedule_table validator + 老注释清理 ──
+console.log('\n【18】Round 14 治理收口·report 8 阶段对齐 + ppt/lecture strict + schedule_table validator + 老注释清理');
+
+test('Round 14 P1.1 · report.handlers 读取 quiz_set / homework_set artifact', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'ipc', 'v2', 'report.handlers.js'), 'utf8');
+  assert(/pickLatestConfirmed\([^)]*['"]quiz_set['"][^)]*['"]quiz['"]/.test(src),
+    'report.handlers 未读取 quiz_set artifact（Codex Round 14 P1.1）');
+  assert(/pickLatestConfirmed\([^)]*['"]homework_set['"][^)]*['"]homework['"]/.test(src),
+    'report.handlers 未读取 homework_set artifact（Codex Round 14 P1.1）');
+  // 传给 reportSvc.generate 时也要带 quizData/homeworkData
+  assert(/reportSvc\.generate\(\{[\s\S]*?quizData[\s\S]*?homeworkData[\s\S]*?\}\)/.test(src),
+    'report.handlers 调用 reportSvc.generate 未传 quizData/homeworkData');
+});
+
+test('Round 14 P1.1 · report.handlers 不再硬编码"广州纺校"（H14 反兜底）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'ipc', 'v2', 'report.handlers.js'), 'utf8');
+  assert(!/\|\|\s*['"]广州纺校['"]/.test(src),
+    'report.handlers 仍含 "|| \'广州纺校\'" 兜底（违反 H14，Codex Round 11 漏改）');
+});
+
+test('Round 14 P1.2 · report.service.generate 签名含 quizData / homeworkData', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'services', 'report.service.js'), 'utf8');
+  assert(/quizData\s*=\s*null/.test(src), 'report.service.generate 签名缺 quizData 参数');
+  assert(/homeworkData\s*=\s*null/.test(src), 'report.service.generate 签名缺 homeworkData 参数');
+});
+
+test('Round 14 P1.2 · report.service hintBlocks 含测验 + 作业 hint 块', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'services', 'report.service.js'), 'utf8');
+  assert(/上游测验 hint/.test(src), 'report.service 缺"上游测验 hint"块');
+  assert(/上游作业 hint/.test(src), 'report.service 缺"上游作业 hint"块');
+});
+
+test('Round 14 P1.2 · report.service upstreamSummary 含 hasQuiz / hasHomework', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'services', 'report.service.js'), 'utf8');
+  assert(/hasQuiz:\s*Boolean/.test(src), 'upstreamSummary 缺 hasQuiz');
+  assert(/hasHomework:\s*Boolean/.test(src), 'upstreamSummary 缺 hasHomework');
+});
+
+test('Round 14 P1.3 · run-e2e-v8.js schedule/ppt/lecture 走 strict 失败路径（runMockStage 包装）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'e2e', 'run-e2e-v8.js'), 'utf8');
+  assert(/function runMockStage/.test(src),
+    'run-e2e-v8.js 缺 runMockStage helper（Codex Round 14 P1.3）');
+  // schedule / ppt / lecture 必须调 runMockStage
+  ['schedule', 'ppt', 'lecture'].forEach((stage) => {
+    assert(new RegExp(`runMockStage\\(['"]${stage}['"]`).test(src),
+      `run-e2e-v8.js stage=${stage} 未走 runMockStage strict 路径`);
+  });
+  // runMockStage 内部必须把 validator 失败推入 SUMMARY.errors（strict 模式）
+  assert(/runMockStage[\s\S]*?!ARGS\.allowValidatorWarnings[\s\S]*?SUMMARY\.errors\.push/.test(src),
+    'runMockStage 未在 strict 模式把 validator 失败计入 SUMMARY.errors');
+});
+
+test('Round 14 P2.1 · artifact-validator 注册 schedule_table 校验', () => {
+  const v = require(path.resolve(__dirname, '..', 'src', 'main', 'services', 'artifact-validator.service.js'));
+  assert(typeof v.VALIDATORS.schedule_table === 'function',
+    'artifact-validator 缺 schedule_table（Codex Round 14 P2.1）');
+});
+
+test('Round 14 P2.1 · schedule_table validator · 健康样本 valid · 空数组 invalid · 学时不守恒 invalid', () => {
+  const v = require(path.resolve(__dirname, '..', 'src', 'main', 'services', 'artifact-validator.service.js'));
+  // 健康
+  const good = {
+    type: 'schedule_table', schemaVersion: 1, dirty: false,
+    content: {
+      header: { totalHours: 4 },
+      schedule: [
+        { week: 1, session: 1, content: '内容1', hours: 2 },
+        { week: 2, session: 2, content: '内容2', hours: 2 },
+      ],
+    },
+  };
+  const r = v.validateArtifact(good);
+  assert(r.valid, `健康 schedule_table 应 valid，实际 issues: ${r.issues.join(' | ')}`);
+  // 空数组
+  const empty = { ...good, content: { schedule: [] } };
+  assert(!v.validateArtifact(empty).valid, '空 schedule[] 应 invalid');
+  // 学时不守恒
+  const bad = {
+    ...good,
+    content: { header: { totalHours: 10 }, schedule: [{ week: 1, session: 1, content: 'x', hours: 2 }] },
+  };
+  const r3 = v.validateArtifact(bad);
+  assert(!r3.valid && r3.issues.some((i) => /学时不守恒/.test(i)), '总学时不守恒应 invalid');
+});
+
+test('Round 14 P2.2 · contracts.js 顶部注释清理"前 5 阶段"残留', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'v2', 'contracts.js'), 'utf8');
+  // 老版"AI 汇总前 5 阶段"必须改为 8 阶段对齐说法
+  assert(!/AI\s*汇总前\s*5\s*阶段/.test(src),
+    'contracts.js 顶部仍残留"AI 汇总前 5 阶段"老注释');
+  assert(!/report\s*需要前\s*5\s*阶段/.test(src),
+    'contracts.js 仍残留"report 需要前 5 阶段"老注释');
+});
+
+test('Round 14 P2.2 · report.service 顶部注释升级到 7 阶段产物（8 阶段对齐）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'services', 'report.service.js'), 'utf8');
+  assert(!/前\s*5\s*个阶段（schedule\/design\/lecture\/ppt\/video）/.test(src),
+    'report.service 顶部注释仍说"前 5 个阶段"老版');
+  assert(/上游\s*7\s*个阶段产物/.test(src) || /上游 7 阶段/.test(src),
+    'report.service 顶部注释未升级到"上游 7 个阶段产物"');
+});
+
+test('Round 14 P2.2 · report.handlers 顶部注释升级到上游 7 阶段', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'ipc', 'v2', 'report.handlers.js'), 'utf8');
+  assert(!/AI\s*汇总前\s*5\s*阶段产物/.test(src),
+    'report.handlers 注释仍说"AI 汇总前 5 阶段产物"');
+  assert(/上游\s*7\s*阶段产物/.test(src) || /上游 7 阶段/.test(src),
+    'report.handlers 注释未升级到"上游 7 阶段产物"');
 });
 
 test('report.service prompt · 从"上游 5 个 artifact"升级到"上游阶段产物 hint"（8 阶段对齐）', () => {

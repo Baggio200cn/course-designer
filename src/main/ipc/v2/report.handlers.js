@@ -1,8 +1,8 @@
 /**
- * v2 教学实施报告 handlers（Phase-9 阶段 C-4）
+ * v2 教学实施报告 handlers（Phase-9 阶段 C-4 · v4.3.3 Codex Round 14 P1.1 升级 8 阶段对齐）
  *
  * 处理的 channel：
- *   v2:generateReport      生成教学实施报告（AI 汇总前 5 阶段产物）
+ *   v2:generateReport      生成教学实施报告（AI 汇总上游 7 阶段产物 · schedule/design/ppt/lecture/quiz/homework/video）
  *   v2:saveReport          保存（老师手填实施成效 / 反思改进后）
  *   v2:confirmReport       确认（最终阶段，无下游解锁）
  *   v2:getReportData       读取当前 notebookId 的实施报告
@@ -12,6 +12,7 @@
  * 注意：
  *   - report 是 STAGE_ORDER 的最后阶段，confirm 后无下游可解锁，仅做归档标记
  *   - 生成时 AI 只填"自动汇总区"；老师手填实施成效 / 反思改进
+ *   - 上游 7 阶段中任何一个 artifact 缺失都允许，AI 不得编造缺失阶段的内容
  */
 
 const path = require('path');
@@ -48,12 +49,15 @@ function register(ipcMain, getDeps) {
         : db.getNotebookById(notebookId);
       if (!notebook) return { success: false, error: 'Notebook not found' };
 
-      // 取上游 5 个 confirmed artifact 作为 hint
+      // v4.3.3 Codex Round 14 P1.1：取上游 7 阶段 confirmed artifact 作为 hint
+      // schedule / design / ppt / lecture / quiz / homework / video
       const allArtifacts = typeof db.listArtifacts === 'function' ? db.listArtifacts({ notebookId }) : [];
       const scheduleData = pickLatestConfirmed(allArtifacts, 'schedule_table', 'schedule')?.content || null;
       const designData = pickLatestConfirmed(allArtifacts, 'design_doc', 'design')?.content || null;
-      const lectureData = pickLatestConfirmed(allArtifacts, 'lecture_final', 'lecture')?.content || null;
       const pptData = pickLatestConfirmed(allArtifacts, 'ppt_outline', 'ppt')?.content || null;
+      const lectureData = pickLatestConfirmed(allArtifacts, 'lecture_final', 'lecture')?.content || null;
+      const quizData = pickLatestConfirmed(allArtifacts, 'quiz_set', 'quiz')?.content || null;
+      const homeworkData = pickLatestConfirmed(allArtifacts, 'homework_set', 'homework')?.content || null;
       const microVideoData = pickLatestConfirmed(allArtifacts, 'video_prompt', 'video')?.content || null;
 
       const config = resolveProviderConfig({ payload, db });
@@ -62,8 +66,10 @@ function register(ipcMain, getDeps) {
         return { success: false, error: '未配置有效的 AI 客户端' };
       }
 
+      // v4.3.3 Codex Round 14 P1.1：H14 反模板化 · 不再硬编码"广州纺校"兜底
+      //   缺失时留空，让 report.service 内部的"（未填，AI 请勿编造，从产物中查找）"提示生效
       const courseContext = {
-        school: payload.school || notebook.school || '广州纺校',
+        school: payload.school || notebook.school || '',
         academicYear: payload.academicYear || notebook.academicYear || '',
         term: payload.term || notebook.term || '',
         teacher: payload.teacher || notebook.teacher || '',
@@ -77,8 +83,11 @@ function register(ipcMain, getDeps) {
         courseName: payload.courseName || notebook.name || '课程',
         scheduleData,
         designData,
-        lectureData,
         pptData,
+        lectureData,
+        // v4.3.3 Codex Round 14 P1.1：传入 quiz / homework 数据
+        quizData,
+        homeworkData,
         microVideoData,
         courseContext,
       });

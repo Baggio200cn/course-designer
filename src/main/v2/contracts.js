@@ -7,14 +7,17 @@
  * 详见 .claude/notes/2026-05-09-phase9-h1-exception.md
  *
  * 【6 阶段依赖链（驭课 Agent v4.0.0）】
- *   schedule → design → lecture → ppt → video → report
+ *   schedule → design → ppt → lecture → quiz → homework → video → report
+ *   （v4.3.3 H1 例外 · 8 阶段架构 · 2026-05-18 落地）
  *
  *   - schedule（教学进度表）：18 周排课表（按周次 × 6 列）
  *   - design（教学设计）：课前/课中/课后 + 信息化 + 考核权重
- *   - lecture（课堂讲稿）：A/B/C → 正式稿（含 Phase-8.5 五段式 / 9 维审核）
  *   - ppt（教学课件）：页级规划 + 一键批量配图
+ *   - lecture（课堂讲稿）：A/B/C → 正式稿（含 Phase-8.5 五段式 / 9 维审核）
+ *   - quiz（在线测验）：每页 PPT 末尾 1-2 道题 + 章节末综合题
+ *   - homework（课后作业）：基于讲稿要点 + PPT 骨架的作业题
  *   - video（微课视频）：脚本 + 分镜 + 即梦提示词 + 拍摄说明 + 剪辑思路
- *   - report（教学实施报告）：AI 汇总前 5 阶段 + 老师手填反思
+ *   - report（教学实施报告）：AI 汇总上游 7 阶段产物 + 老师手填反思
  *
  * 【与旧 v3.x 的差异】
  *   - 旧：framework → lecture → ppt → video（4 阶段）
@@ -26,7 +29,7 @@
  * 【Stage 依赖原则】
  *   - 上一阶段必须 confirmed=true 才能解锁下一阶段
  *   - schedule 是起点（无前置）
- *   - report 需要前 5 阶段全部 confirmed 才能生成（汇总用）
+ *   - report 需要上游 7 阶段（schedule/design/ppt/lecture/quiz/homework/video）按本节实际生成情况汇总
  */
 
 // ── 8 阶段链（v4.3.3 H1 例外 · 2026-05-18） ──────────────────────────────────

@@ -16,6 +16,47 @@
 'use strict';
 
 const VALIDATORS = {
+  // schedule_table（v4.3.3 Codex Round 14 P2.1）：教学进度表
+  //   关键检查：schedule[] 非空 / 每行 week+session+content+hours 合法 / 总学时守恒
+  schedule_table(artifact) {
+    const issues = [];
+    const c = artifact.content || {};
+    const rows = Array.isArray(c.schedule) ? c.schedule : [];
+    if (rows.length === 0) {
+      issues.push('schedule[] 数组为空（进度表至少应有 1 行）');
+      return issues;
+    }
+    rows.forEach((row, i) => {
+      const w = Number(row?.week);
+      if (!Number.isFinite(w) || w <= 0 || w > 52) {
+        issues.push(`第 ${i + 1} 行: week 非正整数或超出 1-52（实际: ${row?.week}）`);
+      }
+      const s = Number(row?.session);
+      if (!Number.isFinite(s) || s <= 0) {
+        issues.push(`第 ${i + 1} 行: session 缺失或非正整数（实际: ${row?.session}）`);
+      }
+      const content = String(row?.content || '').trim();
+      if (!content) {
+        issues.push(`第 ${i + 1} 行: content 缺失（不允许空字符串）`);
+      } else if (/^\[第\s*\d+\s*行内容缺失/.test(content)) {
+        issues.push(`第 ${i + 1} 行: content 仍是 normalize 占位（"[第 N 行内容缺失]"）· 老师需要补内容`);
+      }
+      const h = Number(row?.hours);
+      if (!Number.isFinite(h) || h <= 0) {
+        issues.push(`第 ${i + 1} 行: hours 缺失或非正数（实际: ${row?.hours}）`);
+      }
+    });
+    // 总学时守恒（仅在 header.totalHours 存在时检查）
+    const target = Number(c.header?.totalHours);
+    if (Number.isFinite(target) && target > 0) {
+      const sum = rows.reduce((acc, r) => acc + (Number(r?.hours) || 0), 0);
+      if (Math.abs(sum - target) > 0.5) {
+        issues.push(`总学时不守恒：schedule[].hours 合计 ${sum} ≠ header.totalHours ${target}（容差 0.5）`);
+      }
+    }
+    return issues;
+  },
+
   // ppt_outline：每页必须有 pageNumber / title / pageType / keyContent
   ppt_outline(artifact) {
     const issues = [];

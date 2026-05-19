@@ -212,22 +212,46 @@ function recordStage(name, status, durationMs, extra = {}) {
       }
     }
 
+    // v4.3.3 Codex Round 14 P1.3：手工构造 stage（schedule/ppt/lecture）也走 strict 失败路径
+    //   validator 失败时计入 SUMMARY.errors（除非 --allow-validator-warnings），让进程退出码 ≠ 0
+    function runMockStage(name, artifactType, artifact, metaExtra = {}) {
+      let validatorResult = null;
+      if (artifactType) {
+        validatorResult = validateArtifact(artifact);
+        if (validatorResult.valid) {
+          log(`✓ ${name} 构造 (mock) · validator pass`);
+        } else {
+          log(`✓ ${name} 构造 (mock) · ⚠ validator issues: ${validatorResult.issues.slice(0, 3).join(' | ')}`);
+          if (!ARGS.allowValidatorWarnings) {
+            SUMMARY.errors.push({
+              stage: name,
+              kind: 'validator',
+              error: `artifact validator 失败（${validatorResult.issues.length} 条）: ${validatorResult.issues.join(' | ')}`,
+            });
+          }
+        }
+      } else {
+        log(`✓ ${name} 构造 (mock)`);
+      }
+      recordStage(name, 'ok', 0, {
+        ...metaExtra,
+        validatorValid: validatorResult?.valid,
+        validatorIssues: validatorResult?.issues || [],
+      });
+    }
+
     // Stage 1 schedule（教学进度表）：老师上传 Word 解析后的产物，mock 模式直接构造
-    //   schedule_table 在 8 阶段中是起点，无 service 调用（解析在 schedule.handlers）
-    //   v4.3.3 暂未在 artifact-validator 注册 schedule_table；本步仅登记 stage，
-    //   未来补 schedule_table validator 时此处自动接入 runStage 包装
+    //   v4.3.3 Codex Round 14 P2.1：schedule_table validator 已注册，本步走 strict 路径
     const mockSchedule = {
-      courseName: ctx.courseName,
-      semester: '2026 春',
-      totalWeeks: 18,
-      lessonsPerWeek: 1,
-      weeks: [
-        { weekNumber: 1, lessonNumber: 1, topic: ctx.lessonMeta.topic, chapter: ctx.lessonMeta.chapter, theoryHours: ctx.lessonMeta.theoryHours, practiceHours: ctx.lessonMeta.practiceHours },
+      header: { totalHours: 4, theoryHours: 2, practiceHours: 2, school: 'mock 学校' },
+      schedule: [
+        { week: 1, session: 1, content: '第 1 节内容', hours: 2, chapter: '一' },
+        { week: 2, session: 2, content: '第 2 节内容', hours: 2, chapter: '一' },
       ],
     };
     fs.writeFileSync(path.join(ARGS.outDir, '01-schedule-mock.json'), JSON.stringify(mockSchedule, null, 2));
-    log('✓ schedule 构造 (mock) · 进度表 1/18 周登记');
-    recordStage('schedule', 'ok', 0, { weeks: 18, lessonsLoaded: 1 });
+    const scheduleArt = { type: 'schedule_table', schemaVersion: 1, dirty: false, metadata: { lessonNumber: 1 }, content: mockSchedule };
+    runMockStage('schedule', 'schedule_table', scheduleArt, { weeks: 2, lessonsLoaded: 2 });
 
     // Stage 2 design
     const { generate: generateDesign } = require('../../src/main/services/design.service');
@@ -239,6 +263,7 @@ function recordStage(name, status, durationMs, extra = {}) {
     }), null);  // design_doc validator 暂未定义，跳过
 
     // Stage 3 ppt：mock 模式直接构造（pipeline-v2 是个复杂 orchestrator，单元测不跑全套）
+    // v4.3.3 Codex Round 14 P1.3：走 strict 失败路径（validator 失败计入 errors）
     const mockPpt = {
       pages: [
         { pageNumber: 1, pageType: '封面', title: 'Mock 封面', subtitle: 'mock', keyContent: ['核心1', '核心2'], speakerNotes: 'mock' },
@@ -247,19 +272,16 @@ function recordStage(name, status, durationMs, extra = {}) {
     };
     fs.writeFileSync(path.join(ARGS.outDir, '03-ppt-mock.json'), JSON.stringify(mockPpt, null, 2));
     const pptArt = { type: 'ppt_outline', schemaVersion: 1, dirty: false, metadata: { lessonNumber: 1 }, content: mockPpt, sourceArtifactIds: [101] };
-    const pptValid = validateArtifact(pptArt);
-    log(`✓ ppt 构造 (mock) · validator ${pptValid.valid ? 'pass' : '⚠ ' + pptValid.issues.length}`);
-    recordStage('ppt', 'ok', 0, { validatorValid: pptValid.valid, validatorIssues: pptValid.issues });
+    runMockStage('ppt', 'ppt_outline', pptArt);
 
     // Stage 4 lecture：mock 模式构造合规讲稿
+    // v4.3.3 Codex Round 14 P1.3：走 strict 失败路径
     const mockLecture = {
       finalScript: '## 第 1 页·《Mock》\n**教师讲述：** mock 讲稿内容超过 200 字。' + '好啊好啊。'.repeat(50) + '\n## 第 2 页·《Mock 2》\n**教师讲述：** 第二页。' + '好啊。'.repeat(30),
     };
     fs.writeFileSync(path.join(ARGS.outDir, '04-lecture-mock.json'), JSON.stringify(mockLecture, null, 2));
     const lectureArt = { type: 'lecture_final', schemaVersion: 1, dirty: false, metadata: { lessonNumber: 1, pptPageCount: 2 }, content: mockLecture, sourceArtifactIds: [pptArt.id || 102] };
-    const lectureValid = validateArtifact(lectureArt);
-    log(`✓ lecture 构造 (mock) · validator ${lectureValid.valid ? 'pass' : '⚠ ' + lectureValid.issues.length}`);
-    recordStage('lecture', 'ok', 0, { validatorValid: lectureValid.valid, validatorIssues: lectureValid.issues });
+    runMockStage('lecture', 'lecture_final', lectureArt);
 
     // Stage 5 quiz
     const { generateQuizFromPpt } = require('../../src/main/services/quiz.service');

@@ -1,14 +1,15 @@
 /**
  * report.service.js — 教学实施报告生成服务（驭课 Agent v4.0.0 / Phase-9 C-4）
  *
- * 职责：
- *   AI 自动汇总前 5 个阶段（schedule/design/lecture/ppt/video）的核心要点；
+ * 职责（v4.3.3 Codex Round 14 P2.2：8 阶段对齐）：
+ *   AI 自动汇总上游 7 个阶段产物（schedule/design/ppt/lecture/quiz/homework/video）的核心要点；
  *   老师后续手填"实施成效"和"反思改进"两节。
  *
  * 设计要点：
  *   - implementationOutcomes 5 项 + reflectionAndImprovement 4 项是老师手填区
  *     normalize 时**必须**清空成占位（不让 AI 杜撰）
- *   - 上游 5 个 artifact 通过 ctx 注入；缺哪个就把对应字段留空，但不报错
+ *   - 上游 7 个阶段 artifact 通过 ctx 注入（按本节实际生成情况，缺哪个就把对应字段留空，
+ *     **但 AI 不得编造缺失阶段的内容**）
  *
  * 数据流：
  *   IPC handler (v2:generateReport) → 本 service.generate(...) → AI chatJson →
@@ -169,12 +170,14 @@ function normalizeReport(parsed, ctx = {}) {
     reflectionAndImprovement[key] = [];
   });
 
-  // ── 统计 ──
+  // ── 统计（v4.3.3 Codex Round 14 P1.2：补 quiz / homework）──
   const upstreamSummary = {
     hasSchedule: Boolean(ctx.hasSchedule),
     hasDesign: Boolean(ctx.hasDesign),
-    hasLecture: Boolean(ctx.hasLecture),
     hasPpt: Boolean(ctx.hasPpt),
+    hasLecture: Boolean(ctx.hasLecture),
+    hasQuiz: Boolean(ctx.hasQuiz),
+    hasHomework: Boolean(ctx.hasHomework),
     hasMicroVideo: Boolean(ctx.hasMicroVideo),
   };
   const upstreamCount = Object.values(upstreamSummary).filter(Boolean).length;
@@ -222,16 +225,19 @@ function normalizeReport(parsed, ctx = {}) {
 // ── 主入口：生成 ────────────────────────────────────────────────────────
 
 /**
- * 生成教学实施报告（AI 汇总前 5 阶段产物 + 留出老师手填区）
+ * 生成教学实施报告（v4.3.3 Codex Round 14：AI 汇总上游 7 阶段产物 + 留出老师手填区）
  *
  * @param {Object} params
  * @param {Object} params.aiClient        - AI 客户端（必须有 chatJson 方法）
  * @param {string} params.courseName      - 课程名
- * @param {Object} [params.scheduleData]  - schedule artifact
- * @param {Object} [params.designData]    - design artifact
- * @param {Object} [params.lectureData]   - lecture artifact
- * @param {Object} [params.pptData]       - ppt artifact
- * @param {Object} [params.microVideoData]- video_prompt artifact
+ * @param {Object} [params.scheduleData]  - schedule artifact（教学进度表）
+ * @param {Object} [params.designData]    - design artifact（教学设计）
+ * @param {Object} [params.pptData]       - ppt artifact（PPT 大纲）
+ * @param {Object} [params.lectureData]   - lecture artifact（讲稿）
+ * @param {Object} [params.quizData]      - quiz_set artifact（测验题）· v4.3.3 Codex Round 14 新增
+ * @param {Object} [params.homeworkData]  - homework_set artifact（作业）· v4.3.3 Codex Round 14 新增
+ * @param {Object} [params.microVideoData]- video_prompt artifact（微课视频方案）
+ * @param {Array}  [params.lessonArtifacts] - 多节聚合模式：每项含 quizData/homeworkData/videoData 等
  * @param {Object} [params.courseContext]
  */
 /**
@@ -261,6 +267,9 @@ function aggregateLessonArtifacts(lessonArtifacts) {
       designData: last.designData || null,
       pptData: last.pptData || null,
       lectureData: last.lectureData || null,
+      // v4.3.3 Codex Round 14 P1.2：聚合也补 quiz / homework
+      quizData: last.quizData || null,
+      homeworkData: last.homeworkData || null,
       microVideoData: last.videoData || null,
     },
     summaries,
@@ -274,6 +283,9 @@ async function generate({
   designData = null,
   lectureData = null,
   pptData = null,
+  // v4.3.3 Codex Round 14 P1.2：新增 quizData / homeworkData 参数（8 阶段对齐）
+  quizData = null,
+  homeworkData = null,
   microVideoData = null,
   // v4.3.3 Codex Round 10 P2.3：新增 lessonArtifacts 数组（多节合并模式）
   //   传入后会聚合每节产物 + 把每节摘要拼进 prompt hint
@@ -296,6 +308,9 @@ async function generate({
       if (!designData) designData = aggResult.aggregated.designData;
       if (!pptData) pptData = aggResult.aggregated.pptData;
       if (!lectureData) lectureData = aggResult.aggregated.lectureData;
+      // v4.3.3 Codex Round 14 P1.2：聚合也兜底 quiz/homework
+      if (!quizData) quizData = aggResult.aggregated.quizData;
+      if (!homeworkData) homeworkData = aggResult.aggregated.homeworkData;
       if (!microVideoData) microVideoData = aggResult.aggregated.microVideoData;
     }
   }
@@ -358,10 +373,40 @@ async function generate({
   }
 
   if (pptData) {
-    const slideCount = Array.isArray(pptData.slides) ? pptData.slides.length : 0;
+    // v4.3.3 Codex Round 14 P1.2：pptData 真实字段是 pages（不是 slides），slides 是早期别名
+    const pageCount = Array.isArray(pptData.pages) ? pptData.pages.length
+                    : Array.isArray(pptData.pptPages) ? pptData.pptPages.length
+                    : Array.isArray(pptData.slides) ? pptData.slides.length : 0;
     hintBlocks.push([
       '## 上游 PPT hint',
-      `幻灯片数量：${slideCount}`,
+      `幻灯片数量：${pageCount}`,
+    ].join('\n'));
+  }
+
+  // v4.3.3 Codex Round 14 P1.2：上游测验 hint
+  if (quizData) {
+    const qs = Array.isArray(quizData.questions) ? quizData.questions : [];
+    const typeCount = qs.reduce((acc, q) => {
+      const t = q?.type || 'unknown';
+      acc[t] = (acc[t] || 0) + 1;
+      return acc;
+    }, {});
+    const typeStr = Object.entries(typeCount).map(([k, v]) => `${k}=${v}`).join(' / ') || '（无）';
+    hintBlocks.push([
+      '## 上游测验 hint',
+      `题目数量：${qs.length}`,
+      `题型分布：${typeStr}`,
+    ].join('\n'));
+  }
+
+  // v4.3.3 Codex Round 14 P1.2：上游作业 hint
+  if (homeworkData) {
+    const ts = Array.isArray(homeworkData.tasks) ? homeworkData.tasks : [];
+    const totalMin = ts.reduce((s, t) => s + (Number(t?.estimatedMinutes) || 0), 0);
+    hintBlocks.push([
+      '## 上游作业 hint',
+      `作业任务数：${ts.length}`,
+      `预计总耗时：${totalMin} 分钟`,
     ].join('\n'));
   }
 
@@ -438,6 +483,9 @@ async function generate({
     hasDesign: !!designData,
     hasLecture: !!lectureData,
     hasPpt: !!pptData,
+    // v4.3.3 Codex Round 14 P1.2：暴露 quiz/homework 上游存在性
+    hasQuiz: !!quizData,
+    hasHomework: !!homeworkData,
     hasMicroVideo: !!microVideoData,
   });
 
