@@ -25,82 +25,12 @@ const {
   exportReportHtml,
   exportReportPdf,
 } = require('../../export/report-export');
-
-function pickLatestConfirmed(artifacts, type, stage) {
-  return artifacts
-    .filter((a) => a.type === type && a.stage === stage && a.confirmed)
-    .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))[0];
-}
-
-/**
- * v4.3.3 Codex Round 16：抽出通用助手 · 收集 report 阶段需要的 7 个上游 artifact 血缘
- *   返回：{
- *     ids: number[]      // 7 个 upstream artifact 的非空 id 列表（用于 sourceArtifactIds）
- *     map: { schedule, design, ppt, lecture, quiz, homework, video } // 详细 id 映射，可写 metadata
- *     objs: { ... }       // 完整 artifact 对象（供 generateReport 取 .content）
- *   }
- * 同时被 v2:generateReport 和 v2:saveReport（新建分支兜底）复用，
- * 避免 saveReport 新建路径产生 sourceArtifactIds=[] 的 invalid 报告 artifact
- */
-function collectReportUpstream(db, notebookId) {
-  const allArtifacts = typeof db.listArtifacts === 'function' ? db.listArtifacts({ notebookId }) : [];
-  const objs = {
-    schedule: pickLatestConfirmed(allArtifacts, 'schedule_table', 'schedule') || null,
-    design: pickLatestConfirmed(allArtifacts, 'design_doc', 'design') || null,
-    ppt: pickLatestConfirmed(allArtifacts, 'ppt_outline', 'ppt') || null,
-    lecture: pickLatestConfirmed(allArtifacts, 'lecture_final', 'lecture') || null,
-    quiz: pickLatestConfirmed(allArtifacts, 'quiz_set', 'quiz') || null,
-    homework: pickLatestConfirmed(allArtifacts, 'homework_set', 'homework') || null,
-    video: pickLatestConfirmed(allArtifacts, 'video_prompt', 'video') || null,
-  };
-  const map = {
-    schedule: objs.schedule?.id || null,
-    design: objs.design?.id || null,
-    ppt: objs.ppt?.id || null,
-    lecture: objs.lecture?.id || null,
-    quiz: objs.quiz?.id || null,
-    homework: objs.homework?.id || null,
-    video: objs.video?.id || null,
-  };
-  const ids = Object.values(map).filter((id) => Number.isFinite(id) && id > 0);
-  return { ids, map, objs, allArtifacts };
-}
-
-/**
- * v4.3.3 Codex Round 16：saveReport 新建分支用 · 兜底 sourceArtifactIds 推断顺序：
- *   1) 复用最近一份 implementation_report 的 sourceArtifactIds（保留生成时血缘）
- *   2) 从当前 7 个上游 artifact 重建（老师可能未做 confirm 但 artifact 已存在）
- * 都拿不到时返回空数组（validator 会标 invalid，但至少 caller 可见 metadata.warning）
- */
-function inferReportSourceArtifactIds(db, notebookId) {
-  const allArtifacts = typeof db.listArtifacts === 'function' ? db.listArtifacts({ notebookId }) : [];
-  // 1) 优先复用最近一份 implementation_report 的血缘
-  const prevReport = allArtifacts
-    .filter((a) => a.type === 'implementation_report' && a.stage === 'report')
-    .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))[0];
-  if (prevReport && Array.isArray(prevReport.sourceArtifactIds) && prevReport.sourceArtifactIds.length > 0) {
-    return { ids: prevReport.sourceArtifactIds.slice(), source: 'inherit-previous-report' };
-  }
-  // 2) 重建：从 7 个上游 artifact 取 id（不要求 confirmed，因为老师可能改了顺序）
-  const types = [
-    { type: 'schedule_table', stage: 'schedule' },
-    { type: 'design_doc', stage: 'design' },
-    { type: 'ppt_outline', stage: 'ppt' },
-    { type: 'lecture_final', stage: 'lecture' },
-    { type: 'quiz_set', stage: 'quiz' },
-    { type: 'homework_set', stage: 'homework' },
-    { type: 'video_prompt', stage: 'video' },
-  ];
-  const ids = types
-    .map(({ type, stage }) => {
-      const a = allArtifacts
-        .filter((x) => x.type === type && x.stage === stage)
-        .sort((x, y) => new Date(y.updatedAt || y.createdAt) - new Date(x.updatedAt || x.createdAt))[0];
-      return a?.id || null;
-    })
-    .filter((id) => Number.isFinite(id) && id > 0);
-  return { ids, source: 'rebuild-from-upstream' };
-}
+// v4.3.3 Codex Round 17：上游血缘 helper 抽到独立纯模块（脱 electron 依赖，行为可单测）
+const {
+  pickLatestConfirmed,
+  collectReportUpstream,
+  inferReportSourceArtifactIds,
+} = require('./report-upstream.helper');
 
 function register(ipcMain, getDeps) {
   // ── 生成 ───────────────────────────────────────────────────────────
