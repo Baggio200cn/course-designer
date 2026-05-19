@@ -32,6 +32,76 @@ function pickLatestConfirmed(artifacts, type, stage) {
     .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))[0];
 }
 
+/**
+ * v4.3.3 Codex Round 16：抽出通用助手 · 收集 report 阶段需要的 7 个上游 artifact 血缘
+ *   返回：{
+ *     ids: number[]      // 7 个 upstream artifact 的非空 id 列表（用于 sourceArtifactIds）
+ *     map: { schedule, design, ppt, lecture, quiz, homework, video } // 详细 id 映射，可写 metadata
+ *     objs: { ... }       // 完整 artifact 对象（供 generateReport 取 .content）
+ *   }
+ * 同时被 v2:generateReport 和 v2:saveReport（新建分支兜底）复用，
+ * 避免 saveReport 新建路径产生 sourceArtifactIds=[] 的 invalid 报告 artifact
+ */
+function collectReportUpstream(db, notebookId) {
+  const allArtifacts = typeof db.listArtifacts === 'function' ? db.listArtifacts({ notebookId }) : [];
+  const objs = {
+    schedule: pickLatestConfirmed(allArtifacts, 'schedule_table', 'schedule') || null,
+    design: pickLatestConfirmed(allArtifacts, 'design_doc', 'design') || null,
+    ppt: pickLatestConfirmed(allArtifacts, 'ppt_outline', 'ppt') || null,
+    lecture: pickLatestConfirmed(allArtifacts, 'lecture_final', 'lecture') || null,
+    quiz: pickLatestConfirmed(allArtifacts, 'quiz_set', 'quiz') || null,
+    homework: pickLatestConfirmed(allArtifacts, 'homework_set', 'homework') || null,
+    video: pickLatestConfirmed(allArtifacts, 'video_prompt', 'video') || null,
+  };
+  const map = {
+    schedule: objs.schedule?.id || null,
+    design: objs.design?.id || null,
+    ppt: objs.ppt?.id || null,
+    lecture: objs.lecture?.id || null,
+    quiz: objs.quiz?.id || null,
+    homework: objs.homework?.id || null,
+    video: objs.video?.id || null,
+  };
+  const ids = Object.values(map).filter((id) => Number.isFinite(id) && id > 0);
+  return { ids, map, objs, allArtifacts };
+}
+
+/**
+ * v4.3.3 Codex Round 16：saveReport 新建分支用 · 兜底 sourceArtifactIds 推断顺序：
+ *   1) 复用最近一份 implementation_report 的 sourceArtifactIds（保留生成时血缘）
+ *   2) 从当前 7 个上游 artifact 重建（老师可能未做 confirm 但 artifact 已存在）
+ * 都拿不到时返回空数组（validator 会标 invalid，但至少 caller 可见 metadata.warning）
+ */
+function inferReportSourceArtifactIds(db, notebookId) {
+  const allArtifacts = typeof db.listArtifacts === 'function' ? db.listArtifacts({ notebookId }) : [];
+  // 1) 优先复用最近一份 implementation_report 的血缘
+  const prevReport = allArtifacts
+    .filter((a) => a.type === 'implementation_report' && a.stage === 'report')
+    .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))[0];
+  if (prevReport && Array.isArray(prevReport.sourceArtifactIds) && prevReport.sourceArtifactIds.length > 0) {
+    return { ids: prevReport.sourceArtifactIds.slice(), source: 'inherit-previous-report' };
+  }
+  // 2) 重建：从 7 个上游 artifact 取 id（不要求 confirmed，因为老师可能改了顺序）
+  const types = [
+    { type: 'schedule_table', stage: 'schedule' },
+    { type: 'design_doc', stage: 'design' },
+    { type: 'ppt_outline', stage: 'ppt' },
+    { type: 'lecture_final', stage: 'lecture' },
+    { type: 'quiz_set', stage: 'quiz' },
+    { type: 'homework_set', stage: 'homework' },
+    { type: 'video_prompt', stage: 'video' },
+  ];
+  const ids = types
+    .map(({ type, stage }) => {
+      const a = allArtifacts
+        .filter((x) => x.type === type && x.stage === stage)
+        .sort((x, y) => new Date(y.updatedAt || y.createdAt) - new Date(x.updatedAt || x.createdAt))[0];
+      return a?.id || null;
+    })
+    .filter((id) => Number.isFinite(id) && id > 0);
+  return { ids, source: 'rebuild-from-upstream' };
+}
+
 function register(ipcMain, getDeps) {
   // ── 生成 ───────────────────────────────────────────────────────────
   ipcMain.handle('v2:generateReport', async (event, payload = {}) => {
@@ -49,17 +119,11 @@ function register(ipcMain, getDeps) {
         : db.getNotebookById(notebookId);
       if (!notebook) return { success: false, error: 'Notebook not found' };
 
-      // v4.3.3 Codex Round 14 P1.1：取上游 7 阶段 confirmed artifact 作为 hint
-      // v4.3.3 Codex Round 15 P1.1：保留 artifact 对象（不只 .content），用其 id 组装 sourceArtifactIds 写报告血缘
+      // v4.3.3 Codex Round 16：用 collectReportUpstream 统一收集 7 阶段上游
       // schedule / design / ppt / lecture / quiz / homework / video
-      const allArtifacts = typeof db.listArtifacts === 'function' ? db.listArtifacts({ notebookId }) : [];
-      const scheduleArt = pickLatestConfirmed(allArtifacts, 'schedule_table', 'schedule') || null;
-      const designArt = pickLatestConfirmed(allArtifacts, 'design_doc', 'design') || null;
-      const pptArt = pickLatestConfirmed(allArtifacts, 'ppt_outline', 'ppt') || null;
-      const lectureArt = pickLatestConfirmed(allArtifacts, 'lecture_final', 'lecture') || null;
-      const quizArt = pickLatestConfirmed(allArtifacts, 'quiz_set', 'quiz') || null;
-      const homeworkArt = pickLatestConfirmed(allArtifacts, 'homework_set', 'homework') || null;
-      const microVideoArt = pickLatestConfirmed(allArtifacts, 'video_prompt', 'video') || null;
+      const upstream = collectReportUpstream(db, notebookId);
+      const { schedule: scheduleArt, design: designArt, ppt: pptArt, lecture: lectureArt,
+              quiz: quizArt, homework: homeworkArt, video: microVideoArt } = upstream.objs;
       const scheduleData = scheduleArt?.content || null;
       const designData = designArt?.content || null;
       const pptData = pptArt?.content || null;
@@ -67,10 +131,8 @@ function register(ipcMain, getDeps) {
       const quizData = quizArt?.content || null;
       const homeworkData = homeworkArt?.content || null;
       const microVideoData = microVideoArt?.content || null;
-      // v4.3.3 Codex Round 15 P1.1：上游血缘 ID 列表（artifact-validator implementation_report 必检）
-      const upstreamArtifactIds = [scheduleArt, designArt, pptArt, lectureArt, quizArt, homeworkArt, microVideoArt]
-        .map((a) => a?.id)
-        .filter((id) => Number.isFinite(id) && id > 0);
+      // 上游血缘 ID 列表（artifact-validator implementation_report 必检）
+      const upstreamArtifactIds = upstream.ids;
 
       const config = resolveProviderConfig({ payload, db });
       const aiClient = createAiClientByConfig(config);
@@ -123,15 +185,7 @@ function register(ipcMain, getDeps) {
           upstreamSummary: result.data.report._stats?.upstreamSummary,
           // 留存详细血缘类型映射，便于未来诊断
           upstreamArtifactIds,
-          upstreamArtifactTypes: {
-            schedule: scheduleArt?.id || null,
-            design: designArt?.id || null,
-            ppt: pptArt?.id || null,
-            lecture: lectureArt?.id || null,
-            quiz: quizArt?.id || null,
-            homework: homeworkArt?.id || null,
-            video: microVideoArt?.id || null,
-          },
+          upstreamArtifactTypes: upstream.map,
         },
       });
 
@@ -165,6 +219,10 @@ function register(ipcMain, getDeps) {
       if (artifactId && db.updateArtifact) {
         artifact = db.updateArtifact(artifactId, { content: report, status: 'draft' });
       } else {
+        // v4.3.3 Codex Round 16：新建路径必须写血缘——否则会产生 sourceArtifactIds=[] 的 invalid
+        // implementation_report，触发 artifact-validator 的非空必检（之前的边界 bug）
+        // 推断顺序：① 复用最近一份 implementation_report 的 sourceArtifactIds；② 从当前 7 个上游 artifact 重建
+        const inferred = inferReportSourceArtifactIds(db, notebookId);
         artifact = db.createArtifact({
           notebookId,
           type: 'implementation_report',
@@ -173,7 +231,18 @@ function register(ipcMain, getDeps) {
           content: report,
           confirmed: false,
           status: 'draft',
-          metadata: { source: 'manual-save', phase: 'phase-9' },
+          sourceArtifactIds: inferred.ids,
+          metadata: {
+            source: 'manual-save',
+            phase: 'phase-9',
+            // 记录血缘来源（便于诊断空血缘的真实原因）
+            upstreamArtifactIds: inferred.ids,
+            upstreamSource: inferred.source,
+            upstreamCount: inferred.ids.length,
+            upstreamWarning: inferred.ids.length === 0
+              ? 'saveReport 新建分支未能恢复血缘（7 阶段上游均不存在）· validator 会标 invalid'
+              : null,
+          },
         });
       }
 
