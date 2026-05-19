@@ -75,8 +75,10 @@ function normalizeReport(parsed, ctx = {}) {
   const safe = parsed || {};
 
   // ── 基本元信息 ──
+  // v4.3.3 Codex Round 11 P1.2：H14 反模板化 · 学校名不再硬编码"广州纺校"
+  //   缺失时留空字符串，让 caller 显式处理而不是 AI 自己编一个
   const courseName = String(safe.courseName || ctx.courseName || '').trim();
-  const school = String(safe.school || ctx.school || '广州纺校').trim();
+  const school = String(safe.school || ctx.school || '').trim();
   const academicYear = String(safe.academicYear || ctx.academicYear || '').trim();
   const term = String(safe.term || ctx.term || '').trim();
   const teacher = String(safe.teacher || ctx.teacher || '').trim();
@@ -373,9 +375,11 @@ async function generate({
     ].filter(Boolean).join('\n'));
   }
 
+  // v4.3.3 Codex Round 11 P1.2：H14 反模板化 · 学校名缺失时不再填"广州纺校"
+  //   AI 看到 "学校：（未填）" 时不会编学校名，会主动从 lessonMeta / lecture / ppt 找
   const ctxLines = [
     `课程名称：${courseName}`,
-    `学校：${courseContext.school || '广州纺校'}`,
+    `学校：${courseContext.school || '（未填，AI 请勿编造，从产物中查找）'}`,
     courseContext.academicYear ? `学年：${courseContext.academicYear}` : '',
     courseContext.term ? `学期：${courseContext.term}` : '',
     courseContext.teacher ? `授课教师：${courseContext.teacher}` : '',
@@ -544,10 +548,12 @@ function selfCheck() {
   });
 
   checks.push({
-    name: 'normalizeReport school 默认广州纺校',
+    // v4.3.3 Codex Round 11 P1.2：H14 反模板化 · school 不再硬编码默认值
+    //   selfCheck 期望也改为空字符串，与 normalize 实际行为一致
+    name: 'normalizeReport school 缺失时为空（H14 反模板化）',
     pass: (() => {
       const r = normalizeReport({});
-      return r.school === '广州纺校';
+      return r.school === '';
     })(),
   });
 

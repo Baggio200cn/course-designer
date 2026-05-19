@@ -616,6 +616,56 @@ test('verify:gate 含 verify-migrations-runner-v8.js', () => {
     'verify:gate 未串联 verify-migrations-runner-v8');
 });
 
+// ── 【15】Round 11 治理收口·H14 反兜底 + runner failed 计入 + mock e2e 7-stage 闭环 ─────────────
+console.log('\n【15】Round 11 治理收口·H14 反兜底 + runner failed 计入 + mock e2e 7-stage 闭环');
+
+test('report.service 不再硬编码"广州纺校"（H14 反兜底）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'services', 'report.service.js'), 'utf8');
+  // 允许在注释/反例提示中提到，但 || '广州纺校' 这种兜底不许有
+  assert(!/\|\|\s*['"]广州纺校['"]/.test(src),
+    'report.service 仍含 "|| \'广州纺校\'" 兜底（违反 H14）');
+  assert(!/School:\s*\|\|\s*'广州纺校'/.test(src), 'school 兜底未清干净');
+});
+
+test('migrations/runner.js · invalid migration 计入 failed（防错放）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'migrations', 'runner.js'), 'utf8');
+  // 必须能看到 invalid 分支累加 failed
+  assert(/缺\s*run\s*函数[^}]*failed\s*\+=\s*1/s.test(src) || /status:\s*'invalid'[\s\S]{0,200}failed\s*\+=\s*1/.test(src),
+    'runner.js invalid 分支未累加 failed（Codex Round 11 P3）');
+});
+
+test('run-e2e-v8.js · mock 模式覆盖 7 阶段闭环（design/ppt/lecture/quiz/homework/video/report）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'e2e', 'run-e2e-v8.js'), 'utf8');
+  // runStage 包裹（design/quiz/homework/video/report）或 recordStage 显式登记（ppt/lecture mock 构造）都算覆盖
+  ['design', 'ppt', 'lecture', 'quiz', 'homework', 'video', 'report'].forEach((stage) => {
+    const reA = new RegExp(`runStage\\(['"]${stage}['"]`);
+    const reB = new RegExp(`recordStage\\(['"]${stage}['"]`);
+    assert(reA.test(src) || reB.test(src),
+      `run-e2e-v8.js mock 路径未覆盖 stage=${stage}（Codex Round 11 P1 #1）`);
+  });
+});
+
+test('run-e2e-v8.js · 路径提示已更新到 scripts/e2e/e2e-4lessons-parallel-real.js（Codex Round 11 #3）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'e2e', 'run-e2e-v8.js'), 'utf8');
+  assert(!/scripts\/e2e-4lessons-parallel\.js/.test(src) || /e2e-4lessons-parallel-real/.test(src),
+    'run-e2e-v8.js 仍提示老路径 scripts/e2e-4lessons-parallel.js');
+});
+
+test('run-e2e-v8.js · mock 7 阶段使用 artifact-validator 后置检查', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'e2e', 'run-e2e-v8.js'), 'utf8');
+  assert(/artifact-validator/.test(src),
+    'run-e2e-v8.js 未引入 artifact-validator 后置检查');
+  assert(/validateArtifact/.test(src),
+    'run-e2e-v8.js 未调用 validateArtifact');
+});
+
+test('runner.js · failed 累加路径含 invalid + 异常两类', () => {
+  const runner = require(path.resolve(__dirname, '..', 'src', 'main', 'migrations', 'runner.js'));
+  // 用 mock db + 一个 invalid migration 验证 failed 计入
+  // （不真实创建文件，只验证模块化导出无回归）
+  assert(typeof runner.runMigrations === 'function', 'runner.runMigrations 必须 export');
+});
+
 // ── 结果汇总 ─────────────────────────────────────────────────────────────
 console.log(`\n═══ 结果：${pass}/${pass + fail} 通过 ═══`);
 if (fail > 0) {

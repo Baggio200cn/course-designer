@@ -48,8 +48,10 @@ function runMigrations(db, options = {}) {
     try {
       const m = require(fullPath);
       if (typeof m.run !== 'function') {
-        log.warn(`[migrations:runner] ${f} 缺 run 函数，跳过`);
+        // v4.3.3 Codex Round 11 P3：invalid 也计入 failed，让门禁能拦住
+        log.error(`[migrations:runner] ${f} 缺 run 函数 · 计入 failed（防错放）`);
         results.push({ file: f, status: 'invalid', reason: 'no run function' });
+        failed += 1;
         return;
       }
       const result = m.run(db, log);

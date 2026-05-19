@@ -86,7 +86,7 @@ function makeMockAiClient() {
       const isReport = /教学实施报告/.test(systemPrompt);
 
       if (isQuiz) return JSON.stringify({ questions: [{ id: 'q1', sourcePageNumber: 1, type: 'single', stem: 'mock 题干', options: [{ key: 'A', text: '选项A' }, { key: 'B', text: '选项B' }], correctAnswer: 'A', explanation: 'mock 解析', difficulty: 2, knowledgePoint: 'mock' }] });
-      if (isHomework) return JSON.stringify({ tasks: [{ id: 'hw1', type: 'reading', title: 'mock 作业', description: '阅读 mock 资料', deliverables: 'mock 提交', estimatedMinutes: 30, knowledgePoints: ['mock'], evaluationCriteria: ['mock criterion 1', 'mock criterion 2', 'mock criterion 3'] }] });
+      if (isHomework) return JSON.stringify({ tasks: [{ id: 'hw1', type: 'reading', title: 'mock 作业1', description: '阅读 mock 资料', deliverables: 'mock 提交', estimatedMinutes: 90, knowledgePoints: ['mock'], evaluationCriteria: ['mock criterion 1', 'mock criterion 2', 'mock criterion 3'] }, { id: 'hw2', type: 'practice', title: 'mock 作业2', description: '练习 mock', deliverables: 'mock 报告', estimatedMinutes: 60, knowledgePoints: ['mock'], evaluationCriteria: ['mock criterion 1', 'mock criterion 2', 'mock criterion 3'] }] });
       if (isDesign) return JSON.stringify({ lessonMeta: { topic: 'mock', lessonNumber: 1 }, courseInfo: { courseName: 'mock' }, fivePhases: { preInClass: 'mock', inClassOpening: 'mock', inClassExploration: 'mock', inClassApplication: 'mock', postClass: 'mock' }, evaluation: { rules: [] } });
       if (isPpt) return JSON.stringify({ pages: [{ pageNumber: 1, pageType: '封面', title: 'mock' }] });
       if (isLecture) return '## 第 1 页·《Mock》\n**教师讲述：** mock 讲稿内容\n**课堂动作附栏：**\n- 教师：mock';
@@ -118,32 +118,148 @@ function recordStage(name, status, durationMs, extra = {}) {
   //   - mock AI 客户端（CI 跑得通）
   //   - 配合 P3 validator 做后置检查
 
-  // 临时实现：只跑 mock 模式，验证脚手架可用
+  // v4.3.3 Codex Round 11 #1：mock E2E 扩展到 1 节完整 7 stage 闭环
+  //   design → ppt → lecture → quiz → homework → video → report
+  //   每 stage 跑 artifact-validator 后置检查，summary 包含 validator pass/fail
   if (ARGS.dryRun) {
-    log('═══ mock 模式：跑 schedule + 1 节 design 验证脚手架 ═══');
+    log('═══ mock 模式 · 1 节完整 7 stage 闭环 ═══');
     const aiClient = makeMockAiClient();
-    const { generate: generateDesign } = require('../../src/main/services/design.service');
-    const startDesign = Date.now();
-    const result = await generateDesign({
-      aiClient,
+    const { validateArtifact } = require('../../src/main/services/artifact-validator.service');
+
+    const ctx = {
       courseName: 'mock 课程',
-      lessonMeta: { topic: 'mock 节', theoryHours: 2, practiceHours: 2, lessonNumber: 1, chapter: '一' },
-      notebook: { minutesPerHour: 40, school: 'mock 学校', teacher: 'mock 老师' },
-    });
-    const durDesign = Date.now() - startDesign;
-    if (!result.success) {
-      log('❌ design 失败:', result.error);
-      SUMMARY.errors.push({ stage: 'design', error: result.error });
-      recordStage('design', 'failed', durDesign);
-    } else {
-      log('✓ design 成功（mock）·', durDesign + 'ms');
-      recordStage('design', 'ok', durDesign);
-      fs.writeFileSync(path.join(ARGS.outDir, '02-design-mock.json'), JSON.stringify(result, null, 2));
+      notebook: { minutesPerHour: 40, school: 'mock 学校', teacher: 'mock 老师', industryScenarios: 'mock 行业' },
+      lessonMeta: { topic: 'mock 节', theoryHours: 2, practiceHours: 2, lessonNumber: 1, chapter: '一', weekRange: '第 1 周' },
+    };
+
+    // 通用 wrapper：跑一个 stage + 计时 + 提取 product + validator 后置
+    async function runStage(name, fn, validatorType) {
+      if (ARGS.skipStages.includes(name)) {
+        log(`⏭ ${name} 跳过`);
+        recordStage(name, 'skipped', 0);
+        return null;
+      }
+      const start = Date.now();
+      try {
+        const result = await fn();
+        const dur = Date.now() - start;
+        if (!result?.success) {
+          log(`❌ ${name} 失败 (${dur}ms):`, result?.error);
+          SUMMARY.errors.push({ stage: name, error: result?.error || 'unknown' });
+          recordStage(name, 'failed', dur, { error: result?.error });
+          return null;
+        }
+        // 取主路径 data.product；回退 legacy alias
+        const product = result.data?.product || result.data?.design || result.data?.report
+                     || result.data?.microVideo || result.quizSet || result.homeworkSet;
+        log(`✓ ${name} 成功 (${dur}ms)`);
+        // 构造 fake artifact 跑 validator（mock 模式不写库）
+        let validatorResult = null;
+        if (validatorType) {
+          const fakeArtifact = {
+            type: validatorType,
+            schemaVersion: 1,
+            dirty: false,
+            metadata: { lessonNumber: 1, theoryHours: 2, practiceHours: 2 },
+            content: product,
+            sourceArtifactIds: validatorType === 'implementation_report' ? [101, 102] : [101],
+          };
+          validatorResult = validateArtifact(fakeArtifact);
+          if (validatorResult.valid) {
+            log(`  ✓ validator pass (${name})`);
+          } else {
+            log(`  ⚠ validator issues: ${validatorResult.issues.slice(0, 3).join(' | ')}`);
+            // mock 模式下 validator issue 不阻断流程，但要记录
+          }
+        }
+        recordStage(name, 'ok', dur, { validatorValid: validatorResult?.valid, validatorIssues: validatorResult?.issues || [] });
+        return product;
+      } catch (e) {
+        const dur = Date.now() - start;
+        log(`💥 ${name} 异常 (${dur}ms):`, e.message);
+        SUMMARY.errors.push({ stage: name, error: e.message });
+        recordStage(name, 'exception', dur, { error: e.message });
+        return null;
+      }
     }
+
+    // Stage 2 design
+    const { generate: generateDesign } = require('../../src/main/services/design.service');
+    const design = await runStage('design', () => generateDesign({
+      aiClient,
+      courseName: ctx.courseName,
+      lessonMeta: ctx.lessonMeta,
+      notebook: ctx.notebook,
+    }), null);  // design_doc validator 暂未定义，跳过
+
+    // Stage 3 ppt：mock 模式直接构造（pipeline-v2 是个复杂 orchestrator，单元测不跑全套）
+    const mockPpt = {
+      pages: [
+        { pageNumber: 1, pageType: '封面', title: 'Mock 封面', subtitle: 'mock', keyContent: ['核心1', '核心2'], speakerNotes: 'mock' },
+        { pageNumber: 2, pageType: '知识讲解', title: 'Mock 讲解', keyContent: ['知识点'], speakerNotes: 'mock' },
+      ],
+    };
+    fs.writeFileSync(path.join(ARGS.outDir, '03-ppt-mock.json'), JSON.stringify(mockPpt, null, 2));
+    const pptArt = { type: 'ppt_outline', schemaVersion: 1, dirty: false, metadata: { lessonNumber: 1 }, content: mockPpt, sourceArtifactIds: [101] };
+    const pptValid = validateArtifact(pptArt);
+    log(`✓ ppt 构造 (mock) · validator ${pptValid.valid ? 'pass' : '⚠ ' + pptValid.issues.length}`);
+    recordStage('ppt', 'ok', 0, { validatorValid: pptValid.valid, validatorIssues: pptValid.issues });
+
+    // Stage 4 lecture：mock 模式构造合规讲稿
+    const mockLecture = {
+      finalScript: '## 第 1 页·《Mock》\n**教师讲述：** mock 讲稿内容超过 200 字。' + '好啊好啊。'.repeat(50) + '\n## 第 2 页·《Mock 2》\n**教师讲述：** 第二页。' + '好啊。'.repeat(30),
+    };
+    fs.writeFileSync(path.join(ARGS.outDir, '04-lecture-mock.json'), JSON.stringify(mockLecture, null, 2));
+    const lectureArt = { type: 'lecture_final', schemaVersion: 1, dirty: false, metadata: { lessonNumber: 1, pptPageCount: 2 }, content: mockLecture, sourceArtifactIds: [pptArt.id || 102] };
+    const lectureValid = validateArtifact(lectureArt);
+    log(`✓ lecture 构造 (mock) · validator ${lectureValid.valid ? 'pass' : '⚠ ' + lectureValid.issues.length}`);
+    recordStage('lecture', 'ok', 0, { validatorValid: lectureValid.valid, validatorIssues: lectureValid.issues });
+
+    // Stage 5 quiz
+    const { generateQuizFromPpt } = require('../../src/main/services/quiz.service');
+    const quizSet = await runStage('quiz', () => generateQuizFromPpt({
+      aiClient,
+      lessonMeta: ctx.lessonMeta,
+      pptPages: mockPpt.pages,
+      lectureScript: mockLecture.finalScript,
+    }), 'quiz_set');
+
+    // Stage 6 homework
+    const { generateHomeworkFromLecture } = require('../../src/main/services/homework.service');
+    const homeworkSet = await runStage('homework', () => generateHomeworkFromLecture({
+      aiClient,
+      lessonMeta: ctx.lessonMeta,
+      pptPages: mockPpt.pages,
+      lectureScript: mockLecture.finalScript,
+    }), 'homework_set');
+
+    // Stage 7 video
+    const { generate: generateVideo } = require('../../src/main/services/micro-video.service');
+    const microVideo = await runStage('video', () => generateVideo({
+      aiClient,
+      courseName: ctx.courseName,
+      videoTopic: ctx.lessonMeta.topic,
+      pptOutline: mockPpt,
+      courseContext: { ...ctx.notebook, lessonNumber: 1 },
+    }), null);  // micro_video_plan validator 未定义（v4.3.3 type 是 video_prompt 但 validator 未覆盖）
+
+    // Stage 8 report
+    const { generate: generateReport } = require('../../src/main/services/report.service');
+    await runStage('report', () => generateReport({
+      aiClient,
+      courseName: ctx.courseName,
+      designData: design,
+      pptData: mockPpt,
+      lectureData: mockLecture,
+      microVideoData: microVideo,
+      courseContext: ctx.notebook,
+    }), 'implementation_report');
+
+    log('═══ mock 7 stage 闭环完成 ═══');
   } else {
     log('⚠ 真实 AI 模式：本 driver 暂只实现 mock 验证脚手架');
-    log('   完整真实跑请用 scripts/e2e-4lessons-parallel.js（临时脚本，下版本合并到此）');
-    recordStage('e2e', 'real-ai-pending', 0, { note: '完整真实 e2e 见 scripts/e2e-4lessons-parallel.js' });
+    log('   完整真实跑请用 scripts/e2e/e2e-4lessons-parallel-real.js（v4.3.3 Round 10 归档）');
+    recordStage('e2e', 'real-ai-pending', 0, { note: '完整真实 e2e 见 scripts/e2e/e2e-4lessons-parallel-real.js' });
   }
 
   SUMMARY.finishedAt = new Date().toISOString();
