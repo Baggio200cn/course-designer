@@ -1288,6 +1288,50 @@ test('Round 18 D · pipeline 主返回值暴露 consistencyEnabled / consistency
   });
 });
 
+// ── 【23】Round 19 治理收口·report normalize 保留 5 段法完整字段 + micro-video 字段对齐（codex 反馈） ──
+console.log('\n【23】Round 19 治理收口·report 5 段法完整字段 + micro-video 字段对齐');
+
+test('Round 19 · report.service normalize 保留 5 段法 duration/teacherActions/studentActions', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'services', 'report.service.js'), 'utf8');
+  // 之前 inClassPhases map 只输出 {phase, highlight}，现在必须含完整字段
+  assert(/inClassPhases\s*=\s*REQUIRED_PHASES\.map[\s\S]{0,400}teacherActions:[\s\S]{0,100}studentActions:[\s\S]{0,100}duration:/.test(src)
+       || /teacherActions:\s*String\(p\.teacherActions/.test(src),
+    'report.service normalizeReport 5 段法仍只保留 highlight·未保留 teacherActions/studentActions/duration');
+});
+
+test('Round 19 · report-export.js 渲染 5 段法 teacherActions / studentActions', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'export', 'report-export.js'), 'utf8');
+  assert(/教师活动：\$\{ph\.teacherActions\}|ph\.teacherActions/.test(src),
+    'exportReportWord 课中流程未渲染 teacherActions');
+  assert(/学生活动：\$\{ph\.studentActions\}|ph\.studentActions/.test(src),
+    'exportReportWord 课中流程未渲染 studentActions');
+});
+
+test('Round 19 · micro-video-word.js 受众读 targetAudience（不再 fallback 默认值）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'export', 'micro-video-word.js'), 'utf8');
+  assert(/microVideo\.targetAudience\s*\|\|/.test(src),
+    'micro-video 受众未优先读 targetAudience（codex 反馈点 1）');
+});
+
+test('Round 19 · micro-video-word.js 剪辑节奏读 eg.rhythm（不再 eg.pace）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'export', 'micro-video-word.js'), 'utf8');
+  assert(/eg\.rhythm\s*\|\|\s*eg\.pace/.test(src),
+    'micro-video 节奏未优先读 rhythm（codex 反馈点 2）');
+});
+
+test('Round 19 · micro-video-word.js 平台读 eg.platforms（不再 eg.tools）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'export', 'micro-video-word.js'), 'utf8');
+  assert(/eg\.platforms/.test(src),
+    'micro-video 投放平台未读 platforms');
+});
+
+test('Round 19 · verify:gate 串入 verify-export-content-v8（导出物级测试已接门禁）', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8'));
+  assert(/verify-export-content-v8/.test(pkg.scripts['verify:gate']),
+    'package.json verify:gate 未串入 verify-export-content-v8');
+  assert(pkg.scripts['verify:export-content'], 'package.json 缺独立 verify:export-content 脚本');
+});
+
 // ── 结果汇总 ─────────────────────────────────────────────────────────────
 console.log(`\n═══ 结果：${pass}/${pass + fail} 通过 ═══`);
 if (fail > 0) {

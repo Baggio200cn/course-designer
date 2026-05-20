@@ -127,11 +127,14 @@ async function exportMicroVideoWord({ microVideo, outputPath, courseName, lesson
 
   // ① 元信息
   children.push(h2('① 视频元信息'));
+  // v4.3.3 Round 19 修复（codex 反馈 · 2026-05-20）：
+  //   服务 normalizeMicroVideo 输出 targetAudience（line 197），不是 audience/target。
+  //   之前会落空到 fallback"中职二年级学生"，老师填的受众完全消失。
   const metaRows = [
     ['课程名', courseName || microVideo.courseTitle || '（未填）'],
     ['视频主题', videoTopic || microVideo.videoTopic || '（未填）'],
     ['总时长', `${microVideo.durationSec || microVideo.duration || 60} 秒`],
-    ['受众', microVideo.audience || microVideo.target || '中职二年级学生'],
+    ['受众', microVideo.targetAudience || microVideo.audience || microVideo.target || '中职二年级学生'],
     ['镜头数', String(microVideo.storyboard.length)],
     ['即梦提示词数', String(microVideo.jimengPrompts.length)],
   ];
@@ -248,15 +251,36 @@ async function exportMicroVideoWord({ microVideo, outputPath, courseName, lesson
   if (microVideo.editingGuide) {
     children.push(h2('⑥ 剪辑指南'));
     const eg = microVideo.editingGuide;
-    if (eg.pace) children.push(p(`⏩ 节奏：${eg.pace}`));
-    if (eg.transitions) children.push(p(`🔀 转场：${eg.transitions}`));
+    // v4.3.3 Round 19 修复（codex 反馈 · 2026-05-20）·剪辑指南字段全部对齐 service 真实输出：
+    //   service.normalizeMicroVideo 输出 { rhythm, transitions[], music{type,volume},
+    //                                       subtitles{style,keyPoints}, platforms[] }
+    //   之前导出器读 pace/eg.transitions(直接拼)/eg.subtitles(直接对象→[object Object])/eg.tools(根本不存在)
+    if (eg.rhythm || eg.pace) {
+      children.push(p(`⏩ 节奏：${eg.rhythm || eg.pace}`));
+    }
+    if (eg.transitions) {
+      const tx = Array.isArray(eg.transitions) ? eg.transitions.join(' / ') : String(eg.transitions);
+      if (tx) children.push(p(`🔀 转场：${tx}`));
+    }
     if (eg.music) {
       const m = eg.music;
-      children.push(p(`🎵 音乐：${typeof m === 'string' ? m : `${m.type || ''} · ${m.volume || ''}`}`));
+      children.push(p(`🎵 音乐：${typeof m === 'string' ? m : `${m.type || ''}${m.volume ? ` · ${m.volume}` : ''}`}`));
     }
-    if (eg.subtitles) children.push(p(`💬 字幕：${eg.subtitles}`));
-    if (Array.isArray(eg.tools) && eg.tools.length) children.push(p(`🛠 推荐工具：${eg.tools.join(' / ')}`));
-    else if (typeof eg.tools === 'string') children.push(p(`🛠 推荐工具：${eg.tools}`));
+    if (eg.subtitles) {
+      const s = eg.subtitles;
+      if (typeof s === 'string') {
+        children.push(p(`💬 字幕：${s}`));
+      } else if (s.style || s.keyPoints) {
+        children.push(p(`💬 字幕：${s.style || ''}${s.keyPoints ? ` · ${s.keyPoints}` : ''}`));
+      }
+    }
+    // 服务真实字段 platforms[]（投放平台），老 tools 仅作向后兼容
+    const platforms = Array.isArray(eg.platforms) ? eg.platforms : (Array.isArray(eg.tools) ? eg.tools : null);
+    if (platforms && platforms.length) {
+      children.push(p(`📺 投放平台：${platforms.join(' / ')}`));
+    } else if (typeof eg.tools === 'string') {
+      children.push(p(`🛠 推荐工具：${eg.tools}`));
+    }
   }
 
   // 页脚水印

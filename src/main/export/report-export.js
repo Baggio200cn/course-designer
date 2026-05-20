@@ -164,7 +164,15 @@ async function exportReportWord({ report, outputPath }) {
   }
   if (flow.inClassPhases?.length) {
     children.push(p('课中（5 段法）', FONT.subTitle));
-    flow.inClassPhases.forEach((ph) => children.push(p(`  · ${ph.phase}：${ph.highlight || '—'}`, FONT.body)));
+    // v4.3.3 Round 19 修复（codex 反馈 · 2026-05-20）：
+    //   渲染 5 段法的完整内容（duration / teacherActions / studentActions），不再只一行 highlight。
+    flow.inClassPhases.forEach((ph) => {
+      const head = ph.duration ? `${ph.phase}（${ph.duration}）` : ph.phase;
+      const summary = ph.highlight ? `：${ph.highlight}` : '';
+      children.push(p(`  · ${head}${summary}`, FONT.body));
+      if (ph.teacherActions) children.push(p(`      教师活动：${ph.teacherActions}`, FONT.body));
+      if (ph.studentActions) children.push(p(`      学生活动：${ph.studentActions}`, FONT.body));
+    });
   }
   if (flow.postClass?.homework?.length) {
     children.push(p('课后任务', FONT.subTitle));

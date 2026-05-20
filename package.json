@@ -14,10 +14,11 @@
     "verify:contracts": "node scripts/verify-contracts-v8.js",
     "verify:integration": "node scripts/verify-workflow-integration-v8.js",
     "verify:migrations": "node scripts/verify-migrations-runner-v8.js",
+    "verify:export-content": "node scripts/verify-export-content-v8.js",
     "verify:e2e:mock": "node scripts/e2e/run-e2e-v8.js --dry-run --out-dir=./scripts/e2e/.test-out --lessons=1",
-    "verify:gate": "node scripts/verify-contracts-v8.js && node scripts/verify-workflow-integration-v8.js && node scripts/verify-migrations-runner-v8.js",
-    "verify:all": "node scripts/verify-contracts-v8.js && node scripts/verify-workflow-integration-v8.js && node scripts/verify-migrations-runner-v8.js && echo \"OK: A 类发布门禁全过\"",
-    "verify:release": "node scripts/verify-contracts-v8.js && node scripts/verify-workflow-integration-v8.js && node scripts/verify-migrations-runner-v8.js && vite build && electron-builder"
+    "verify:gate": "node scripts/verify-contracts-v8.js && node scripts/verify-workflow-integration-v8.js && node scripts/verify-migrations-runner-v8.js && node scripts/verify-export-content-v8.js",
+    "verify:all": "node scripts/verify-contracts-v8.js && node scripts/verify-workflow-integration-v8.js && node scripts/verify-migrations-runner-v8.js && node scripts/verify-export-content-v8.js && echo \"OK: A 类发布门禁全过\"",
+    "verify:release": "node scripts/verify-contracts-v8.js && node scripts/verify-workflow-integration-v8.js && node scripts/verify-migrations-runner-v8.js && node scripts/verify-export-content-v8.js && vite build && electron-builder"
   },
   "keywords": [
     "electron",

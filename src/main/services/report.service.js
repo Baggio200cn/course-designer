@@ -126,11 +126,18 @@ function normalizeReport(parsed, ctx = {}) {
   inPhases.forEach((p) => {
     if (p && p.phase) phasesByName[String(p.phase).trim()] = p;
   });
+  // v4.3.3 Round 19 修复（codex 反馈 · 2026-05-20）：
+  //   旧 normalize 只保留 phase+highlight，老师从教学设计阶段填的
+  //   duration/teacherActions/studentActions 全部被砍掉，最终报告 docx 5 段法只显示一句话。
+  //   现在 normalize 完整保留这些字段，让 export 能渲染含教师活动+学生活动+段时长的完整 5 段法。
   const inClassPhases = REQUIRED_PHASES.map((name) => {
     const p = phasesByName[name] || {};
     return {
       phase: name,
       highlight: String(p.highlight || '').trim(),
+      duration: String(p.duration || '').trim(),
+      teacherActions: String(p.teacherActions || '').trim(),
+      studentActions: String(p.studentActions || '').trim(),
     };
   });
 
