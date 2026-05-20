@@ -2,73 +2,130 @@
 
 > **职业教育 8 阶段课程开发 Workflow Agent** — Electron + React + JSON DB + 火山引擎（豆包）API
 >
-> 当前版本：**v4.3.3**（Sprint A 止血 · Sprint B 结构重构中） · 最后更新：2026-05-18
+> 当前版本：**v4.3.3**（commit `dcecca8` · Codex Round 19 收口 · 175/175 自动验证通过）
+> 最后更新：2026-05-20
 
 ---
 
 ## 项目概览
 
-面向中职/职业院校教师的 AI 驱动课程开发工具。核心理念来自 **Harness Engineering**：
+面向中职 / 职业院校教师的 AI 驱动课程开发工具。核心理念来自 **Harness Engineering**：
 
 > 模型是不稳定组件，框架约束它——不依赖模型自律，用工程化手段保证输出质量。
 
-### 当前阶段
+### 当前状态（2026-05-20）
 
 | 项 | 详情 |
 |---|---|
-| 版本 | **v4.3.3**（D6-D9 + Sprint A 止血 · Sprint B 结构重构中） |
-| 工作流 | **8 阶段**（v4.3.3 新增 Step 5 在线测验 + Step 6 课后作业）|
-| 上一里程碑 | v4.3.0 D6-D9 一步出稿 + AI 对话改稿 + 三路径自动保存 + stage 聚合校验 + 强制解锁 |
-| 当前里程碑 | **Sprint A**（止血：文档/默认值/迁移规范统一）+ **Sprint B**（D14-D15 + D11-D13 结构重构）|
-| 下一里程碑 | 老师试用反馈 → v4.4.0 体验打磨 |
+| 版本 | **v4.3.3** · commit `dcecca8` |
+| 工作流 | **8 阶段**（schedule → design → ppt → lecture → quiz → homework → video → report）|
+| 质量门禁 | **4 套 175 条断言全过**：合约 35 + 工作流集成 117 + 数据迁移 17 + 导出物语义 6 |
+| Codex 审计 | 19 轮治理收口（含真实交付物语义验收）|
+| 当前安装包 | `dist/驭课Agent-v4.3.3-setup.exe`（含 Round 18/19 全部修复）|
 
 ---
 
-## 8 阶段工作流（v4.3.3 核心）
+## v4.3.3 累积里程碑（Round 1-19）
+
+### 新增功能
+- 🎬 **微课视频方案 Word 导出**（Round 18）：MicroVideoStage 加"📄 导出 Word"按钮，按真实 schema 渲染 6 大段
+- 🖼 **新版 icon**（v4.3.3 新版 · 2026-05-20）：绿底金马·驭字 logo，多尺寸 ICO（16/24/32/48/64/128/256）
+- 🔍 **4 个预览页面最大化**：教学设计 / PPT 大纲 / 讲稿 / 实施报告 都支持全屏阅读，Esc 退出
+- 📋 **报告 5 段法完整渲染**（Round 19）：含 duration + teacherActions + studentActions
+
+### 关键 Bug 修复
+- ✅ web-extractor 非 Electron 环境平静降级（不再 `BrowserWindow is not a constructor`）
+- ✅ schedule/report/micro-video 三个 export 入口加 schema 守卫，错字段名立刻报错
+- ✅ micro-video Word 导出 5 字段对齐 service 真实输出（targetAudience/rhythm/transitions/subtitles/platforms）
+- ✅ report.service.normalizeReport 不再压扁 5 段法到只剩 highlight
+- ✅ 课中 5 段法"评价"→"设计意图"前端预览修齐
+
+### 治理层升级
+- ⭐ **导出物级质量门禁**（Round 19）：真实生成 .docx → 解包 → 断言关键字段出现在正文
+- ⭐ **schema 守卫 + 测试两层防御**：caller 写错字段名立刻 throw，docx 不再静默生成空文档
+- ⭐ **mock E2E 8 阶段闭环**：schedule → ... → report 全跑通 + artifact validator 后置 strict
+
+---
+
+## 8 阶段工作流
 
 ```
 教学进度表 → 教学设计 → 教学课件 → 课堂讲稿 → 在线测验 → 课后作业 → 微课视频 → 教学实施报告
   schedule    design      ppt        lecture     quiz       homework     video        report
-    ①          ②           ③           ④           ⑤          ⑥           ⑦           ⑧
+    ①           ②           ③           ④           ⑤          ⑥           ⑦           ⑧
 ```
 
-| 阶段 | 关键产物 | AI 输入依据 | 输出格式 |
+| 阶段 | 关键产物（artifact_type）| AI 输入依据 | 输出格式 |
 |---|---|---|---|
-| ① 教学进度表 | `schedule_table` | 老师上传素材 + 课程基本信息 | JSON + Word |
-| ② 教学设计 | `design_doc` | 进度表 + 教学要求 | 5 段教学法 + 考核权重 + Word |
-| ③ 教学课件 | `ppt_outline` + `ppt_page_image` | 教学设计 + 老师选目标 | 页级框架 + AI 配图 + 导出 |
-| ④ 课堂讲稿 | `lecture_final` | **PPT 骨架 100% 主权重** + 素材 80% 深度 | 逐页教师口播稿 |
-| ⑤ 在线测验 ⭐NEW | `quiz_set` | PPT 每页 + 讲稿 | 每页 1-2 题 + 综合题（5 种题型）|
-| ⑥ 课后作业 ⭐NEW | `homework_set` | 讲稿 + PPT | 3-5 道作业，含 deliverables + 评分标准 |
-| ⑦ 微课视频 | `video_prompt`（旧 `micro_video_plan` 已废，但 workbench 仍兼容读老数据） | 讲稿 | 脚本+分镜+即梦提示词+拍摄+剪辑 |
-| ⑧ 教学实施报告 | `implementation_report` | 前 7 阶段全部产物 | AI 汇总 + 老师手填实施成效 |
+| ① 教学进度表 | `schedule_table` | 老师上传 Word 进度表 + 课程基本信息 | JSON + Word |
+| ② 教学设计 | `design_doc` | 进度表 + 教学要求 | 5 段法 + 信息图嵌入 + 思政 + Word |
+| ③ 教学课件 | `ppt_outline` + 配图 | 教学设计 + 老师选目标 | 页级框架 + AI 配图 + .pptx |
+| ④ 课堂讲稿 | `lecture_final` | PPT 骨架 + 素材 80% 深度 | 逐页教师口播稿 |
+| ⑤ 在线测验 | `quiz_set` | PPT 每页 + 讲稿 | 5 题型（单/多/判/填/简）+ HTML 翻卡 |
+| ⑥ 课后作业 | `homework_set` | 讲稿 + PPT | 4-6 道作业 + 评分标准 + Word |
+| ⑦ 微课视频 | `video_prompt` | 讲稿 + PPT | 旁白 + 分镜 + 即梦提示词 + Word ⭐NEW |
+| ⑧ 实施报告 | `implementation_report` | 上游 7 阶段产物 | AI 汇总 + 老师手填 + Word/MD/HTML/PDF |
 
 ---
 
-## v4.3.3 关键能力（vs v4.2.0）
+## 安装与使用
 
-### 🎯 讲稿阶段（D6-D8）
-- **一步出稿**：删 ABC 三稿流程，AI 直接出正式稿（PPT 骨架 100% 决定节奏）
-- **右侧 380px AI 对话框**：老师可输入「把第 3 页改口语化」「整体减 30% 字数」「整合刚上传的素材」做局部 patch
-- **三路径自动保存**：AI 生成 / AI 对话改稿 / 老师手贴正式稿 — 三处都立即落库 draft，刷新不丢
-- **正式稿大窗预览**：四方向拖拽、字号 14px、行高 1.75，老师阅读体验大改
-- **PDF/PPTX/图片 OCR**：扩展支持的素材格式（图片 OCR 走多模态文本 endpoint，无需新模型）
+### 给老师（终端用户）
 
-### 📑 PPT 阶段（D1-D5）
-- **AI 主色推荐**：3-5 hex 候选 + 老师自定义
-- **图片风格 preset**：扁平 / 插画 / 写实 / 国潮 / 极简 5 种
-- **3 层防误操作**：确认 modal + 取消按钮 + 清空重做
-- **PPT 骨架下拉**：lecture 阶段可切换骨架来源 PPT（多份时可选）+ 自动预填本节信息
+直接看 [`驭课Agent-v4.3.3-安装指南.md`](https://github.com/Baggio200cn/course-designer/blob/main/驭课Agent-v4.3.3-安装指南.md)（与 setup.exe 同发布）。
 
-### 🎓 在线测验 + 课后作业（v4.3.3 Step 5/6）
-- AI 基于 PPT 每页骨架出 1-2 道题（单选 / 多选 / 判断 / 填空 / 简答）+ 综合题
-- 课后作业按学时算量（每学时 30-60 分钟练习）
-- 题型多样化，含 deliverables 和 evaluationCriteria
+最关键 3 步：
 
-### 🛡 数据安全（Sprint A）
-- **`src/main/migrations/` 数据迁移目录**：跨版本 schema 变化时不再丢老师数据
-- **教师日志**（前称「我的工作台」）：「🔍 找回历史数据」按钮，对老师反馈的「v4.1.4 → v4.3.x 36 个 design 丢失」做修复
-- **「⚙ 强制解锁下游」按钮**：质检误报时老师能手动跳过门槛
+1. **下载** `驭课Agent-v4.3.3-setup.exe` → 双击安装
+2. **配置 API**：顶栏 "API 配置" → 填火山引擎 Key（需 doubao-pro / seedream / doubao-vision 三类端点）
+3. **新建教学进度表** → 上传你的课程进度表 Word → 走 8 阶段
+
+### 给开发者
+
+```bash
+git clone https://github.com/Baggio200cn/course-designer.git
+cd course-designer
+npm install
+
+# 开发模式（vite + electron 一键启动）
+npm run dev
+
+# 生产构建（vite build → electron-builder → dist/驭课Agent-v4.3.3-setup.exe）
+npm run build
+
+# 完整发版门禁（gate + build，发版前跑这个）
+npm run verify:release
+```
+
+---
+
+## 质量门禁（v4.3.3 · Round 19）
+
+### 4 套自动验证（共 175 条断言）
+
+```bash
+npm run verify:gate         # 跑全部 4 套，全绿才能发版
+```
+
+拆开跑：
+
+```bash
+npm run verify:contracts        # 35/35 · 8 阶段 STAGE_ORDER / REQUIREMENTS / unlock 链合约自检
+npm run verify:integration      # 117/117 · 工作流集成 + 19 轮治理收口防回归
+npm run verify:migrations       # 17/17 · 4 个数据迁移行为验证（runner + 003 + 004）
+npm run verify:export-content   # 6/6  · 导出物级正文断言（Round 19 新增） ⭐
+npm run verify:e2e:mock         # mock 8 阶段闭环 + artifact validator strict 模式
+```
+
+### 验证套件职责
+
+| 套件 | 防什么 | 关键文件 |
+|---|---|---|
+| `verify:contracts` | 8 阶段链不被破坏 | `verify-contracts-v8.js` |
+| `verify:integration` | IPC / runtime / V2App / handler 集成不回归 | `verify-workflow-integration-v8.js`（23 组断言）|
+| `verify:migrations` | 跨版本升级数据不丢 | `verify-migrations-runner-v8.js` |
+| `verify:export-content` ⭐ | docx 正文真实含老师填的字段 | `verify-export-content-v8.js` |
+| `verify:e2e:mock` | 8 阶段端到端能跑通 | `scripts/e2e/run-e2e-v8.js` |
 
 ---
 
@@ -76,138 +133,86 @@
 
 ```
 course-designer/
-├── README.md                         ← 你正在读
-├── CLAUDE.md                         ← Claude Code 工作约束（H1-H14 硬约束）
-├── CONTEXT.md                        ← 当前阶段快照
-├── package.json                      ← v4.3.3 · electron-builder 配置
-├── dist/                             ← 打包产物（驭课Agent-v4.3.3-setup.exe）
-├── prompts/                          ← AI Prompt 文件（H5 必须在这）
-├── scripts/                          ← 验证脚本（H4 不可删）
-├── src/
-│   ├── main/                         ← Electron 主进程
-│   │   ├── index.js
-│   │   ├── migrations/               ← v4.3.3 新增 · 跨版本数据迁移
-│   │   │   ├── README.md
-│   │   │   └── 001-recover-orphan-artifacts.js
-│   │   ├── v2/
-│   │   │   ├── contracts.js          ← STAGE_ORDER 8 阶段 + STAGE_REQUIREMENTS（H1 例外）
-│   │   │   ├── runtime.js
-│   │   │   └── quality.js
-│   │   ├── ipc/
-│   │   │   ├── _registry.js          ← 集中注册（H2: 不在 index.js 加 handler）
-│   │   │   └── v2/                   ← 8 个 stage 的 handlers
-│   │   │       ├── schedule.handlers.js
-│   │   │       ├── design.handlers.js
-│   │   │       ├── ppt.handlers.js
-│   │   │       ├── lesson.handlers.js     ← Phase-9 多节课模型
-│   │   │       ├── quiz.handlers.js       ← v4.3.3 NEW
-│   │   │       ├── homework.handlers.js   ← v4.3.3 NEW
-│   │   │       ├── micro-video.handlers.js
-│   │   │       └── report.handlers.js
-│   │   ├── services/
-│   │   │   ├── quiz.service.js       ← v4.3.3 NEW
-│   │   │   ├── homework.service.js   ← v4.3.3 NEW
-│   │   │   ├── pptx-parser.service.js
-│   │   │   └── ...
-│   │   └── database/
-│   │       └── db-simple.js          ← JSON DB
-│   ├── preload/index.js              ← IPC API 暴露（含 quizV2 / homeworkV2）
-│   └── renderer/src/v2/
-│       ├── V2App.jsx                 ← 主路由 + 全局 state（**4500 LOC，D11 待拆**）
-│       ├── ScheduleStage.jsx
-│       ├── DesignStage.jsx
-│       ├── PptStage.jsx
-│       ├── LectureStage.jsx          ← 含右侧 LectureChatPanel
-│       ├── QuizStage.jsx             ← v4.3.3 NEW
-│       ├── HomeworkStage.jsx         ← v4.3.3 NEW
-│       ├── MicroVideoStage.jsx
-│       ├── ReportStage.jsx
-│       └── MyWorkbench.jsx           ← 教师日志（前称我的工作台）
-└── .claude/
-    ├── README.md                     ← 治理知识库索引
-    ├── hard-constraints.md           ← H1-H14 详细
-    ├── notes/
-    │   ├── 2026-05-18-bug-retrospective-v1-to-v4.3.0.md  ← bug 历史回顾
-    │   └── 2026-05-18-audit-v4.3.0-to-4.3.3.md           ← 审计报告
-    └── phases/                       ← 阶段完工总结
+├── README.md                              ← 你正在读
+├── CLAUDE.md                              ← Claude Code 工作约束（H1-H14 硬约束）
+├── 驭课Agent-v4.3.3-安装指南.md           ← 给老师的安装说明
+├── package.json                           ← electron-builder 配置 + 5 个 verify 脚本
+├── resources/
+│   └── icons/
+│       ├── icon.ico                       ← 多尺寸 ICO（含 16/24/32/48/64/128/256）
+│       └── icon.png                       ← 1024×1024 PNG（窗口/任务栏）
+├── dist/
+│   └── 驭课Agent-v4.3.3-setup.exe         ← 一键安装程序（~240 MB）
+├── prompts/                               ← AI Prompt 文件（H5 必须在这）
+├── scripts/
+│   ├── verify-contracts-v8.js
+│   ├── verify-workflow-integration-v8.js
+│   ├── verify-migrations-runner-v8.js
+│   ├── verify-export-content-v8.js        ← Round 19 新增 · 导出物级
+│   ├── e2e/
+│   │   └── run-e2e-v8.js                  ← mock 8 阶段闭环
+│   ├── icon/
+│   │   └── rebuild-icons.js               ← 一次性生成多尺寸 ICO + PNG
+│   └── legacy/                            ← v4.1.x / v4.2.x 老脚本（H4 不可删）
+└── src/
+    ├── main/                              ← Electron 主进程
+    │   ├── index.js
+    │   ├── migrations/                    ← 跨版本数据迁移
+    │   │   ├── runner.js                  ← Round 10 抽离的扫描+执行器
+    │   │   ├── 001-recover-orphan-artifacts.js
+    │   │   ├── 002-add-schemaversion-dirty.js
+    │   │   ├── 003-rename-artifact-types.js
+    │   │   └── 004-notebooks-currentstage.js
+    │   ├── v2/
+    │   │   └── contracts.js               ← STAGE_ORDER 8 阶段 + REQUIREMENTS（H1 例外）
+    │   ├── ipc/v2/                        ← 8 个 stage 的 handlers
+    │   │   ├── schedule.handlers.js
+    │   │   ├── design.handlers.js
+    │   │   ├── ppt.handlers.js
+    │   │   ├── lesson.handlers.js
+    │   │   ├── quiz.handlers.js
+    │   │   ├── homework.handlers.js
+    │   │   ├── micro-video.handlers.js    ← + v2:exportMicroVideoWord ⭐
+    │   │   ├── report.handlers.js
+    │   │   └── report-upstream.helper.js  ← Round 17 抽离的纯模块（含 12 条单测）
+    │   ├── services/
+    │   │   ├── schedule.service.js
+    │   │   ├── design.service.js
+    │   │   ├── lecture-importer.service.js
+    │   │   ├── quiz.service.js
+    │   │   ├── homework.service.js
+    │   │   ├── micro-video.service.js
+    │   │   ├── report.service.js
+    │   │   ├── web-extractor.service.js   ← Round 18 加 BrowserWindow 环境守卫
+    │   │   ├── artifact-validator.service.js  ← 5 种 artifact 类型 validator
+    │   │   ├── ppt-images-pipeline.service.js ← Round 18 consistencyEnabled 可观测
+    │   │   └── ...
+    │   └── export/
+    │       ├── schedule-word.js           ← Round 18 加 assertScheduleSchema
+    │       ├── report-export.js           ← Round 18 加 assertReportSchema + Round 19 渲染 5 段法
+    │       ├── micro-video-word.js        ← Round 18 新建 + Round 19 字段对齐 ⭐
+    │       ├── design-word.js
+    │       ├── ppt.js
+    │       ├── quiz.js
+    │       └── word.js                    ← lecture 用通用 docx
+    ├── preload/index.js                   ← IPC API 暴露（含 exportMicroVideoWordV2）
+    └── renderer/src/
+        ├── assets/
+        │   ├── logo.png                   ← 256×256 启动屏/标题栏
+        │   └── favicon.ico
+        └── v2/
+            ├── V2App.jsx                  ← 主路由 + 全局 state
+            ├── PreviewFullscreen.jsx      ← 通用最大化预览组件 ⭐
+            ├── ScheduleStage.jsx
+            ├── DesignStage.jsx            ← 含最大化预览
+            ├── PptStage.jsx               ← 含最大化预览
+            ├── LectureStage.jsx           ← 含最大化阅读模式
+            ├── QuizStage.jsx
+            ├── HomeworkStage.jsx
+            ├── MicroVideoStage.jsx        ← + 📄 导出 Word 按钮 ⭐
+            ├── ReportStage.jsx            ← 含最大化预览
+            └── MyWorkbench.jsx            ← 教师日志（前称"我的工作台"）
 ```
-
----
-
-## 开发指引
-
-### 启动 dev
-
-```bash
-npm install
-npm run dev    # vite + electron 一键启动
-```
-
-### 打包
-
-```bash
-npm run build  # vite build && electron-builder → dist/驭课Agent-v4.3.3-setup.exe
-```
-
-> **Windows PowerShell 提示**：如果 `npm run build` 被执行策略拦截（报「无法加载...因为在此系统上禁止运行脚本」），改用以下任一方式：
-> - 命令行用 **`npm.cmd run build`**（绕过 PS 脚本策略）
-> - 或临时放开当前会话策略：`Set-ExecutionPolicy -Scope Process Bypass`
-> - 或换 cmd.exe 跑
-
-### 验证脚本
-
-**A 类 · 发布门禁（一键命令，全绿才允许发版）**
-
-```bash
-# A 类快速门禁（开发期常跑·覆盖契约 + 集成）
-npm run verify:gate           # 70 测试 = verify:contracts (35) + verify:integration (35)
-
-# 完整发版门禁（包含 build，发版前跑这个）
-npm run verify:release        # gate + vite build + electron-builder
-
-# 拆开跑（CI 单步可见）
-npm run verify:contracts      # 35/35 · STAGE_ORDER / REQUIREMENTS / PRIMARY_TYPE / unlock 链 / video type 一致性
-npm run verify:integration    # 35/35 · runtime + workbench + migration + IPC + V2App stageContracts + setActiveArtifact + mock 集成 + Round 7/8 治理收口防回归
-```
-
-**职责分工**：
-- `verify:gate` = **快速门禁**（开发期、PR、CI 普通分支必跑）
-- `verify:release` = **发版门禁**（gate + build，发安装包前跑，任一失败即 exit 1）
-
-**B 类 · scripts/legacy/**（v4.1.x / v4.2.x 老脚本 + 断言落后于 v4.3.3 新契约的服务单元）：
-
-```bash
-# ⚠ 这些全部移到 scripts/legacy/，仅历史参考，不要跑
-# 见 scripts/legacy/README.md
-# v4.4.0 改写后会移回 scripts/ 主目录
-```
-
-**C 类 · 手动验证（需要环境）**
-
-```bash
-# 真实 endpoint 烟雾测试（手动跑，需要 ARK API Key）
-ARK_API_KEY=xxx ARK_TEXT_ENDPOINT=ep-m-xxx npm run smoke
-```
-
----
-
-## Sprint B 状态（v4.3.3 已落地）
-
-| ID | 内容 | 状态 |
-|---|---|---|
-| **D11** | useSession hook 抽出（`src/renderer/src/v2/useSession.js`）；V2App.jsx 全拆分留 D11.2 下个 sprint | ✅ 最小可行 |
-| **D12** | sessionContext DB 真落地：`db-simple.js` 加 4 个方法 + `data.sessions` 表 + smoke 6/6 通过 | ✅ |
-| **D13** | artifact schemaVersion + dirty 信号 + markDownstreamDirty + clearArtifactDirty + smoke 7/7 通过 + 接入所有 confirm 入口 | ✅ |
-| **D14** | V2App.jsx framework stub + handleSaveRawJson 删除；framework fallback 全清；runtime.js 老方法删除留 D14.2 | ✅ 部分 |
-| **D15** | `npm run smoke` 真实 ARK endpoint 烟雾测试脚本（scripts/smoke-test-real-ark.js） | ✅ |
-
-## 待处理（v4.4.0 D11.2 / D14.2）
-
-- D11.2: V2App.jsx 4500 LOC 完整拆分（router + StageRouter + per-stage component）
-- D14.2: 删 `runtime.js` 老 framework 方法（仍被 lecture.handlers v3 老路径引用）
-- ~~验证脚本升级：`verify-contracts-v6.js` → `verify-contracts-v8.js`~~ ✅ 已落地（v4.3.3 Codex Round 3 响应 · 35/35 测试通过）
-
-详见 `.claude/notes/2026-05-18-audit-v4.3.0-to-4.3.3.md`
 
 ---
 
@@ -215,6 +220,8 @@ ARK_API_KEY=xxx ARK_TEXT_ENDPOINT=ep-m-xxx npm run smoke
 
 - **H1**：`contracts.js` 是核心契约，改它需要明确批准（v4.3.3 已批 1 次：6→8 阶段）
 - **H2**：禁止在 `index.js` 加 IPC handler，必须写到 `ipc/v2/*.handlers.js`
+- **H4**：`scripts/legacy/` 老脚本不可删，可作历史参考
+- **H5**：AI Prompt 必须放 `prompts/*.md`，不可硬编码
 - **H6**：单任务限 1-2 个文件改动（除非用户明确批准大重构）
 - **H8**：加新 npm 依赖需要明确批准（v4.3.3 已批 pdf-parse）
 - **H9**：selfCheck mock 通过 ≠ 功能就绪，必须真实路径覆盖
@@ -238,9 +245,18 @@ ARK_API_KEY=xxx ARK_TEXT_ENDPOINT=ep-m-xxx npm run smoke
 
 | 版本 | 日期 | 关键改动 |
 |---|---|---|
-| **v4.3.3** | 2026-05-18 | **Sprint A 止血 + Sprint B 结构重构** · 8 阶段（+ Step 5 测验 + Step 6 作业）· 跨版本数据找回 · 教师日志改名 |
-| v4.3.0 | 2026-05-18 | D6-D9 · 讲稿一步出稿 + 右侧 AI 对话 + PPT 骨架自动预填 + 三路径自动保存 + stage 聚合校验 + 强制解锁 + PDF/OCR |
-| v4.2.0 | 2026-05-17 | 6 阶段架构升级（PPT 在 lecture 前）+ 会话上下文 + 实体绑定 + 工作台修复 |
+| **v4.3.3 dcecca8** | 2026-05-20 | **Round 19 收口** · 导出物级语义验证 + report 5 段法字段保留 + micro-video 5 字段对齐 |
+| v4.3.3 f61216b | 2026-05-20 | **Round 18 · 端到端测试报告 4 项修复** · A web-extractor / B 微课 Word 导出 / C 三入口 schema 守卫 / D Vision 可观测 |
+| v4.3.3 238d8a6 | 2026-05-20 | **新 icon（绿底金马·驭字）** + 4 个预览页面最大化 + 排版升级 |
+| v4.3.3 304ca17 | 2026-05-19 | Round 17 · report-upstream.helper 抽独立模块 + 10 条真行为单测 |
+| v4.3.3 dc5ec0f | 2026-05-19 | Round 16 · saveReport 新建分支补血缘 + 抽 helper |
+| v4.3.3 1b95456 | 2026-05-19 | Round 15 · 真实报告血缘 + mock 报告吃 8 阶段 + 全工程老注释扫描 |
+| v4.3.3 b0b005c | 2026-05-19 | Round 14 · report 真正吃 8 阶段（quiz/homework 读取）+ schedule validator + 5 项修复 |
+| v4.3.3 b57607d | 2026-05-19 | Round 13 · mock E2E 升级 8 阶段闭环 + validator strict + video_prompt validator |
+| v4.3.3 43dc4c5 | 2026-05-19 | Round 11 · verify:e2e:mock 7 阶段闭环 + H14 反兜底 + runner failed 计入 |
+| v4.3.3 8a0bc9a | 2026-05-19 | Round 10 · migration runner 抽离 + artifact validator + 真实使用路径工程化 |
+| v4.3.0 | 2026-05-18 | D6-D9 · 讲稿一步出稿 + 右侧 AI 对话 + PPT 骨架自动预填 + 三路径自动保存 |
+| v4.2.0 | 2026-05-17 | 6 阶段架构升级（PPT 在 lecture 前）+ 会话上下文 |
 | v4.1.4 | 2026-05-16 | 多节课模式 + 9 维度质量审核 |
 | v4.0.0 | 2026-05-10 | 6 阶段工作流首版（Phase-9 完成）|
 
@@ -251,8 +267,9 @@ ARK_API_KEY=xxx ARK_TEXT_ENDPOINT=ep-m-xxx npm run smoke
 - **设计 / 老师反馈**：Baggio（项目方）+ 试用老师群
 - **技术实现**：Claude Code（Anthropic Claude Opus 4.7 / Sonnet 4.5）
 - **AI 模型**：火山引擎（豆包）系列 endpoint
-- **结构性诊断**：Codex AI 代理（Sprint A/B 治理建议）
+- **结构性诊断 + 19 轮代码审计**：Codex AI 代理
 
 ---
 
-> 📚 治理结构参考：[`CLAUDE.md`](CLAUDE.md) + [`.claude/README.md`](.claude/README.md)
+> 📚 治理结构：[`CLAUDE.md`](CLAUDE.md) + [`.claude/README.md`](.claude/README.md)
+> 📦 当前安装包：[`dist/驭课Agent-v4.3.3-setup.exe`](dist/) · 240 MB · 2026-05-20
