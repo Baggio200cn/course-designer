@@ -101,13 +101,23 @@ npm run verify:release
 
 ## 质量门禁（v4.3.3 · Round 19）
 
-### 4 套自动验证（共 175 条断言）
+### 验证脚本
+
+4 套自动验证（共 175 条断言）：
 
 ```bash
-npm run verify:gate         # 跑全部 4 套，全绿才能发版
+# 快速门禁（开发期、PR、CI 普通分支必跑）—— 跑全部 4 套
+npm run verify:gate         # 全绿才允许发版
+
+# 发版门禁（发安装包前跑这个）—— gate + vite build + electron-builder
+npm run verify:release      # 任一失败即 exit 1
 ```
 
-拆开跑：
+**职责分工**：
+- `verify:gate` = **快速门禁**（4 套验证全过）
+- `verify:release` = **发版门禁**（gate + build，发安装包前跑）
+
+拆开跑（CI 单步可见）：
 
 ```bash
 npm run verify:contracts        # 35/35 · 8 阶段 STAGE_ORDER / REQUIREMENTS / unlock 链合约自检
