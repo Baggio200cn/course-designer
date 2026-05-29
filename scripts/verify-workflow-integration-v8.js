@@ -1460,6 +1460,42 @@ test('功能4 · V2App 阶段卡挂头像按钮 + 弹 StageAssistant', () => {
   assert(/e\.stopPropagation\(\);\s*setAssistantStage/.test(src), '点头像未 stopPropagation（会误触发切换阶段）');
 });
 
+// ── 【28】v4.3.3 老师反馈·功能5 讲稿朗读（周老师 + 语速）─────────────────────
+console.log('\n【28】v4.3.3 老师反馈·功能5 讲稿朗读');
+
+test('功能5 · LectureReader 组件存在 + 导出 cleanScriptForSpeech', () => {
+  const comp = path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'LectureReader.jsx');
+  assert(fs.existsSync(comp), 'LectureReader.jsx 不存在');
+  const src = fs.readFileSync(comp, 'utf8');
+  assert(/SpeechSynthesisUtterance/.test(src), 'LectureReader 未用 Web Speech API');
+  assert(/zhouAvatar/.test(src), 'LectureReader 未用周老师头像');
+  assert(/export function cleanScriptForSpeech/.test(src), '未导出 cleanScriptForSpeech');
+});
+
+test('功能5 · cleanScriptForSpeech 去除 markdown 标记（行为验证）', () => {
+  // jsx 不能直接 require（含 import png），用源码逻辑等价验证：正则规则存在
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'LectureReader.jsx'), 'utf8');
+  assert(/replace\(\/\^#\+\\s\*\/gm/.test(src) || /\^#\+/.test(src), '未去除标题井号');
+  assert(/\\\*\\\*\(\.\*\?\)\\\*\\\*/.test(src) || /\*\*/.test(src), '未去除加粗标记');
+});
+
+test('功能5 · LectureStage 加"周老师朗读"按钮 + 渲染 LectureReader', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'LectureStage.jsx'), 'utf8');
+  assert(/周老师朗读/.test(src), 'LectureStage 缺"周老师朗读"按钮');
+  assert(/setReaderOpen\(true\)/.test(src), '朗读按钮未触发 setReaderOpen');
+  assert(/<LectureReader\s/.test(src), '未渲染 LectureReader');
+  // 仅 finalScript 存在时显示朗读按钮
+  assert(/lessonForm\.finalScript \? \(\s*<button[\s\S]{0,200}周老师朗读/.test(src)
+       || /finalScript[\s\S]{0,300}周老师朗读/.test(src),
+    '朗读按钮未限定 finalScript 存在时显示');
+});
+
+test('功能5 · 语速默认档参考周老师真人录音（0.9× 标准档）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'LectureReader.jsx'), 'utf8');
+  assert(/标准·周老师/.test(src), '缺"标准·周老师"语速档');
+  assert(/useState\(0\.9\)/.test(src), '默认语速未设为 0.9×（周老师参考档）');
+});
+
 // ── 结果汇总 ─────────────────────────────────────────────────────────────
 console.log(`\n═══ 结果：${pass}/${pass + fail} 通过 ═══`);
 if (fail > 0) {

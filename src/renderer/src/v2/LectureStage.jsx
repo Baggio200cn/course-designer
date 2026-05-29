@@ -16,6 +16,8 @@ import ArtifactPanel from './ArtifactPanel';
 import LectureChatPanel from './LectureChatPanel';   // v4.3.0 D6.3
 // v4.3.3 新版 · 预览全屏（讲稿正式稿大屏阅读模式）
 import { PreviewFullscreen, PreviewFullscreenToggle } from './PreviewFullscreen';
+// v4.3.3 功能5（老师反馈）· 讲稿朗读（周老师卡通 + 语速）
+import { LectureReader } from './LectureReader';
 
 const DEFAULT_LESSON = {
   lessonNumber: 1,
@@ -57,6 +59,8 @@ export default function LectureStage({
   // ── 节课列表 + 当前编辑节课 ─────────────────────────────────────
   // v4.3.3 新版：讲稿最大化预览
   const [lecturePreviewFs, setLecturePreviewFs] = useState(false);
+  // v4.3.3 功能5：讲稿朗读面板开关
+  const [readerOpen, setReaderOpen] = useState(false);
   const [lessons, setLessons] = useState([]);     // [{id, lessonNumber, topic, theoryHours, ...}]
   const [usedHours, setUsedHours] = useState(0);
   const [currentLessonId, setCurrentLessonId] = useState(null);   // 编辑中的节课 artifact id；null=新建
@@ -1053,6 +1057,15 @@ export default function LectureStage({
                   label="最大化阅读"
                 />
               ) : null}
+              {/* v4.3.3 功能5（老师反馈）· 周老师朗读试听（Web Speech API，语速可调）*/}
+              {lessonForm.finalScript ? (
+                <button
+                  type="button"
+                  className="v2-btn v2-btn-xs v2-btn-secondary"
+                  onClick={() => setReaderOpen(true)}
+                  title="周老师按真人语速朗读正式稿，帮你打磨课堂节奏"
+                >🔊 周老师朗读</button>
+              ) : null}
             </div>
           </div>
           <div style={{
@@ -1562,6 +1575,13 @@ export default function LectureStage({
           }}>{lessonForm.finalScript}</pre>
         </PreviewFullscreen>
       ) : null}
+
+      {/* v4.3.3 功能5：周老师朗读讲稿正式稿（Web Speech API + 语速可调） */}
+      <LectureReader
+        open={readerOpen}
+        script={lessonForm.finalScript}
+        onClose={() => setReaderOpen(false)}
+      />
     </section>
   );
 }
