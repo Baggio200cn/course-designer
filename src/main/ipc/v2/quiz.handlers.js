@@ -15,18 +15,33 @@
 const { generateQuizFromPpt } = require('../../services/quiz.service');
 const { resolveProviderConfig, createAiClientByConfig } = require('../../api/provider-config');
 
+// v4.3.3 Bug1 修复（2026-05-29）：测验找 PPT 加鲁棒回退
+//   根因：runtime.savePptStage 仅在 lessonContext.lessonNumber 有值时才写 metadata.lessonNumber，
+//         单节场景 / 直接进 PPT 阶段时 metadata 可能缺 lessonNumber → 严格精确匹配永远落空，
+//         报"本节尚无 PPT artifact"。
+//   策略：① 精确匹配 lessonNumber 优先 → ② 若没有任何 PPT 标注过节次（老数据/单节）回退用最新
+//        → ③ 有节次标注但都不等于选中节，才返回 null（让 caller 明确提示"选错节/该节未生成"）
+function pickLatestByLesson(items, type, stage, lessonNumber) {
+  const all = items
+    .filter((a) => a.type === type && a.stage === stage)
+    .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+  if (all.length === 0) return null;
+  // ① 精确匹配
+  const exact = all.find((a) => Number(a.metadata?.lessonNumber) === Number(lessonNumber));
+  if (exact) return exact;
+  // ② 没有任何 artifact 标注过正整数节次 → 单节/老数据场景，回退用最新
+  const anyLabeled = all.some((a) => Number(a.metadata?.lessonNumber) > 0);
+  if (!anyLabeled) return all[0];
+  // ③ 有节次标注但都不匹配选中节 → null（caller 友好报错）
+  return null;
+}
+
 function pickLatestPptByLesson(items, lessonNumber) {
-  return items
-    .filter((a) => a.type === 'ppt_outline' && a.stage === 'ppt'
-      && Number(a.metadata?.lessonNumber) === Number(lessonNumber))
-    .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))[0] || null;
+  return pickLatestByLesson(items, 'ppt_outline', 'ppt', lessonNumber);
 }
 
 function pickLatestLectureByLesson(items, lessonNumber) {
-  return items
-    .filter((a) => a.type === 'lecture_final' && a.stage === 'lecture'
-      && Number(a.metadata?.lessonNumber) === Number(lessonNumber))
-    .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))[0] || null;
+  return pickLatestByLesson(items, 'lecture_final', 'lecture', lessonNumber);
 }
 
 function register(ipcMain, getDeps) {
@@ -49,7 +64,12 @@ function register(ipcMain, getDeps) {
       const items = db.listArtifacts({ notebookId });
       const pptArtifact = pickLatestPptByLesson(items, lessonNumber);
       if (!pptArtifact) {
-        return { success: false, error: `本节（第 ${lessonNumber} 节）尚无 PPT artifact，无法出题` };
+        // v4.3.3 Bug1：区分"完全没 PPT"和"选错节"两种情况，给可执行提示
+        const anyPpt = items.some((a) => a.type === 'ppt_outline' && a.stage === 'ppt');
+        const error = anyPpt
+          ? `第 ${lessonNumber} 节没有对应的 PPT。已有其它节次的 PPT，请确认上方"选择节课"选对了节次；或回到"教学课件"阶段为第 ${lessonNumber} 节生成 PPT。`
+          : `本笔记本尚未生成任何 PPT。请先回到"教学课件"阶段生成并确认 PPT，再来出题。`;
+        return { success: false, error };
       }
       const lectureArtifact = pickLatestLectureByLesson(items, lessonNumber);
       const pptPages = Array.isArray(pptArtifact.content?.pages) ? pptArtifact.content.pages
@@ -181,4 +201,5 @@ function register(ipcMain, getDeps) {
   });
 }
 
-module.exports = { register };
+// v4.3.3 Bug1：导出 pickLatestByLesson 供行为单测（验证节次匹配回退逻辑）
+module.exports = { register, pickLatestByLesson, pickLatestPptByLesson };
