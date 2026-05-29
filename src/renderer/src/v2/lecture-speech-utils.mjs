@@ -55,11 +55,14 @@ export function splitScriptIntoChunks(text, maxLen = 180) {
     if (s.length <= maxLen) pieces.push(s);
     else pieces.push(...hardSplit(s, maxLen));
   }
+  // v4.3.3 Codex R3（问题1）：合并相邻短句时用空格分隔，给无句末标点的列表项/短句
+  //   之间留出朗读停顿，避免"要点一要点二"黏读（空格在 TTS 中产生轻微停顿，不改语义）。
   const chunks = [];
   let buf = '';
   for (const p of pieces) {
-    if (buf && (buf + p).length > maxLen) { chunks.push(buf); buf = p; }
-    else buf += p;
+    const joined = buf ? `${buf} ${p}` : p;
+    if (buf && joined.length > maxLen) { chunks.push(buf); buf = p; }
+    else buf = joined;
   }
   if (buf) chunks.push(buf);
   return chunks;
