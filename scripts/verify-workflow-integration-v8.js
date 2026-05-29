@@ -1575,6 +1575,24 @@ test('CodexR1 · migration 005 回填 metadata.lessonNumber 存在', () => {
     `005 未回填 metadata.lessonNumber（实际 ${JSON.stringify(data.artifacts[0].metadata)}）`);
 });
 
+// ── 【30】Codex 审计第1轮·C 讲稿分段朗读 + 可见合规提醒 ──────────────────────
+console.log('\n【30】Codex 审计第1轮·LectureReader 分段朗读 + 可见合规提醒');
+
+test('CodexR1-C · LectureReader 分段队列朗读（splitScriptIntoChunks + voiceschanged）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'LectureReader.jsx'), 'utf8');
+  assert(/splitScriptIntoChunks/.test(src), '未实现 splitScriptIntoChunks 分段');
+  assert(/voiceschanged/.test(src), '未监听 voiceschanged（部分环境首次 getVoices 为空）');
+  assert(/speakChunk/.test(src), '未实现分段队列朗读 speakChunk');
+  // onend 链式播下一段
+  assert(/onend\s*=\s*\(\)\s*=>\s*\{[^}]*speakChunk\(idx \+ 1/.test(src), 'onend 未链式播下一段');
+});
+
+test('CodexR1-C · 可见合规提醒（防误用于参赛视频配音）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'LectureReader.jsx'), 'utf8');
+  assert(/v2-reader-compliance/.test(src), '缺可见合规提醒 UI（不只注释）');
+  assert(/参赛演示视频的解说请用真人录音/.test(src), '合规提醒文案缺失');
+});
+
 // ── 结果汇总 ─────────────────────────────────────────────────────────────
 console.log(`\n═══ 结果：${pass}/${pass + fail} 通过 ═══`);
 if (fail > 0) {
