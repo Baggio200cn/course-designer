@@ -298,10 +298,24 @@ export default function ScheduleStage({
                   methodPool={schedule?.methods || []}
                   /* 2026-05-17 v4.2.0 Step 1.5：表格内编辑 method 等字段，立即同步到 scheduleState */
                   onRowEdit={(rowIndex, field, value) => {
+                    // v4.3.3 Codex 审计R1（问题7）：数字列输入边界校验，
+                    //   避免中间态/非法值变 NaN → JSON 序列化成 null 污染学时守恒。
+                    let safeValue = value;
+                    const NUMERIC_FIELDS = ['week', 'session', 'hours', 'homework'];
+                    if (NUMERIC_FIELDS.includes(field)) {
+                      if (value === null || value === '' || value === undefined) {
+                        safeValue = null;            // 清空 = null（不是 NaN）
+                      } else {
+                        const n = Number(value);
+                        // 非法 / 负数 → 丢弃本次输入（保持原值，不写 NaN）
+                        if (!Number.isFinite(n) || n < 0) return;
+                        safeValue = n;
+                      }
+                    }
                     setScheduleState((prev) => {
                       if (!prev.schedule) return prev;
                       const newRows = [...prev.schedule.schedule];
-                      newRows[rowIndex] = { ...newRows[rowIndex], [field]: value };
+                      newRows[rowIndex] = { ...newRows[rowIndex], [field]: safeValue };
                       const newSchedule = { ...prev.schedule, schedule: newRows };
                       return {
                         ...prev,

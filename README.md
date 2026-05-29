@@ -2,8 +2,8 @@
 
 > **职业教育 8 阶段课程开发 Workflow Agent** — Electron + React + JSON DB + 火山引擎（豆包）API
 >
-> 当前版本：**v4.3.3**（commit `dcecca8` · Codex Round 19 收口 · 175/175 自动验证通过）
-> 最后更新：2026-05-20
+> 当前版本：**v4.3.3**（Codex 审计第 1 轮收口 · 200/200 自动验证通过）
+> 最后更新：2026-05-30
 
 ---
 
@@ -13,13 +13,13 @@
 
 > 模型是不稳定组件，框架约束它——不依赖模型自律，用工程化手段保证输出质量。
 
-### 当前状态（2026-05-20）
+### 当前状态（2026-05-30）
 
 | 项 | 详情 |
 |---|---|
-| 版本 | **v4.3.3** · commit `dcecca8` |
+| 版本 | **v4.3.3** · Codex 审计第 1 轮收口 |
 | 工作流 | **8 阶段**（schedule → design → ppt → lecture → quiz → homework → video → report）|
-| 质量门禁 | **4 套 175 条断言全过**：合约 35 + 工作流集成 117 + 数据迁移 17 + 导出物语义 6 |
+| 质量门禁 | **4 套 200 条断言全过**：合约 35 + 工作流集成 142 + 数据迁移 17 + 导出物语义 6 |
 | Codex 审计 | 19 轮治理收口（含真实交付物语义验收）|
 | 当前安装包 | `dist/驭课Agent-v4.3.3-setup.exe`（含 Round 18/19 全部修复）|
 
@@ -103,7 +103,7 @@ npm run verify:release
 
 ### 验证脚本
 
-4 套自动验证（共 175 条断言）：
+4 套自动验证（共 200 条断言）：
 
 ```bash
 # 快速门禁（开发期、PR、CI 普通分支必跑）—— 跑全部 4 套
@@ -121,7 +121,7 @@ npm run verify:release      # 任一失败即 exit 1
 
 ```bash
 npm run verify:contracts        # 35/35 · 8 阶段 STAGE_ORDER / REQUIREMENTS / unlock 链合约自检
-npm run verify:integration      # 117/117 · 工作流集成 + 19 轮治理收口防回归
+npm run verify:integration      # 142/142 · 工作流集成 + 19 轮治理收口防回归
 npm run verify:migrations       # 17/17 · 4 个数据迁移行为验证（runner + 003 + 004）
 npm run verify:export-content   # 6/6  · 导出物级正文断言（Round 19 新增） ⭐
 npm run verify:e2e:mock         # mock 8 阶段闭环 + artifact validator strict 模式
@@ -255,7 +255,9 @@ course-designer/
 
 | 版本 | 日期 | 关键改动 |
 |---|---|---|
-| **v4.3.3 dcecca8** | 2026-05-20 | **Round 19 收口** · 导出物级语义验证 + report 5 段法字段保留 + micro-video 5 字段对齐 |
+| **v4.3.3 Codex审计R1** | 2026-05-30 | **Bug1 真根因** createArtifact 存 metadata + 统一多来源节次解析（quiz/homework/report 防串课）+ migration 005 回填 + 进度表输入边界 + 讲稿分段朗读 |
+| v4.3.3 老师反馈 | 2026-05-29 | Bug1 测验找 PPT 回退 + Bug2 报告解锁提示 + 功能3 进度表可编辑 + 功能4 卡通老师助手 + 功能5 讲稿朗读 |
+| v4.3.3 dcecca8 | 2026-05-20 | **Round 19 收口** · 导出物级语义验证 + report 5 段法字段保留 + micro-video 5 字段对齐 |
 | v4.3.3 f61216b | 2026-05-20 | **Round 18 · 端到端测试报告 4 项修复** · A web-extractor / B 微课 Word 导出 / C 三入口 schema 守卫 / D Vision 可观测 |
 | v4.3.3 238d8a6 | 2026-05-20 | **新 icon（绿底金马·驭字）** + 4 个预览页面最大化 + 排版升级 |
 | v4.3.3 304ca17 | 2026-05-19 | Round 17 · report-upstream.helper 抽独立模块 + 10 条真行为单测 |
