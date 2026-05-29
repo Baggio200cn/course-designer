@@ -159,6 +159,24 @@ function resolveStageState({ stage, currentStage, unlockedStages, quality, artif
   const completed = nextStage ? arr(unlockedStages).includes(nextStage) : confirmedCount > 0;
 
   if (locked) {
+    // v4.3.3 Bug2 修复（老师反馈 · 2026-05-29）：
+    //   实施报告需前 7 个阶段全部 confirmed 才解锁。老师反馈"微课确认了报告仍不解锁"，
+    //   根因是教学课件/课堂讲稿处于"可继续·有改进建议"状态未点确认。
+    //   这里在 report 卡 locked 时，明确列出还差哪几个阶段确认（不再笼统"等待上一步"）。
+    if (stage === 'report') {
+      const upstreamOrder = ['schedule', 'design', 'ppt', 'lecture', 'quiz', 'homework', 'video'];
+      const upstreamTitle = {
+        schedule: '教学进度表', design: '教学设计', ppt: '教学课件', lecture: '课堂讲稿',
+        quiz: '在线测验', homework: '课后作业', video: '微课视频',
+      };
+      const missing = upstreamOrder.filter((s) => {
+        const types = STAGE_PRIMARY_ARTIFACTS[s] || [];
+        return !safeArtifacts.some((a) => types.includes(a.type) && artifactIsConfirmed(a));
+      }).map((s) => upstreamTitle[s]);
+      if (missing.length > 0) {
+        return { key: 'locked', label: '未解锁', tone: 'neutral', detail: `还需确认：${missing.join('、')}` };
+      }
+    }
     return { key: 'locked', label: '未解锁', tone: 'neutral', detail: '等待上一步确认后开放' };
   }
   if (quality?.valid === false) {
@@ -3004,8 +3022,14 @@ export default function V2App() {
     const res = await api.confirmMicroVideoV2({ notebookId: selectedNotebookId, artifactId: microVideoState.artifactId });
     if (!res?.success) { window.alert(`确认失败：${res?.error || '未知'}`); return; }
     setMicroVideoState((prev) => ({ ...prev, confirmed: true }));
-    setAssistantStatus('微课视频方案已确认，实施报告阶段已解锁。');
     await loadNotebookContext(selectedNotebookId);
+    // v4.3.3 Bug2 修复（老师反馈）：不再无条件说"已解锁"——实施报告需前 7 阶段全部确认。
+    //   loadNotebookContext 刷新后按真实 unlockedStages 给提示，避免误导。
+    const wf = await api.getWorkflowState(selectedNotebookId).catch(() => null);
+    const reportUnlocked = arr(wf?.unlockedStages || wf?.data?.unlockedStages).includes('report');
+    setAssistantStatus(reportUnlocked
+      ? '微课视频方案已确认，实施报告阶段已解锁。'
+      : '微课视频方案已确认。实施报告需"教学课件 / 课堂讲稿 / 在线测验 / 课后作业 / 微课视频"等前置阶段全部点过"确认"才解锁——请检查上方卡片是否还有未确认的阶段。');
   };
   const handleCopyJimengPrompts = async () => {
     const prompts = microVideoState.microVideo?.jimengPrompts || [];

@@ -1382,6 +1382,27 @@ test('Bug1 · quiz.handlers 报错提示区分"完全没PPT"和"选错节"', () 
   assert(/选对了节次|为第.*节生成 PPT/.test(src), '缺"选错节/该节未生成"的友好提示');
 });
 
+// ── 【25】v4.3.3 老师反馈·Bug2 微课确认不解锁报告（UI 提示修正）─────────────
+console.log('\n【25】v4.3.3 老师反馈·Bug2 报告解锁缺失项提示 + 微课确认提示修正');
+
+test('Bug2 · resolveStageState 对 report locked 显示缺失确认项（不再笼统"等待上一步"）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'V2App.jsx'), 'utf8');
+  // report locked 分支必须计算 missing 上游并显示"还需确认："
+  assert(/stage\s*===\s*['"]report['"]/.test(src), 'resolveStageState 未对 report 单独处理 locked');
+  assert(/还需确认：/.test(src), 'report locked 未显示"还需确认：..."缺失项');
+  // 必须遍历 7 个上游阶段主产物的 confirmed 状态
+  assert(/upstreamOrder|upstreamTitle/.test(src), 'report locked 缺上游阶段缺失计算');
+});
+
+test('Bug2 · 微课确认提示不再无条件说"已解锁"', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'V2App.jsx'), 'utf8');
+  // 旧的无条件 "微课视频方案已确认，实施报告阶段已解锁。" 不能再单独出现（应改为条件式）
+  // 现在应按 reportUnlocked 条件分支给提示
+  assert(/reportUnlocked/.test(src), '微课确认未按 reportUnlocked 条件给提示');
+  assert(/前置阶段全部点过|全部点过.*确认.*才解锁|前置.*确认.*才解锁/.test(src),
+    '微课确认未在未解锁时提示"前置阶段需全部确认"');
+});
+
 // ── 结果汇总 ─────────────────────────────────────────────────────────────
 console.log(`\n═══ 结果：${pass}/${pass + fail} 通过 ═══`);
 if (fail > 0) {
