@@ -1463,20 +1463,24 @@ test('功能4 · V2App 阶段卡挂头像按钮 + 弹 StageAssistant', () => {
 // ── 【28】v4.3.3 老师反馈·功能5 讲稿朗读（周老师 + 语速）─────────────────────
 console.log('\n【28】v4.3.3 老师反馈·功能5 讲稿朗读');
 
-test('功能5 · LectureReader 组件存在 + 导出 cleanScriptForSpeech', () => {
+test('功能5 · LectureReader 组件存在 + 从 .mjs 工具引入分段算法（Codex R2 重构）', () => {
   const comp = path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'LectureReader.jsx');
   assert(fs.existsSync(comp), 'LectureReader.jsx 不存在');
   const src = fs.readFileSync(comp, 'utf8');
   assert(/SpeechSynthesisUtterance/.test(src), 'LectureReader 未用 Web Speech API');
   assert(/zhouAvatar/.test(src), 'LectureReader 未用周老师头像');
-  assert(/export function cleanScriptForSpeech/.test(src), '未导出 cleanScriptForSpeech');
+  // Codex R2：分段算法抽到 lecture-speech-utils.mjs，LectureReader 从中 import
+  assert(/from '\.\/lecture-speech-utils\.mjs'/.test(src), 'LectureReader 未从 .mjs 工具引入');
 });
 
-test('功能5 · cleanScriptForSpeech 去除 markdown 标记（行为验证）', () => {
-  // jsx 不能直接 require（含 import png），用源码逻辑等价验证：正则规则存在
-  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'LectureReader.jsx'), 'utf8');
-  assert(/replace\(\/\^#\+\\s\*\/gm/.test(src) || /\^#\+/.test(src), '未去除标题井号');
-  assert(/\\\*\\\*\(\.\*\?\)\\\*\\\*/.test(src) || /\*\*/.test(src), '未去除加粗标记');
+test('功能5 · lecture-speech-utils.mjs 导出 cleanScriptForSpeech / splitScriptIntoChunks', () => {
+  // 真实行为测试在 verify-export-content-v8.js（async await import）；这里查 .mjs 导出存在
+  const util = path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'lecture-speech-utils.mjs');
+  assert(fs.existsSync(util), 'lecture-speech-utils.mjs 不存在');
+  const src = fs.readFileSync(util, 'utf8');
+  assert(/export function cleanScriptForSpeech/.test(src), '.mjs 未导出 cleanScriptForSpeech');
+  assert(/export function splitScriptIntoChunks/.test(src), '.mjs 未导出 splitScriptIntoChunks');
+  assert(/export function hardSplit/.test(src), '.mjs 未导出 hardSplit（超长句硬切）');
 });
 
 test('功能5 · LectureStage 加"周老师朗读"按钮 + 渲染 LectureReader', () => {
@@ -1591,6 +1595,33 @@ test('CodexR1-C · 可见合规提醒（防误用于参赛视频配音）', () =
   const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'LectureReader.jsx'), 'utf8');
   assert(/v2-reader-compliance/.test(src), '缺可见合规提醒 UI（不只注释）');
   assert(/参赛演示视频的解说请用真人录音/.test(src), '合规提醒文案缺失');
+});
+
+// ── 【31】Codex 审计第2轮·讲稿朗读鲁棒性收口 ────────────────────────────────
+console.log('\n【31】Codex 审计第2轮·讲稿朗读鲁棒性（硬切 + onerror 显式 + script 停止）');
+
+test('CodexR2 · onerror 不再静默跳过（区分 interrupted + 显式 setError）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'LectureReader.jsx'), 'utf8');
+  // onerror 必须区分 interrupted/canceled（正常取消）+ 其它真错 setError
+  assert(/onerror\s*=\s*\(e\)\s*=>/.test(src), 'onerror 未接收 error 事件参数');
+  assert(/interrupted'\s*\|\|\s*kind === 'canceled'/.test(src) || /interrupted.*canceled/.test(src),
+    'onerror 未区分 interrupted/canceled 正常事件');
+  assert(/setError\(/.test(src), 'onerror 真错时未 setError 显式提示（仍静默）');
+});
+
+test('CodexR2 · script 变化时停止朗读（防旧闭包进度/内容不一致）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'LectureReader.jsx'), 'utf8');
+  assert(/useMemo\(\(\)\s*=>\s*splitScriptIntoChunks\(script\),\s*\[script\]\)/.test(src),
+    'chunks 未用 useMemo 固定（script 变化不重算）');
+  // 有一个 useEffect 监听 [script] 停止朗读
+  assert(/useEffect\([\s\S]{0,400}cancelledRef\.current = true[\s\S]{0,200}\[script\]\)/.test(src),
+    'script 变化未停止当前朗读');
+});
+
+test('CodexR2 · 分段行为测试已接入 verify:export-content（真实 await import）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'scripts', 'verify-export-content-v8.js'), 'utf8');
+  assert(/lecture-speech-utils\.mjs/.test(src), 'export-content 未引入 .mjs 做真实行为测试');
+  assert(/所有 chunk 都 ≤ 180/.test(src), '缺"500字无标点≤180"行为断言');
 });
 
 // ── 结果汇总 ─────────────────────────────────────────────────────────────

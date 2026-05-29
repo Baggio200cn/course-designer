@@ -278,6 +278,41 @@ async function main() {
     assert(threw, 'video schema 守卫未拦住缺 narrationScript');
   });
 
+  // ───────── 4. 讲稿分段朗读（Codex R2 真实行为测试，await import ESM）─────────
+  console.log('\n【4】lecture-speech-utils 分段算法行为测试（Codex 审计第2轮）');
+  const { pathToFileURL } = require('url');
+  const speechUrl = pathToFileURL(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'lecture-speech-utils.mjs')).href;
+  const speech = await import(speechUrl);
+
+  await test('R2 · 500 字无标点文本：所有 chunk 都 ≤ 180（超长句硬切）', async () => {
+    const long = '啊'.repeat(500);
+    const chunks = speech.splitScriptIntoChunks(long, 180);
+    assert(chunks.length > 0, '应切出多个块');
+    assert(chunks.every((c) => c.length <= 180), `存在超长块：${chunks.map((c) => c.length).join(',')}`);
+    // 内容不丢（无标点纯字符）
+    assert(chunks.join('').length === 500, `内容丢失：合计 ${chunks.join('').length} ≠ 500`);
+  });
+
+  await test('R2 · 超长逗号句在逗号断 + 每块 ≤ 180', async () => {
+    const longComma = '词，'.repeat(150); // 450 字
+    const chunks = speech.splitScriptIntoChunks(longComma, 180);
+    assert(chunks.every((c) => c.length <= 180), '逗号句未保证 ≤ 180');
+  });
+
+  await test('R2 · 普通中文段落顺序与内容不丢', async () => {
+    const normal = '第一句话。第二句话！第三句话？第四句话；';
+    const chunks = speech.splitScriptIntoChunks(normal, 180);
+    const joined = chunks.join('').replace(/\s/g, '');
+    assert(joined === normal.replace(/\s/g, ''), `内容/顺序变了：${joined}`);
+  });
+
+  await test('R2 · cleanScriptForSpeech 去 markdown 标记', async () => {
+    const md = '## 第 1 页\n**教师讲述：** 内容\n- 要点一';
+    const clean = speech.cleanScriptForSpeech(md);
+    assert(!/[#*\-]/.test(clean.replace(/[一-龥]/g, '')), `markdown 残留：${clean}`);
+    assert(/教师讲述/.test(clean) && /内容/.test(clean), '正文被误删');
+  });
+
   // ───────── 结果汇总 ─────────
   console.log(`\n═══ 结果：${pass}/${pass + fail} 通过 ═══`);
 

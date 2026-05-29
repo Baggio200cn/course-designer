@@ -11,8 +11,10 @@
  *   不要用本朗读做配音（指南"原则上不能使用软件生成逐字稿配音"）。
  */
 'use strict';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import zhouAvatar from '../assets/avatars/zhou.png';
+// v4.3.3 Codex 审计R2：分段算法抽到纯工具（可真实单测），含超长句硬切保证 ≤ maxLen
+import { cleanScriptForSpeech, splitScriptIntoChunks } from './lecture-speech-utils.mjs';
 
 // 中文讲课语速档位（参考周老师真人录音节奏）
 const SPEED_PRESETS = [
@@ -21,38 +23,8 @@ const SPEED_PRESETS = [
   { label: '稍快', rate: 1.1 },
 ];
 
-// 去 markdown 标记，保留可朗读正文
-export function cleanScriptForSpeech(text) {
-  return String(text || '')
-    .replace(/^#+\s*/gm, '')             // 标题井号
-    .replace(/\*\*(.*?)\*\*/g, '$1')      // 加粗
-    .replace(/^\s*[-•*]\s+/gm, '')        // 列表符号
-    .replace(/[#*`>_~|]/g, '')            // 残余 markdown 符号
-    .replace(/\n{2,}/g, '\n')             // 多空行
-    .trim();
-}
-
-// v4.3.3 Codex 审计R1（问题6）：长讲稿分段
-//   一次性塞整篇进 SpeechSynthesisUtterance，Chromium/Web Speech 容易卡住/截断/不触发 onend。
-//   按句子/段落切成 ≤ 180 字的小块，排队朗读，稳定且可中途停止。
-export function splitScriptIntoChunks(text, maxLen = 180) {
-  const clean = cleanScriptForSpeech(text);
-  if (!clean) return [];
-  // 先按换行/句末标点切句，再按 maxLen 合并成块
-  const sentences = clean.split(/(?<=[。！？!?；;\n])/).map((s) => s.trim()).filter(Boolean);
-  const chunks = [];
-  let buf = '';
-  for (const s of sentences) {
-    if ((buf + s).length > maxLen && buf) {
-      chunks.push(buf);
-      buf = s;
-    } else {
-      buf += s;
-    }
-  }
-  if (buf) chunks.push(buf);
-  return chunks;
-}
+// 兼容旧导出（其它处若有引用）
+export { cleanScriptForSpeech, splitScriptIntoChunks };
 
 export function LectureReader({ open, script, onClose }) {
   const [rate, setRate] = useState(0.9);
@@ -60,16 +32,19 @@ export function LectureReader({ open, script, onClose }) {
   const [paused, setPaused] = useState(false);
   const [supported, setSupported] = useState(true);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [error, setError] = useState('');     // v4.3.3 Codex R2：TTS 错误显式暴露
   const voicesRef = useRef([]);
   const cancelledRef = useRef(false);
+
+  // v4.3.3 Codex R2（问题4）：用 useMemo 固定 chunks，script 变化时重算并停止朗读，
+  //   避免朗读中讲稿被重生成导致"进度与实际内容不一致"。
+  const chunks = useMemo(() => splitScriptIntoChunks(script), [script]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.speechSynthesis || typeof window.SpeechSynthesisUtterance === 'undefined') {
       setSupported(false);
       return undefined;
     }
-    // v4.3.3 Codex 审计R1（问题6）：voiceschanged —— 部分环境首次 getVoices() 为空，
-    //   需监听 voiceschanged 才能拿到中文音色
     const loadVoices = () => { voicesRef.current = window.speechSynthesis.getVoices() || []; };
     loadVoices();
     window.speechSynthesis.addEventListener?.('voiceschanged', loadVoices);
@@ -79,8 +54,14 @@ export function LectureReader({ open, script, onClose }) {
     };
   }, []);
 
+  // script 变化（重生成讲稿）→ 停止当前朗读 + 清进度/错误
+  useEffect(() => {
+    cancelledRef.current = true;
+    try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch (_) { /* noop */ }
+    setSpeaking(false); setPaused(false); setProgress({ done: 0, total: 0 }); setError('');
+  }, [script]);
+
   if (!open) return null;
-  const chunks = splitScriptIntoChunks(script);
 
   const pickZhVoice = () => {
     const voices = voicesRef.current.length ? voicesRef.current : (window.speechSynthesis.getVoices() || []);
@@ -99,20 +80,32 @@ export function LectureReader({ open, script, onClose }) {
     u.rate = rate;
     if (zhVoice) u.voice = zhVoice;
     u.onend = () => { if (!cancelledRef.current) speakChunk(idx + 1, zhVoice); };
-    u.onerror = () => { if (!cancelledRef.current) speakChunk(idx + 1, zhVoice); };
+    // v4.3.3 Codex R2（问题2）：onerror 不再静默跳过。
+    //   'interrupted'/'canceled' 是用户停止导致的正常事件，忽略；其它（synthesis-failed /
+    //   audio-busy / 语音不可用等）首次就停止队列并显式提示，避免"一路跑完但没声音"。
+    u.onerror = (e) => {
+      if (cancelledRef.current) return;
+      const kind = e && e.error;
+      if (kind === 'interrupted' || kind === 'canceled') return;
+      cancelledRef.current = true;
+      setSpeaking(false); setPaused(false);
+      setError(`朗读出错（${kind || '语音引擎不可用'}）。请检查系统是否安装中文语音，或改用真人录音。`);
+    };
     window.speechSynthesis.speak(u);
   };
 
   const start = () => {
-    if (!supported) { window.alert('当前环境不支持语音朗读（需要 Electron / Chrome）。'); return; }
-    if (chunks.length === 0) { window.alert('正式稿为空，无法朗读。'); return; }
+    if (!supported) { setError('当前环境不支持语音朗读（需要 Electron / Chrome）。'); return; }
+    if (chunks.length === 0) { setError('正式稿为空，无法朗读。'); return; }
     try {
       window.speechSynthesis.cancel();
       cancelledRef.current = false;
+      setError('');
       setSpeaking(true); setPaused(false);
       speakChunk(0, pickZhVoice());
     } catch (e) {
-      window.alert(`朗读失败：${e.message}`);
+      setError(`朗读失败：${e.message}`);
+      setSpeaking(false);
     }
   };
   const pause = () => { try { window.speechSynthesis.pause(); setPaused(true); } catch (_) { /* noop */ } };
@@ -166,6 +159,8 @@ export function LectureReader({ open, script, onClose }) {
               {speaking ? ` · 朗读中 ${progress.done + 1}/${chunks.length}` : ''}
               {' · 调整语速后请重新点"开始朗读"生效'}
             </div>
+            {/* v4.3.3 Codex R2（问题2）：TTS 错误显式提示，不再静默 */}
+            {error ? <div className="v2-reader-warn" style={{ marginTop: 10 }}>{error}</div> : null}
             {/* v4.3.3 Codex 审计R1（问题6）：可见合规提醒，防误用于参赛视频配音 */}
             <div className="v2-reader-compliance">
               ⚠ 此为软件内试听功能，帮你打磨课堂语速。<strong>参赛演示视频的解说请用真人录音</strong>，
