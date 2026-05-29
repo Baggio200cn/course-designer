@@ -279,7 +279,7 @@ export default function ScheduleStage({
           <>
             <div className="v2-panel">
               <div className="v2-panel-head">
-                <h3>{viewMode === 'table' ? '进度表预览（点表格内单元格可在 JSON 模式下编辑）' : '进度表 JSON（编辑后点保存）'}</h3>
+                <h3>{viewMode === 'table' ? '进度表预览（可直接在表格内编辑各列，改完点上方"保存"）' : '进度表 JSON（编辑后点保存）'}</h3>
                 <div className="v2-inline-actions">
                   <button
                     className={`v2-btn v2-btn-xs ${viewMode === 'table' ? 'v2-btn-primary' : 'v2-btn-secondary'}`}
@@ -560,7 +560,7 @@ function SchedulePreviewTable({ schedule, onRowEdit, methodPool = [] }) {
       }}>
         {hoursOk
           ? `✓ 学时守恒：${rows.length} 条课次 · 合计 ${totalHoursFromRows} 学时${headerTotalHours ? ` / 目标 ${headerTotalHours}` : ''}`
-          : `⚠ 学时不守恒！${rows.length} 条课次合计 ${totalHoursFromRows} 学时，但表头总学时为 ${headerTotalHours} —— 请在 JSON 模式下修正每行 hours 后保存`}
+          : `⚠ 学时不守恒！${rows.length} 条课次合计 ${totalHoursFromRows} 学时，但表头总学时为 ${headerTotalHours} —— 可直接在表格"学时"列修改每行后点保存`}
       </div>
       <table style={tableStyle}>
         <thead>
@@ -577,11 +577,22 @@ function SchedulePreviewTable({ schedule, onRowEdit, methodPool = [] }) {
         <tbody>
           {rows.map((r, i) => (
             <tr key={i} style={i % 2 === 0 ? trEvenStyle : trOddStyle}>
-              <td style={tdCenterStyle}>{r.week ?? '—'}</td>
-              <td style={tdCenterStyle}>{r.session ?? '—'}</td>
-              <td style={tdCenterStyle}>{r.chapter || '—'}</td>
-              <td style={tdStyle}>{r.content || '—'}</td>
-              <td style={{ ...tdCenterStyle, fontWeight: 600, color: '#2563eb' }}>{r.hours ?? '—'}</td>
+              {/* v4.3.3 功能3（老师反馈 2026-05-29）：周次/课次/章节/内容/学时 全部可直接表格内编辑（不再只能 JSON） */}
+              <td style={tdCenterStyle}>{onRowEdit
+                ? <input type="number" value={r.week ?? ''} onChange={(e) => onRowEdit(i, 'week', e.target.value === '' ? null : Number(e.target.value))} style={cellNumInputStyle} />
+                : (r.week ?? '—')}</td>
+              <td style={tdCenterStyle}>{onRowEdit
+                ? <input type="number" value={r.session ?? ''} onChange={(e) => onRowEdit(i, 'session', e.target.value === '' ? null : Number(e.target.value))} style={cellNumInputStyle} />
+                : (r.session ?? '—')}</td>
+              <td style={tdCenterStyle}>{onRowEdit
+                ? <input type="text" value={r.chapter || ''} onChange={(e) => onRowEdit(i, 'chapter', e.target.value)} style={{ ...cellNumInputStyle, width: 70 }} placeholder="章节" />
+                : (r.chapter || '—')}</td>
+              <td style={tdStyle}>{onRowEdit
+                ? <textarea value={r.content || ''} onChange={(e) => onRowEdit(i, 'content', e.target.value)} rows={2} style={cellTextAreaStyle} placeholder="教学内容" />
+                : (r.content || '—')}</td>
+              <td style={{ ...tdCenterStyle, fontWeight: 600, color: '#2563eb' }}>{onRowEdit
+                ? <input type="number" value={r.hours ?? ''} onChange={(e) => onRowEdit(i, 'hours', e.target.value === '' ? null : Number(e.target.value))} style={{ ...cellNumInputStyle, color: '#2563eb', fontWeight: 600 }} />
+                : (r.hours ?? '—')}</td>
               {/* 2026-05-17 v4.2.0 Step 1.5：method 列可编辑 + AI 候选 popover */}
               <td style={{ ...tdCenterStyle, position: 'relative', minWidth: 200 }}>
                 {onRowEdit ? (
@@ -678,7 +689,10 @@ function SchedulePreviewTable({ schedule, onRowEdit, methodPool = [] }) {
                   r.method || '—'
                 )}
               </td>
-              <td style={tdCenterStyle}>{r.homework === 0 || r.homework == null ? '/' : r.homework}</td>
+              {/* v4.3.3 功能3：作业次数可编辑 */}
+              <td style={tdCenterStyle}>{onRowEdit
+                ? <input type="number" min="0" value={r.homework ?? ''} onChange={(e) => onRowEdit(i, 'homework', e.target.value === '' ? null : Number(e.target.value))} style={cellNumInputStyle} placeholder="0" />
+                : (r.homework === 0 || r.homework == null ? '/' : r.homework)}</td>
             </tr>
           ))}
           {/* 学时合计行 */}
@@ -738,3 +752,6 @@ const tdStyle = {
 const tdCenterStyle = { ...tdStyle, textAlign: 'center', whiteSpace: 'nowrap' };
 const trEvenStyle = { background: '#FFFFFF' };
 const trOddStyle = { background: '#FAFBFC' };
+// v4.3.3 功能3：进度表单元格可编辑输入框样式
+const cellNumInputStyle = { width: 52, padding: '3px 4px', fontSize: 13, textAlign: 'center', border: '1px solid #cbd5e1', borderRadius: 3, background: '#fff' };
+const cellTextAreaStyle = { width: '100%', minWidth: 200, padding: '4px 6px', fontSize: 13, lineHeight: 1.5, border: '1px solid #cbd5e1', borderRadius: 3, background: '#fff', resize: 'vertical', fontFamily: 'inherit' };

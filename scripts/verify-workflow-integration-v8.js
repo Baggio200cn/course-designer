@@ -1403,6 +1403,30 @@ test('Bug2 · 微课确认提示不再无条件说"已解锁"', () => {
     '微课确认未在未解锁时提示"前置阶段需全部确认"');
 });
 
+// ── 【26】v4.3.3 老师反馈·功能3 进度表整行可编辑 ────────────────────────────
+console.log('\n【26】v4.3.3 老师反馈·功能3 进度表整行可编辑');
+
+test('功能3 · ScheduleStage 进度表 6 列全部接 onRowEdit（不再只 method）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'ScheduleStage.jsx'), 'utf8');
+  ['week', 'session', 'chapter', 'content', 'hours', 'homework'].forEach((field) => {
+    assert(new RegExp(`onRowEdit\\(i,\\s*['"]${field}['"]`).test(src),
+      `进度表 ${field} 列未接 onRowEdit（仍只读，老师改不了）`);
+  });
+});
+
+test('功能3 · 数字列编辑做 Number 转换（学时守恒不被字符串污染）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'ScheduleStage.jsx'), 'utf8');
+  // week/session/hours/homework 数字列应在 onChange 里 Number(...) 转换
+  assert(/onRowEdit\(i,\s*['"]hours['"][^)]*Number\(/.test(src),
+    'hours 列未做 Number 转换（会导致学时守恒计算被字符串污染）');
+});
+
+test('功能3 · 表格标题提示不再误导"只能 JSON 编辑"', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'ScheduleStage.jsx'), 'utf8');
+  assert(/可直接在表格内编辑各列/.test(src), '进度表标题未更新为"可直接在表格内编辑"');
+  assert(!/点表格内单元格可在 JSON 模式下编辑/.test(src), '仍残留"只能 JSON 模式编辑"老提示');
+});
+
 // ── 结果汇总 ─────────────────────────────────────────────────────────────
 console.log(`\n═══ 结果：${pass}/${pass + fail} 通过 ═══`);
 if (fail > 0) {
