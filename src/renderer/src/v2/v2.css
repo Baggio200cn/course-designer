@@ -3312,3 +3312,30 @@ textarea, input, select {
   color: #92400e;
 }
 .v2-reader-compliance strong { color: #b45309; }
+
+/* v4.3.3 功能5+ · 周老师真声（声音复刻）选段试听 */
+.v2-reader-clone {
+  margin-top: 14px;
+  padding: 12px;
+  background: #f5f3ff;
+  border: 1px solid #ddd6fe;
+  border-radius: 10px;
+}
+.v2-reader-clone-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #6d28d9;
+  margin-bottom: 8px;
+}
+.v2-reader-clone-text {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.6;
+  border: 1px solid #c4b5fd;
+  border-radius: 6px;
+  background: #fff;
+  resize: vertical;
+  font-family: inherit;
+  box-sizing: border-box;
+}

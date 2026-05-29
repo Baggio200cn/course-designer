@@ -67,7 +67,10 @@ const API_FORM = {
   arkTextEndpoint: '',
   arkLectureFormalEndpoint: '',  // B6：正式稿专用 endpoint（可选）
   arkImageEndpoint: '',
-  arkVideoEndpoint: ''
+  arkVideoEndpoint: '',
+  // v4.3.3 功能5+：声音复刻（周老师真声朗读）
+  voiceCloneApiKey: '',
+  voiceCloneSpeakerId: ''
 };
 
 // P1.1d 删除（2026-05-17）：Agent 自动模式整套已下线，ENABLE_AGENT_UI 永久 false
@@ -1245,13 +1248,16 @@ export default function V2App() {
 
   const loadApiForm = async () => {
     // B6：增加 ark_endpoint_lecture_formal（正式稿专用）字段加载
-    const [arkRes, textRes, imageRes, imageFallbackRes, videoRes, lectureFormalRes] = await Promise.all([
+    const [arkRes, textRes, imageRes, imageFallbackRes, videoRes, lectureFormalRes, voiceKeyRes, voiceSpeakerRes] = await Promise.all([
       api.getApiKey('ark'),
       api.getApiKey('ark_endpoint_text'),
       api.getApiKey('ark_endpoint_image'),
       api.getApiKey('ark_endpoint'),
       api.getApiKey('ark_endpoint_video_t2v'),
       api.getApiKey('ark_endpoint_lecture_formal'),
+      // v4.3.3 功能5+：声音复刻凭证
+      api.getApiKey('voice_clone_api_key'),
+      api.getApiKey('voice_clone_speaker_id'),
     ]);
     setApiForm({
       ark: arkRes?.success ? String(arkRes.data || '') : '',
@@ -1261,6 +1267,8 @@ export default function V2App() {
         : String(imageFallbackRes?.data || ''),
       arkVideoEndpoint: videoRes?.success ? String(videoRes.data || '') : '',
       arkLectureFormalEndpoint: lectureFormalRes?.success ? String(lectureFormalRes.data || '') : '',
+      voiceCloneApiKey: voiceKeyRes?.success ? String(voiceKeyRes.data || '') : '',
+      voiceCloneSpeakerId: voiceSpeakerRes?.success ? String(voiceSpeakerRes.data || '') : '',
     });
   };
 
@@ -3292,7 +3300,10 @@ export default function V2App() {
       api.saveApiKey('ark_endpoint_lecture_formal', (apiForm.arkLectureFormalEndpoint || '').trim()),
       api.saveApiKey('ark_endpoint_image', apiForm.arkImageEndpoint.trim()),
       api.saveApiKey('ark_endpoint', apiForm.arkImageEndpoint.trim()),
-      api.saveApiKey('ark_endpoint_video_t2v', apiForm.arkVideoEndpoint.trim())
+      api.saveApiKey('ark_endpoint_video_t2v', apiForm.arkVideoEndpoint.trim()),
+      // v4.3.3 功能5+：声音复刻凭证（周老师真声朗读）
+      api.saveApiKey('voice_clone_api_key', (apiForm.voiceCloneApiKey || '').trim()),
+      api.saveApiKey('voice_clone_speaker_id', (apiForm.voiceCloneSpeakerId || '').trim()),
     ]);
     setShowApi(false);
     setAssistantStatus('API 配置已保存。');
@@ -4430,6 +4441,23 @@ export default function V2App() {
               placeholder="例如：ep-xxxxxxxx-video"
               onChange={(e) => setApiForm((prev) => ({ ...prev, arkVideoEndpoint: e.target.value }))}
             />
+
+            {/* v4.3.3 功能5+：声音复刻（周老师真声朗读讲稿选段）*/}
+            <label className="v2-label" style={{ marginTop: 16 }}>5. 声音复刻 · API Key（讲稿"真声朗读"用，可选）</label>
+            <p className="v2-field-note">火山引擎「语音技术 → 声音复刻」控制台 →「API 调用」里的 x-api-key（UUID）。不填则讲稿朗读只用系统音色。</p>
+            <input
+              value={apiForm.voiceCloneApiKey}
+              placeholder="例如：1c85da94-96d8-43e2-aedf-..."
+              onChange={(e) => setApiForm((prev) => ({ ...prev, voiceCloneApiKey: e.target.value }))}
+            />
+            <label className="v2-label" style={{ marginTop: 12 }}>6. 声音复刻 · 音色 ID（Speaker ID）</label>
+            <p className="v2-field-note">声音复刻控制台训练后得到的音色 ID（S_ 开头）。例如周老师音色 S_xxxxxxx。</p>
+            <input
+              value={apiForm.voiceCloneSpeakerId}
+              placeholder="例如：S_zxFSBjj42"
+              onChange={(e) => setApiForm((prev) => ({ ...prev, voiceCloneSpeakerId: e.target.value }))}
+            />
+
             <div className="v2-inline-actions">
               <button className="v2-btn v2-btn-primary" onClick={saveApiFormAction}>保存设置</button>
             </div>

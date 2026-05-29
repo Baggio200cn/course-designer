@@ -1581,6 +1581,7 @@ export default function LectureStage({
         open={readerOpen}
         script={lessonForm.finalScript}
         onClose={() => setReaderOpen(false)}
+        api={api}
       />
     </section>
   );

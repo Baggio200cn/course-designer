@@ -26,7 +26,7 @@ const SPEED_PRESETS = [
 // 兼容旧导出（其它处若有引用）
 export { cleanScriptForSpeech, splitScriptIntoChunks };
 
-export function LectureReader({ open, script, onClose }) {
+export function LectureReader({ open, script, onClose, api }) {
   const [rate, setRate] = useState(0.9);
   const [speaking, setSpeaking] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -35,6 +35,10 @@ export function LectureReader({ open, script, onClose }) {
   const [error, setError] = useState('');     // v4.3.3 Codex R2：TTS 错误显式暴露
   const voicesRef = useRef([]);
   const cancelledRef = useRef(false);
+  // v4.3.3 功能5+：周老师真声（声音复刻）选段试听
+  const [cloneText, setCloneText] = useState('');
+  const [cloneLoading, setCloneLoading] = useState(false);
+  const cloneAudioRef = useRef(null);
 
   // v4.3.3 Codex R2（问题4）：用 useMemo 固定 chunks，script 变化时重算并停止朗读，
   //   避免朗读中讲稿被重生成导致"进度与实际内容不一致"。
@@ -54,11 +58,12 @@ export function LectureReader({ open, script, onClose }) {
     };
   }, []);
 
-  // script 变化（重生成讲稿）→ 停止当前朗读 + 清进度/错误
+  // script 变化（重生成讲稿）→ 停止当前朗读（系统 TTS + 周老师真声）+ 清进度/错误
   useEffect(() => {
     cancelledRef.current = true;
     try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch (_) { /* noop */ }
-    setSpeaking(false); setPaused(false); setProgress({ done: 0, total: 0 }); setError('');
+    try { if (cloneAudioRef.current) { cloneAudioRef.current.pause(); cloneAudioRef.current = null; } } catch (_) { /* noop */ }
+    setSpeaking(false); setPaused(false); setProgress({ done: 0, total: 0 }); setError(''); setCloneLoading(false);
   }, [script]);
 
   if (!open) return null;
@@ -115,7 +120,33 @@ export function LectureReader({ open, script, onClose }) {
     try { window.speechSynthesis.cancel(); } catch (_) { /* noop */ }
     setSpeaking(false); setPaused(false);
   };
-  const closeAll = () => { stop(); onClose(); };
+
+  // v4.3.3 功能5+：周老师真声（声音复刻）合成选段并播放
+  const stopClone = () => {
+    try { if (cloneAudioRef.current) { cloneAudioRef.current.pause(); cloneAudioRef.current = null; } } catch (_) { /* noop */ }
+  };
+  const playCloneVoice = async () => {
+    const t = (cloneText || '').trim();
+    if (!t) { setError('请把想用周老师真声朗读的段落粘贴到下方文本框'); return; }
+    if (!api || typeof api.synthesizeLectureVoiceV2 !== 'function') {
+      setError('当前环境不支持真声合成（需在 Electron 桌面端）'); return;
+    }
+    setError(''); setCloneLoading(true);
+    stop(); stopClone();          // 先停系统 TTS + 上次真声
+    try {
+      const res = await api.synthesizeLectureVoiceV2({ text: t, speedRatio: rate });
+      if (!res?.success) { setError(res?.error || '周老师真声合成失败'); setCloneLoading(false); return; }
+      const audio = new Audio(`data:audio/mp3;base64,${res.audioBase64}`);
+      cloneAudioRef.current = audio;
+      audio.onended = () => { setCloneLoading(false); };
+      audio.onerror = () => { setError('音频播放失败'); setCloneLoading(false); };
+      await audio.play();
+    } catch (e) {
+      setError(`真声合成失败：${e.message}`); setCloneLoading(false);
+    }
+  };
+
+  const closeAll = () => { stop(); stopClone(); onClose(); };
 
   return (
     <div className="v2-assistant-overlay" role="dialog" aria-modal="true" onClick={closeAll}>
@@ -159,6 +190,25 @@ export function LectureReader({ open, script, onClose }) {
               {speaking ? ` · 朗读中 ${progress.done + 1}/${chunks.length}` : ''}
               {' · 调整语速后请重新点"开始朗读"生效'}
             </div>
+
+            {/* v4.3.3 功能5+：周老师真声（声音复刻）选段试听 */}
+            <div className="v2-reader-clone">
+              <div className="v2-reader-clone-title">🎙 周老师真声（选段试听 · 需在 API 配置填声音复刻）</div>
+              <textarea
+                className="v2-reader-clone-text"
+                value={cloneText}
+                onChange={(e) => setCloneText(e.target.value)}
+                placeholder="从上方讲稿复制一段（≤1000 字）粘贴这里，用周老师真声朗读。按字符计费，建议选关键段落。"
+                rows={3}
+              />
+              <button
+                className="v2-reader-play"
+                style={{ marginTop: 8 }}
+                onClick={playCloneVoice}
+                disabled={cloneLoading}
+              >{cloneLoading ? '合成中…（约 1-3 秒）' : '▶ 用周老师真声朗读这段'}</button>
+            </div>
+
             {/* v4.3.3 Codex R2（问题2）：TTS 错误显式提示，不再静默 */}
             {error ? <div className="v2-reader-warn" style={{ marginTop: 10 }}>{error}</div> : null}
             {/* v4.3.3 Codex 审计R1（问题6）：可见合规提醒，防误用于参赛视频配音 */}

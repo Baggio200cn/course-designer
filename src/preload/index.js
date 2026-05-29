@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   saveApiKey: (provider, apiKey) => ipcRenderer.invoke('settings:saveApiKey', { provider, apiKey }),
   getApiKey: (provider) => ipcRenderer.invoke('settings:getApiKey', provider),
+  // v4.3.3 功能5+：声音复刻合成（周老师真声朗读选段）
+  synthesizeLectureVoiceV2: (payload) => ipcRenderer.invoke('v2:synthesizeLectureVoice', payload),
 
   listResources: (filters) => ipcRenderer.invoke('resource:list', filters),
   importResources: (payload) => ipcRenderer.invoke('resource:import', payload),

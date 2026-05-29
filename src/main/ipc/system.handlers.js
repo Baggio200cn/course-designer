@@ -290,6 +290,34 @@ function register(ipcMain, getDeps) {
     }
   });
 
+  // ── 声音复刻合成（v4.3.3 功能5+ · 周老师真声朗读 · 2026-05-30）────────────
+  //   读 settings 里 voice_clone_api_key + voice_clone_speaker_id，调火山声音复刻
+  //   合成选段文本，返回 base64 mp3 给 renderer 播放。
+  ipcMain.handle('v2:synthesizeLectureVoice', async (event, payload = {}) => {
+    const { db } = getDeps();
+    try {
+      if (!db) throw new Error('Database not initialized');
+      const text = String(payload.text || '').trim();
+      if (!text) return { success: false, error: '请先选中要朗读的讲稿段落' };
+      // 防超额：单次合成限 1000 字符（声音复刻按字符计费，选段朗读足够）
+      if (text.length > 1000) {
+        return { success: false, error: `选段过长（${text.length} 字），单次最多 1000 字。请选更短的一段（按字符计费）。` };
+      }
+      const apiKey = db.getApiKey('voice_clone_api_key');
+      const speakerId = db.getApiKey('voice_clone_speaker_id');
+      if (!apiKey || !speakerId) {
+        return { success: false, error: '未配置声音复刻。请在「API 配置」填入声音复刻 API Key 和音色 ID。' };
+      }
+      const { synthesizeVoice } = require('../api/volc-voice-clone');
+      const speedRatio = Number(payload.speedRatio) > 0 ? Number(payload.speedRatio) : 1.0;
+      const result = await synthesizeVoice({ apiKey, speakerId, text, speedRatio });
+      return result; // { success, audioBase64, encoding } 或 { success:false, error }
+    } catch (error) {
+      console.error('[v2:synthesizeLectureVoice] 异常：', error);
+      return { success: false, error: error.message };
+    }
+  });
+
   // ── 外部链接 ───────────────────────────────────────────────────────────────
 
   ipcMain.handle('util:openExternalUrl', async (event, url) => {
