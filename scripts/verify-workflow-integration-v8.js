@@ -1427,6 +1427,39 @@ test('功能3 · 表格标题提示不再误导"只能 JSON 编辑"', () => {
   assert(!/点表格内单元格可在 JSON 模式下编辑/.test(src), '仍残留"只能 JSON 模式编辑"老提示');
 });
 
+// ── 【27】v4.3.3 老师反馈·功能4 阶段卡卡通老师助手（刘/吕/周）─────────────
+console.log('\n【27】v4.3.3 老师反馈·功能4 阶段卡卡通老师助手');
+
+test('功能4 · StageAssistant 组件存在 + 3 张头像就位', () => {
+  const comp = path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'StageAssistant.jsx');
+  assert(fs.existsSync(comp), 'StageAssistant.jsx 不存在');
+  ['liu', 'lyu', 'zhou'].forEach((k) => {
+    const p = path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'assets', 'avatars', `${k}.png`);
+    assert(fs.existsSync(p), `头像 avatars/${k}.png 不存在`);
+  });
+});
+
+test('功能4 · 三角色映射正确（刘 1-4 / 吕 5-7 / 周 8）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'StageAssistant.jsx'), 'utf8');
+  // 刘老师覆盖 schedule/design/ppt/lecture
+  ['schedule', 'design', 'ppt', 'lecture'].forEach((s) => {
+    assert(new RegExp(`${s}:[\\s\\S]{0,80}liuAvatar`).test(src), `${s} 未映射到刘老师`);
+  });
+  ['quiz', 'homework', 'video'].forEach((s) => {
+    assert(new RegExp(`${s}:[\\s\\S]{0,80}lyuAvatar`).test(src), `${s} 未映射到吕老师`);
+  });
+  assert(/report:[\s\S]{0,80}zhouAvatar/.test(src), 'report 未映射到周老师');
+});
+
+test('功能4 · V2App 阶段卡挂头像按钮 + 弹 StageAssistant', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'V2App.jsx'), 'utf8');
+  assert(/v2-stage-assistant-btn/.test(src), '阶段卡未加头像按钮');
+  assert(/setAssistantStage\(card\.key\)/.test(src), '点头像未触发 setAssistantStage');
+  assert(/<StageAssistant\s+stage=\{assistantStage\}/.test(src), '未渲染 StageAssistant 弹窗');
+  // 点头像必须 stopPropagation（不触发切换阶段）
+  assert(/e\.stopPropagation\(\);\s*setAssistantStage/.test(src), '点头像未 stopPropagation（会误触发切换阶段）');
+});
+
 // ── 结果汇总 ─────────────────────────────────────────────────────────────
 console.log(`\n═══ 结果：${pass}/${pass + fail} 通过 ═══`);
 if (fail > 0) {

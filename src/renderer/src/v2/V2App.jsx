@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 // v4.3.3 新版 · 应用 logo（绿底金马·驭字）— 由 scripts/icon/rebuild-icons.js 生成
 import logoSrc from '../assets/logo.png';
+// v4.3.3 功能4（老师反馈）· 阶段卡卡通老师助手（刘/吕/周）
+import { StageAssistant, stageAssistantAvatar, stageAssistantTeacher } from './StageAssistant';
 // P1.1d 删除（2026-05-17）：FrameworkStage / WorkflowPauseModal 整 v3 framework + Agent 自动模式下线
 // import FrameworkStage from './FrameworkStage';   // 已删
 // import WorkflowPauseModal from './WorkflowPauseModal';  // 已删
@@ -1042,6 +1044,8 @@ export default function V2App() {
   const [selectedNotebook, setSelectedNotebook] = useState(null);
   // Phase-9：默认起点从 'framework' 改为 'schedule'
   const [workflowState, setWorkflowState] = useState({ currentStage: 'schedule', unlockedStages: ['schedule'] });
+  // v4.3.3 功能4：当前弹出的阶段助手（null = 不弹）
+  const [assistantStage, setAssistantStage] = useState(null);
   const [resources, setResources] = useState([]);
   const [workspace, setWorkspace] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -3478,6 +3482,17 @@ export default function V2App() {
                             {isGenerating ? '⏳' : stateKey === 'completed' ? '✓' : `0${idx + 1}`}
                           </div>
                           <span className="v2-step-name">{card.title}</span>
+                          {/* v4.3.3 功能4（老师反馈）：阶段卡老师卡通头像，点击弹该阶段功能介绍助手 */}
+                          {stageAssistantAvatar(card.key) ? (
+                            <img
+                              src={stageAssistantAvatar(card.key)}
+                              className="v2-stage-assistant-btn"
+                              alt={stageAssistantTeacher(card.key)}
+                              title={`${stageAssistantTeacher(card.key)}·点我看本阶段功能介绍`}
+                              draggable={false}
+                              onClick={(e) => { e.stopPropagation(); setAssistantStage(card.key); }}
+                            />
+                          ) : null}
                           {isGenerating
                             ? <span className="v2-step-badge v2-badge-generating">AI 生成中…</span>
                             : <span className={`v2-step-badge v2-badge-tone-${tone}`}>{card.state?.label || '未解锁'}</span>
@@ -3904,6 +3919,11 @@ export default function V2App() {
           </main>
         </div>
       )}
+
+      {/* v4.3.3 功能4：阶段卡卡通老师助手对话框 */}
+      {assistantStage ? (
+        <StageAssistant stage={assistantStage} onClose={() => setAssistantStage(null)} />
+      ) : null}
 
       {showCreate ? (
         <div className="v2-modal-mask">

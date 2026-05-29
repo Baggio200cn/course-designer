@@ -3110,3 +3110,117 @@ textarea, input, select {
   }
 }
 
+
+/* ─────────────────────────────────────────────────────────────
+ * v4.3.3 功能4 · 阶段卡卡通老师助手（刘/吕/周）· 2026-05-29
+ * ───────────────────────────────────────────────────────────── */
+.v2-stage-assistant-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  margin-left: 6px;
+  cursor: pointer;
+  border: 1.5px solid #c7d2fe;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  flex-shrink: 0;
+  transition: transform 0.12s, border-color 0.12s;
+  user-select: none;
+  -webkit-user-drag: none;
+  object-fit: cover;
+  background: #fff;
+}
+.v2-stage-assistant-btn:hover {
+  transform: scale(1.18);
+  border-color: #6366f1;
+}
+
+.v2-assistant-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.v2-assistant-card {
+  position: relative;
+  width: min(440px, 92vw);
+  background: #fff;
+  border-radius: 16px;
+  padding: 24px 24px 20px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  animation: v2-assistant-pop 0.18s ease-out;
+}
+@keyframes v2-assistant-pop {
+  from { transform: scale(0.92) translateY(8px); opacity: 0; }
+  to   { transform: scale(1) translateY(0); opacity: 1; }
+}
+.v2-assistant-close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  border: none;
+  background: transparent;
+  font-size: 18px;
+  color: #94a3b8;
+  cursor: pointer;
+  line-height: 1;
+}
+.v2-assistant-close:hover { color: #475569; }
+.v2-assistant-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.v2-assistant-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 2px solid #e0e7ff;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.18);
+  object-fit: cover;
+}
+.v2-assistant-name {
+  font-size: 17px;
+  font-weight: 700;
+  color: #1e293b;
+}
+.v2-assistant-role {
+  font-size: 13px;
+  color: #6366f1;
+  margin-top: 2px;
+}
+.v2-assistant-bubble {
+  position: relative;
+  background: #f1f5f9;
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-size: 14.5px;
+  line-height: 1.75;
+  color: #334155;
+  margin-bottom: 16px;
+}
+.v2-assistant-bubble::before {
+  content: '';
+  position: absolute;
+  top: -8px;
+  left: 26px;
+  border: 8px solid transparent;
+  border-top: none;
+  border-bottom-color: #f1f5f9;
+}
+.v2-assistant-ok {
+  display: block;
+  width: 100%;
+  padding: 9px 0;
+  border: none;
+  border-radius: 8px;
+  background: #4f46e5;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.v2-assistant-ok:hover { background: #4338ca; }
