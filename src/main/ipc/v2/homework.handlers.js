@@ -13,12 +13,13 @@
 
 const { generateHomeworkFromLecture } = require('../../services/homework.service');
 const { resolveProviderConfig, createAiClientByConfig } = require('../../api/provider-config');
+// v4.3.3 Bug1 真根因修复（codex 审计 2026-05-29 · 问题4）：
+//   课后作业找讲稿/PPT 同样改用统一多来源节次解析 + 鲁棒回退，
+//   不再只读 metadata.lessonNumber（否则 createArtifact 没存 metadata 时报"本节尚无讲稿"）。
+const { pickLatestArtifactByLesson } = require('../../v2/artifact-lesson');
 
 function pickLatestByLessonAndType(items, lessonNumber, type, stage) {
-  return items
-    .filter((a) => a.type === type && a.stage === stage
-      && Number(a.metadata?.lessonNumber) === Number(lessonNumber))
-    .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))[0] || null;
+  return pickLatestArtifactByLesson(items, type, stage, lessonNumber);
 }
 
 function register(ipcMain, getDeps) {

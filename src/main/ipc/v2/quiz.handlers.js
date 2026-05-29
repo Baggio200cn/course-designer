@@ -15,33 +15,22 @@
 const { generateQuizFromPpt } = require('../../services/quiz.service');
 const { resolveProviderConfig, createAiClientByConfig } = require('../../api/provider-config');
 
-// v4.3.3 Bug1 修复（2026-05-29）：测验找 PPT 加鲁棒回退
-//   根因：runtime.savePptStage 仅在 lessonContext.lessonNumber 有值时才写 metadata.lessonNumber，
-//         单节场景 / 直接进 PPT 阶段时 metadata 可能缺 lessonNumber → 严格精确匹配永远落空，
-//         报"本节尚无 PPT artifact"。
-//   策略：① 精确匹配 lessonNumber 优先 → ② 若没有任何 PPT 标注过节次（老数据/单节）回退用最新
-//        → ③ 有节次标注但都不等于选中节，才返回 null（让 caller 明确提示"选错节/该节未生成"）
+// v4.3.3 Bug1 真根因修复（codex 审计 2026-05-29）：
+//   改用统一的 pickLatestArtifactByLesson（多来源解析 lessonNumber：metadata / metadata.lessonContext
+//   / content.lessonMeta / content.lessonContext），根治"createArtifact 没存 metadata 时按节匹配失败、
+//   多节课无 metadata 时串课"问题。
+const { pickLatestArtifactByLesson, getArtifactLessonNumber } = require('../../v2/artifact-lesson');
+
 function pickLatestByLesson(items, type, stage, lessonNumber) {
-  const all = items
-    .filter((a) => a.type === type && a.stage === stage)
-    .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
-  if (all.length === 0) return null;
-  // ① 精确匹配
-  const exact = all.find((a) => Number(a.metadata?.lessonNumber) === Number(lessonNumber));
-  if (exact) return exact;
-  // ② 没有任何 artifact 标注过正整数节次 → 单节/老数据场景，回退用最新
-  const anyLabeled = all.some((a) => Number(a.metadata?.lessonNumber) > 0);
-  if (!anyLabeled) return all[0];
-  // ③ 有节次标注但都不匹配选中节 → null（caller 友好报错）
-  return null;
+  return pickLatestArtifactByLesson(items, type, stage, lessonNumber);
 }
 
 function pickLatestPptByLesson(items, lessonNumber) {
-  return pickLatestByLesson(items, 'ppt_outline', 'ppt', lessonNumber);
+  return pickLatestArtifactByLesson(items, 'ppt_outline', 'ppt', lessonNumber);
 }
 
 function pickLatestLectureByLesson(items, lessonNumber) {
-  return pickLatestByLesson(items, 'lecture_final', 'lecture', lessonNumber);
+  return pickLatestArtifactByLesson(items, 'lecture_final', 'lecture', lessonNumber);
 }
 
 function register(ipcMain, getDeps) {

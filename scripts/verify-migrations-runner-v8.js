@@ -110,11 +110,13 @@ test('runner 不报错执行', () => {
   assert(firstResult, 'runMigrations 返回空');
   assert(firstResult.success === true, `success 应 true，实际：${firstResult.success}`);
 });
-test('runner 至少扫描到 4 个 migration（001-004）', () => {
-  assert(firstResult.total >= 4, `total 应 >= 4，实际：${firstResult.total}`);
+test('runner 至少扫描到 5 个 migration（001-005，含 metadata.lessonNumber 回填）', () => {
+  // v4.3.3 Codex 审计第1轮：新增 005-backfill-metadata-lessonnumber，total 从 4 → 5
+  assert(firstResult.total >= 5, `total 应 >= 5，实际：${firstResult.total}`);
 });
-test('首次执行 4 个 migration（executed=4, skipped=0）', () => {
-  assert(firstResult.executed === 4, `executed 应 4，实际：${firstResult.executed}`);
+test('首次全部执行（executed === total, skipped=0）', () => {
+  // 改为动态：首次跑全新 db 时所有 migration 都应 executed（未来加 migration 不用改这条）
+  assert(firstResult.executed === firstResult.total, `executed 应 === total(${firstResult.total})，实际：${firstResult.executed}`);
   assert(firstResult.skipped === 0, `skipped 应 0，实际：${firstResult.skipped}`);
   assert(firstResult.failed === 0, `failed 应 0，实际：${firstResult.failed}`);
 });

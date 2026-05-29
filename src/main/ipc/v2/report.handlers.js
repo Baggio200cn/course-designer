@@ -51,7 +51,10 @@ function register(ipcMain, getDeps) {
 
       // v4.3.3 Codex Round 16：用 collectReportUpstream 统一收集 7 阶段上游
       // schedule / design / ppt / lecture / quiz / homework / video
-      const upstream = collectReportUpstream(db, notebookId);
+      // v4.3.3 Codex 审计第1轮（问题5）：payload.lessonNumber 传入 → 单节报告（按节过滤上游，防串课）；
+      //   不传 → 整门课汇总（取最新 confirmed）。UI 默认传当前节 = 默认单节。
+      const reportLessonNumber = Number(payload.lessonNumber) > 0 ? Number(payload.lessonNumber) : undefined;
+      const upstream = collectReportUpstream(db, notebookId, { lessonNumber: reportLessonNumber });
       const { schedule: scheduleArt, design: designArt, ppt: pptArt, lecture: lectureArt,
               quiz: quizArt, homework: homeworkArt, video: microVideoArt } = upstream.objs;
       const scheduleData = scheduleArt?.content || null;

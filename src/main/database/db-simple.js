@@ -484,6 +484,10 @@ class DatabaseManager {
       stage: artifactData.stage || 'unknown',
       title: artifactData.title || artifactData.type || '未命名产物',
       content: artifactData.content ?? null,
+      // v4.3.3 Bug1 真根因修复（codex 审计 2026-05-29）：补存 metadata
+      //   旧实现完全没存 metadata，导致 metadata.lessonNumber 全部丢失，
+      //   PPT/讲稿/测验/作业/报告的"按节次匹配"全部失效（测验报"本节尚无 PPT"等）。
+      metadata: (artifactData.metadata && typeof artifactData.metadata === 'object') ? artifactData.metadata : {},
       format: artifactData.format || 'json',
       status: artifactData.status || 'generated',
       version: Number(artifactData.version) || 1,

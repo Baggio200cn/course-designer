@@ -33,10 +33,21 @@ const UPSTREAM_TYPES = [
   { key: 'video',    type: 'video_prompt',    stage: 'video'    },
 ];
 
-function pickLatestConfirmed(artifacts, type, stage) {
-  return artifacts
-    .filter((a) => a && a.type === type && a.stage === stage && a.confirmed)
-    .sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))[0];
+// v4.3.3 Codex 审计第1轮（问题5 · 2026-05-29）：报告按节过滤，避免"串课"
+//   （第2节设计 + 第5节PPT + 第1节测验拼一起）。
+//   lessonNumber 传入时只取该节产物；不传（整门课汇总模式）维持取最新 confirmed。
+const { getArtifactLessonNumber } = require('../../v2/artifact-lesson');
+
+function pickLatestConfirmed(artifacts, type, stage, lessonNumber) {
+  let pool = artifacts.filter((a) => a && a.type === type && a.stage === stage && a.confirmed);
+  // 单节模式：只保留该节产物（解析不到节次的产物视为"通用"，仅在无精确匹配时兜底）
+  if (Number.isFinite(Number(lessonNumber)) && Number(lessonNumber) > 0) {
+    const ln = Number(lessonNumber);
+    const exact = pool.filter((a) => getArtifactLessonNumber(a) === ln);
+    if (exact.length > 0) pool = exact;
+    else pool = pool.filter((a) => getArtifactLessonNumber(a) === null); // 无节次标注的通用产物兜底
+  }
+  return pool.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt))[0];
 }
 
 function pickLatest(artifacts, type, stage) {
@@ -58,19 +69,24 @@ function pickLatest(artifacts, type, stage) {
  *   allArtifacts: Array
  * }}
  */
-function collectReportUpstream(db, notebookId) {
+function collectReportUpstream(db, notebookId, options = {}) {
+  // v4.3.3 Codex 审计第1轮（问题5）：options.lessonNumber 传入 → 单节报告（按节过滤）；
+  //   不传 → 整门课汇总（取最新 confirmed，原行为）。
+  const lessonNumber = options.lessonNumber;
   const allArtifacts = (db && typeof db.listArtifacts === 'function')
     ? (db.listArtifacts({ notebookId }) || [])
     : [];
   const objs = {};
   const map = {};
   UPSTREAM_TYPES.forEach(({ key, type, stage }) => {
-    const a = pickLatestConfirmed(allArtifacts, type, stage) || null;
+    // schedule_table 是整门课产物，不按节过滤
+    const ln = (stage === 'schedule') ? undefined : lessonNumber;
+    const a = pickLatestConfirmed(allArtifacts, type, stage, ln) || null;
     objs[key] = a;
     map[key] = a?.id || null;
   });
   const ids = Object.values(map).filter((id) => Number.isFinite(id) && id > 0);
-  return { ids, map, objs, allArtifacts };
+  return { ids, map, objs, allArtifacts, lessonNumber: lessonNumber || null };
 }
 
 /**

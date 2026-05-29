@@ -1496,6 +1496,85 @@ test('功能5 · 语速默认档参考周老师真人录音（0.9× 标准档）
   assert(/useState\(0\.9\)/.test(src), '默认语速未设为 0.9×（周老师参考档）');
 });
 
+// ── 【29】Codex 审计第1轮·Bug1 真根因：metadata 持久化 + 统一节次解析 ──────────
+console.log('\n【29】Codex 审计第1轮·Bug1 真根因（metadata 持久化 + 统一节次解析）');
+
+test('CodexR1 · createArtifact 现在保存 metadata 字段（Bug1 真根因）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'database', 'db-simple.js'), 'utf8');
+  // createArtifact item 必须含 metadata 字段
+  assert(/metadata:\s*\(artifactData\.metadata/.test(src),
+    'createArtifact 仍未保存 metadata（Bug1 真根因未修）');
+});
+
+test('CodexR1 · artifact-lesson.js 统一多来源节次解析', () => {
+  const m = require(path.resolve(__dirname, '..', 'src', 'main', 'v2', 'artifact-lesson.js'));
+  assert(typeof m.getArtifactLessonNumber === 'function', '缺 getArtifactLessonNumber');
+  assert(typeof m.pickLatestArtifactByLesson === 'function', '缺 pickLatestArtifactByLesson');
+  // 4 个来源都能解析
+  assert(m.getArtifactLessonNumber({ metadata: { lessonNumber: 3 } }) === 3, 'metadata.lessonNumber 解析失败');
+  assert(m.getArtifactLessonNumber({ metadata: { lessonContext: { lessonNumber: 4 } } }) === 4, 'metadata.lessonContext 解析失败');
+  assert(m.getArtifactLessonNumber({ content: { lessonMeta: { lessonNumber: 5 } } }) === 5, 'content.lessonMeta 解析失败');
+  assert(m.getArtifactLessonNumber({ content: { lessonContext: { lessonNumber: 6 } } }) === 6, 'content.lessonContext 解析失败');
+  assert(m.getArtifactLessonNumber({}) === null, '无节次应返回 null');
+});
+
+test('CodexR1 · 真实失败用例：无 metadata 但 content.lessonContext 有节次，选第1节不串到第2节', () => {
+  const m = require(path.resolve(__dirname, '..', 'src', 'main', 'v2', 'artifact-lesson.js'));
+  const items = [
+    { id: 1, type: 'ppt_outline', stage: 'ppt', content: { lessonContext: { lessonNumber: 1 } }, createdAt: '2026-05-01' },
+    { id: 2, type: 'ppt_outline', stage: 'ppt', content: { lessonContext: { lessonNumber: 2 } }, createdAt: '2026-05-02' },
+  ];
+  // codex 反例：之前选第1节会错拿最新的第2节
+  assert(m.pickLatestArtifactByLesson(items, 'ppt_outline', 'ppt', 1)?.id === 1, '选第1节应拿 id=1（不串到第2节）');
+  assert(m.pickLatestArtifactByLesson(items, 'ppt_outline', 'ppt', 2)?.id === 2, '选第2节应拿 id=2');
+  assert(m.pickLatestArtifactByLesson(items, 'ppt_outline', 'ppt', 9) === null, '选不存在的节应 null');
+});
+
+test('CodexR1 · quiz + homework handlers 都接入统一节次解析', () => {
+  const q = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'ipc', 'v2', 'quiz.handlers.js'), 'utf8');
+  const h = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'ipc', 'v2', 'homework.handlers.js'), 'utf8');
+  assert(/require\(['"]\.\.\/\.\.\/v2\/artifact-lesson['"]\)/.test(q), 'quiz.handlers 未引入 artifact-lesson');
+  assert(/require\(['"]\.\.\/\.\.\/v2\/artifact-lesson['"]\)/.test(h), 'homework.handlers 未引入 artifact-lesson');
+  assert(/pickLatestArtifactByLesson/.test(q) && /pickLatestArtifactByLesson/.test(h),
+    'quiz/homework 未用 pickLatestArtifactByLesson');
+});
+
+test('CodexR1 · report 按节过滤（单节防串课，问题5）', () => {
+  const m = require(path.resolve(__dirname, '..', 'src', 'main', 'ipc', 'v2', 'report-upstream.helper.js'));
+  // 构造：第1节和第2节各有 confirmed 的 ppt
+  const arts = [
+    { id: 11, type: 'ppt_outline', stage: 'ppt', confirmed: true, metadata: { lessonNumber: 1 }, createdAt: '2026-05-01' },
+    { id: 12, type: 'ppt_outline', stage: 'ppt', confirmed: true, metadata: { lessonNumber: 2 }, createdAt: '2026-05-02' },
+  ];
+  const db = { listArtifacts: () => arts };
+  // 单节模式：第1节报告只拿第1节 ppt（不拿最新的第2节）
+  const single = m.collectReportUpstream(db, 1, { lessonNumber: 1 });
+  assert(single.map.ppt === 11, `单节报告应拿第1节 ppt id=11，实际 ${single.map.ppt}`);
+  // 整门课模式（不传 lessonNumber）：取最新
+  const whole = m.collectReportUpstream(db, 1);
+  assert(whole.map.ppt === 12, `整门课报告应取最新 ppt id=12，实际 ${whole.map.ppt}`);
+});
+
+test('CodexR1 · report.handlers 透传 payload.lessonNumber', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'ipc', 'v2', 'report.handlers.js'), 'utf8');
+  assert(/collectReportUpstream\(db,\s*notebookId,\s*\{\s*lessonNumber/.test(src),
+    'report.handlers 未把 lessonNumber 传给 collectReportUpstream');
+});
+
+test('CodexR1 · migration 005 回填 metadata.lessonNumber 存在', () => {
+  const p = path.resolve(__dirname, '..', 'src', 'main', 'migrations', '005-backfill-metadata-lessonnumber.js');
+  assert(fs.existsSync(p), 'migration 005 不存在');
+  const mod = require(p);
+  assert(typeof mod.run === 'function', 'migration 005 缺 run');
+  // 行为：构造无 metadata 但 content.lessonContext 有节次的 artifact，跑后回填
+  const data = { artifacts: [{ id: 1, type: 'ppt_outline', content: { lessonContext: { lessonNumber: 7 } } }], migrations: [] };
+  const stubDb = { _readData: () => data, _writeData: (d) => { Object.assign(data, d); } };
+  const r = mod.run(stubDb, { log: () => {}, warn: () => {}, error: () => {} });
+  assert(r.success, 'migration 005 执行失败');
+  assert(data.artifacts[0].metadata && data.artifacts[0].metadata.lessonNumber === 7,
+    `005 未回填 metadata.lessonNumber（实际 ${JSON.stringify(data.artifacts[0].metadata)}）`);
+});
+
 // ── 结果汇总 ─────────────────────────────────────────────────────────────
 console.log(`\n═══ 结果：${pass}/${pass + fail} 通过 ═══`);
 if (fail > 0) {
