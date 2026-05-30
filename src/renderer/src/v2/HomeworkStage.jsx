@@ -8,7 +8,7 @@
  *   4. 保存 + 确认 + 导出 Word
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import AssistantStatusAvatar from './AssistantStatusAvatar';
 
 const TYPE_LABEL = {
@@ -35,6 +35,8 @@ export default function HomeworkStage({ selectedNotebookId, api, assistantStatus
   const [savedHomeworks, setSavedHomeworks] = useState([]);
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
+  // v4.3.3 codex 复审（2026-05-30）：异步序号防护，快速切换笔记本时丢弃旧请求的迟到响应。
+  const loadSeqRef = useRef(0);
 
   // v4.3.3 codex 审计修复 #4（2026-05-30）：进入阶段与手动切换共用"优先 confirmed"选取规则。
   const pickPreferredHomeworkByLesson = (list, lessonNo) => {
@@ -44,6 +46,7 @@ export default function HomeworkStage({ selectedNotebookId, api, assistantStatus
 
   useEffect(() => {
     if (!selectedNotebookId) return;
+    const seq = ++loadSeqRef.current;
     // v4.3.3 codex 审计修复 #3（2026-05-30）：切换笔记本先清空旧状态，避免跨笔记本残留。
     setSelectedLesson(null);
     setHomeworkSet(null);
@@ -51,6 +54,7 @@ export default function HomeworkStage({ selectedNotebookId, api, assistantStatus
     setSavedHomeworks([]);
     (async () => {
       const lectureRes = await api.lessonListV2(selectedNotebookId);
+      if (seq !== loadSeqRef.current) return;  // 已切到别的笔记本，丢弃迟到响应
       let firstLesson = null;
       if (lectureRes?.success) {
         const allLessons = (lectureRes.data?.lessons || []).filter((l) => l.confirmed);
@@ -61,6 +65,7 @@ export default function HomeworkStage({ selectedNotebookId, api, assistantStatus
         setLessons([]);
       }
       const hwRes = await api.homeworkListV2(selectedNotebookId);
+      if (seq !== loadSeqRef.current) return;
       const homeworks = hwRes?.success ? (hwRes.data?.homeworks || []) : [];
       setSavedHomeworks(homeworks);
       // v4.3.3 修复（老师测试 2026-05-30）：进入阶段自动加载已存作业内容（优先 confirmed）；
@@ -135,6 +140,8 @@ export default function HomeworkStage({ selectedNotebookId, api, assistantStatus
         const list = await api.homeworkListV2(selectedNotebookId);
         if (list?.success) setSavedHomeworks(list.data?.homeworks || []);
         setAssistantStatus(`✅ 已自动保存（homework #${saveRes.data?.homeworkId}）`);
+        // v4.3.3 codex 复审（2026-05-30）：保存=撤销确认，通知父级刷新阶段卡/报告/下游 dirty。
+        onStageDataChanged?.();
       }
     } catch (e) {
       console.warn('[autoSave]', e);
@@ -204,7 +211,8 @@ export default function HomeworkStage({ selectedNotebookId, api, assistantStatus
               {lessons.length === 0
                 ? <option value="">⚠ 上游讲稿阶段没有已确认节课</option>
                 : lessons.map((l) => {
-                    const hasHw = savedHomeworks.find((h) => h.lessonNumber === l.lessonNumber);
+                    // v4.3.3 codex 复审：下拉文案与实际加载一致，用"优先 confirmed"那一份
+                    const hasHw = pickPreferredHomeworkByLesson(savedHomeworks, l.lessonNumber);
                     return (
                       <option key={l.id} value={l.lessonNumber}>
                         {hasHw ? `✓ ` : ''}第 {l.lessonNumber} 节·{l.topic || '未命名'}

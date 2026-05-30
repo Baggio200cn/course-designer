@@ -94,6 +94,10 @@ function register(ipcMain, getDeps) {
           title, content, metadata, status: 'draft', confirmed: false,
         });
       }
+      // v4.3.3 codex 复审（2026-05-30）：保存=撤销确认，下游 video/report 标 dirty，避免状态滞后。
+      if (typeof db.markDownstreamDirty === 'function') {
+        try { db.markDownstreamDirty(notebookId, 'homework', 'homework-edited'); } catch (_) {}
+      }
       return { success: true, data: { homeworkId: artifact?.id, metadata } };
     } catch (e) {
       console.error('[v2:homeworkSave]', e);

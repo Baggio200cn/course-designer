@@ -115,6 +115,11 @@ function register(ipcMain, getDeps) {
           title, content, metadata, status: 'draft', confirmed: false,
         });
       }
+      // v4.3.3 codex 复审（2026-05-30）：保存=改成草稿（撤销确认），下游 video/report 标 dirty，
+      //   避免老师编辑已确认测验后下游 dirty/解锁状态滞后。
+      if (typeof db.markDownstreamDirty === 'function') {
+        try { db.markDownstreamDirty(notebookId, 'quiz', 'quiz-edited'); } catch (_) {}
+      }
       return { success: true, data: { quizId: artifact?.id, metadata } };
     } catch (e) {
       console.error('[v2:quizSave]', e);

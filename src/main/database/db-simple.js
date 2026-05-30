@@ -544,6 +544,18 @@ class DatabaseManager {
       normalizedPatch.confirmedAt = null;
       if (patch.lockedByUser === undefined) normalizedPatch.lockedByUser = false;
     }
+    // v4.3.3 codex 复审（2026-05-30）：先算 lifecycle，撤销确认时强制 confirmedAt=null，
+    //   即使调用方显式传了 lifecycle 也封死，不再保留旧确认时间（封死 DB 层不变量）。
+    const _prevLifecycle = allData.artifacts[index].lifecycle || {};
+    let _nextLifecycle = patch.lifecycle && typeof patch.lifecycle === 'object'
+      ? { ..._prevLifecycle, ...patch.lifecycle }
+      : {
+          ..._prevLifecycle,
+          confirmedAt: patch.confirmed
+            ? (_prevLifecycle.confirmedAt || new Date().toISOString())
+            : _prevLifecycle.confirmedAt || null,
+        };
+    if (patch.confirmed === false) _nextLifecycle = { ..._nextLifecycle, confirmedAt: null };
     allData.artifacts[index] = {
       ...allData.artifacts[index],
       ...normalizedPatch,
@@ -562,18 +574,7 @@ class DatabaseManager {
       blockingIssues: Array.isArray(patch.blockingIssues)
         ? patch.blockingIssues
         : allData.artifacts[index].blockingIssues || [],
-      lifecycle: patch.lifecycle && typeof patch.lifecycle === 'object'
-        ? { ...(allData.artifacts[index].lifecycle || {}), ...patch.lifecycle }
-        : {
-            ...(allData.artifacts[index].lifecycle || {}),
-            // v4.3.3 修复（codex 审计 2026-05-30）：撤销确认时 lifecycle.confirmedAt 也要清空，
-            //   不再保留旧确认时间残留。
-            confirmedAt: patch.confirmed === false
-              ? null
-              : (patch.confirmed
-                  ? (allData.artifacts[index].lifecycle?.confirmedAt || new Date().toISOString())
-                  : allData.artifacts[index].lifecycle?.confirmedAt || null)
-          },
+      lifecycle: _nextLifecycle,
       updatedAt: new Date().toISOString()
     };
     this._writeData(allData);
