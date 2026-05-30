@@ -234,6 +234,9 @@ export default function QuizStage({ selectedNotebookId, api, assistantStatus, se
                 if (existing) {
                   loadQuiz(existing.id);
                 } else {
+                  // v4.3.3 codex 第5轮复审：切到"无已存内容"的节也要递增 seq，
+                  //   失效任何在途详情请求，避免旧节内容迟到回写到这个空白节。
+                  ++loadSeqRef.current;
                   setQuizSet(null);
                   setQuizId(null);
                 }

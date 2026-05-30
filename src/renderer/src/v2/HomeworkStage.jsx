@@ -208,6 +208,9 @@ export default function HomeworkStage({ selectedNotebookId, api, assistantStatus
                 if (existing) {
                   loadHomework(existing.id);
                 } else {
+                  // v4.3.3 codex 第5轮复审：切到"无已存内容"的节也递增 seq，失效在途详情请求，
+                  //   避免旧节内容迟到回写到空白节。
+                  ++loadSeqRef.current;
                   setHomeworkSet(null);
                   setHomeworkId(null);
                 }

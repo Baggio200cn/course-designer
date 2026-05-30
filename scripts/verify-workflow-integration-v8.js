@@ -1970,6 +1970,54 @@ test('codex4轮#2 行为 · v2:quizSave 撤销确认后持久化 workflow 真的
   }
 });
 
+test('codex5轮#1 · 切到无已存内容的节也递增 seq（失效在途详情，防旧节回写空白节）', () => {
+  const ui = path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2');
+  const quiz = fs.readFileSync(path.resolve(ui, 'QuizStage.jsx'), 'utf8');
+  const hw = fs.readFileSync(path.resolve(ui, 'HomeworkStage.jsx'), 'utf8');
+  // onChange 的 else 分支（无 existing）应递增 loadSeqRef 后再清空编辑区
+  assert(/\+\+loadSeqRef\.current;\s*setQuizSet\(null\);/.test(quiz),
+    'QuizStage onChange 无已存分支未递增 seq');
+  assert(/\+\+loadSeqRef\.current;\s*setHomeworkSet\(null\);/.test(hw),
+    'HomeworkStage onChange 无已存分支未递增 seq');
+});
+
+test('codex5轮#2 行为 · v2:homeworkSave 撤销确认后持久化 workflow 真的移除 report', () => {
+  const os = require('os');
+  const tmp = path.join(os.tmpdir(), 'yuke-db-test5-' + Date.now() + '-' + Math.floor(Math.random() * 1e6));
+  fs.mkdirSync(tmp, { recursive: true });
+  process.env.ELECTRON_USER_DATA = tmp;
+  const dbModPath = path.resolve(__dirname, '..', 'src', 'main', 'database', 'db-simple.js');
+  delete require.cache[require.resolve(dbModPath)];
+  const DatabaseManager = require(dbModPath);
+  const { computeUnlockedStages } = require(path.resolve(__dirname, '..', 'src', 'main', 'v2', 'contracts.js'));
+  const { register } = require(path.resolve(__dirname, '..', 'src', 'main', 'ipc', 'v2', 'homework.handlers.js'));
+  const db = new DatabaseManager();
+  try {
+    const NB = 999005;
+    const reqs = [['schedule', 'schedule_table'], ['design', 'design_doc'], ['ppt', 'ppt_outline'],
+      ['lecture', 'lecture_final'], ['quiz', 'quiz_set'], ['homework', 'homework_set'], ['video', 'video_prompt']];
+    let hwArtId = null;
+    for (const [stage, type] of reqs) {
+      const a = db.createArtifact({ notebookId: NB, type, stage, content: { tasks: [] }, status: 'confirmed', confirmed: true, metadata: { lessonNumber: 1 } });
+      if (stage === 'homework') hwArtId = a.id;
+    }
+    db.upsertWorkflowState(NB, { currentStage: 'report', unlockedStages: ['schedule', 'design', 'ppt', 'lecture', 'quiz', 'homework', 'video', 'report'] });
+    assert((db.getWorkflowState(NB).unlockedStages || []).includes('report'), '前置：workflow 应含 report');
+    const syncWFA = (nid) => {
+      const arts = db.listArtifacts({ notebookId: nid });
+      return db.upsertWorkflowState(nid, { ...(db.getWorkflowState(nid) || {}), unlockedStages: computeUnlockedStages(arts) });
+    };
+    const handlers = {};
+    register({ handle: (ch, fn) => { handlers[ch] = fn; } }, () => ({ db, syncWorkflowStageAvailability: syncWFA }));
+    assert(typeof handlers['v2:homeworkSave'] === 'function', '未注册 v2:homeworkSave handler');
+    handlers['v2:homeworkSave'](null, { notebookId: NB, homeworkId: hwArtId, metadata: { lessonNumber: 1 }, content: { tasks: [{ t: 'x' }] } });
+    const after = db.getWorkflowState(NB).unlockedStages || [];
+    assert(!after.includes('report'), 'homeworkSave 撤销确认后持久化 workflow 仍含 report（未触发重算）');
+  } finally {
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}
+  }
+});
+
 // ── 结果汇总 ─────────────────────────────────────────────────────────────
 console.log(`\n═══ 结果：${pass}/${pass + fail} 通过 ═══`);
 if (fail > 0) {
