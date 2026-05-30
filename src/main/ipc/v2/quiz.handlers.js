@@ -93,7 +93,7 @@ function register(ipcMain, getDeps) {
 
   // ── 保存测验题集（draft） ──────────────────────────────
   ipcMain.handle('v2:quizSave', async (event, payload = {}) => {
-    const { db } = getDeps();
+    const { db, syncWorkflowStageAvailability } = getDeps();
     try {
       if (!db) throw new Error('Database not initialized');
       const notebookId = Number(payload.notebookId);
@@ -115,10 +115,15 @@ function register(ipcMain, getDeps) {
           title, content, metadata, status: 'draft', confirmed: false,
         });
       }
-      // v4.3.3 codex 复审（2026-05-30）：保存=改成草稿（撤销确认），下游 video/report 标 dirty，
-      //   避免老师编辑已确认测验后下游 dirty/解锁状态滞后。
+      // v4.3.3 codex 复审（2026-05-30）：保存=改成草稿（撤销确认），下游 video/report 标 dirty。
       if (typeof db.markDownstreamDirty === 'function') {
         try { db.markDownstreamDirty(notebookId, 'quiz', 'quiz-edited'); } catch (_) {}
+      }
+      // v4.3.3 codex 第3轮复审（2026-05-30）：保存撤销确认后必须按 artifacts 重算 unlockedStages，
+      //   否则持久化 workflow 仍含 report（报告阶段卡保持"已解锁"）。syncWorkflowStageAvailability
+      //   内部走 computeUnlockedStages(artifacts) 重算，保持 currentStage 在 quiz。
+      if (typeof syncWorkflowStageAvailability === 'function') {
+        try { syncWorkflowStageAvailability(notebookId, { preferredStage: 'quiz' }); } catch (_) {}
       }
       return { success: true, data: { quizId: artifact?.id, metadata } };
     } catch (e) {

@@ -78,7 +78,10 @@ export default function HomeworkStage({ selectedNotebookId, api, assistantStatus
   }, [selectedNotebookId]);
 
   const loadHomework = async (hwArtifactId) => {
+    // v4.3.3 codex 第3轮复审（2026-05-30）：详情请求纳入 loadSeq 防护，切换笔记本后迟到返回不写回。
+    const seq = loadSeqRef.current;
     const res = await api.homeworkGetV2({ homeworkId: hwArtifactId });
+    if (seq !== loadSeqRef.current) return;
     if (!res?.success) {
       window.alert(`加载失败：${res?.error || '未知'}`);
       return;
@@ -114,7 +117,8 @@ export default function HomeworkStage({ selectedNotebookId, api, assistantStatus
       setHomeworkSet(res.data?.homeworkSet || null);
       setHomeworkId(null);
       setAssistantStatus(`✅ 已生成 ${res.data?.homeworkSet?.tasks?.length || 0} 道作业`);
-      await autoSave(res.data?.homeworkSet);
+      // v4.3.3 codex 第3轮复审：重新生成强制新建（显式传 null），不覆盖旧（已确认）版本。
+      await autoSave(res.data?.homeworkSet, null);
     } catch (e) {
       window.alert(`异常：${e.message}`);
     } finally {
@@ -122,12 +126,13 @@ export default function HomeworkStage({ selectedNotebookId, api, assistantStatus
     }
   };
 
-  const autoSave = async (hs) => {
+  // v4.3.3 codex 第3轮复审：idArg 显式控制 update/create（重新生成传 null 强制新建）。
+  const autoSave = async (hs, idArg = homeworkId) => {
     if (!hs) return;
     try {
       const saveRes = await api.homeworkSaveV2({
         notebookId: selectedNotebookId,
-        homeworkId: homeworkId || undefined,
+        homeworkId: idArg || undefined,
         metadata: {
           lessonNumber: selectedLesson.lessonNumber,
           topic: selectedLesson.topic,

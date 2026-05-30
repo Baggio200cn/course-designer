@@ -72,7 +72,7 @@ function register(ipcMain, getDeps) {
   });
 
   ipcMain.handle('v2:homeworkSave', async (event, payload = {}) => {
-    const { db } = getDeps();
+    const { db, syncWorkflowStageAvailability } = getDeps();
     try {
       if (!db) throw new Error('Database not initialized');
       const notebookId = Number(payload.notebookId);
@@ -97,6 +97,11 @@ function register(ipcMain, getDeps) {
       // v4.3.3 codex 复审（2026-05-30）：保存=撤销确认，下游 video/report 标 dirty，避免状态滞后。
       if (typeof db.markDownstreamDirty === 'function') {
         try { db.markDownstreamDirty(notebookId, 'homework', 'homework-edited'); } catch (_) {}
+      }
+      // v4.3.3 codex 第3轮复审（2026-05-30）：保存撤销确认后按 artifacts 重算 unlockedStages，
+      //   否则持久化 workflow 仍含 report（报告卡保持"已解锁"）。
+      if (typeof syncWorkflowStageAvailability === 'function') {
+        try { syncWorkflowStageAvailability(notebookId, { preferredStage: 'homework' }); } catch (_) {}
       }
       return { success: true, data: { homeworkId: artifact?.id, metadata } };
     } catch (e) {

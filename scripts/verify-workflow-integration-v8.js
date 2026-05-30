@@ -1856,6 +1856,64 @@ test('codex复审#4 行为 · 撤销确认即使显式传 lifecycle 也强制清
   }
 });
 
+// ── 【37】codex 第3轮复审（2026-05-30）：workflow 重算 + 详情竞态 + 重生成强制新建 ──
+console.log('\n【37】codex 第3轮复审 · 撤销确认重算解锁(真实DB) + 详情 loadSeq + 重生成强制新建');
+
+test('codex3轮#1 行为 · 撤销确认后 computeUnlockedStages 重算丢掉 report（save 调 sync 的依据）', () => {
+  const os = require('os');
+  const tmp = path.join(os.tmpdir(), 'yuke-db-test3-' + Date.now() + '-' + Math.floor(Math.random() * 1e6));
+  fs.mkdirSync(tmp, { recursive: true });
+  process.env.ELECTRON_USER_DATA = tmp;
+  const dbModPath = path.resolve(__dirname, '..', 'src', 'main', 'database', 'db-simple.js');
+  delete require.cache[require.resolve(dbModPath)];
+  const DatabaseManager = require(dbModPath);
+  const { computeUnlockedStages } = require(path.resolve(__dirname, '..', 'src', 'main', 'v2', 'contracts.js'));
+  const db = new DatabaseManager();
+  try {
+    const reqs = [['schedule', 'schedule_table'], ['design', 'design_doc'], ['ppt', 'ppt_outline'],
+      ['lecture', 'lecture_final'], ['quiz', 'quiz_set'], ['homework', 'homework_set'], ['video', 'video_prompt']];
+    const ids = {};
+    for (const [stage, type] of reqs) {
+      const a = db.createArtifact({ notebookId: 999003, type, stage, content: {}, status: 'confirmed', confirmed: true, metadata: { lessonNumber: 1 } });
+      ids[stage] = a.id;
+    }
+    const arts1 = db.listArtifacts({ notebookId: 999003 });
+    assert(computeUnlockedStages(arts1).includes('report'), '7 阶段全确认后 report 应解锁');
+    // 撤销 quiz（=保存草稿路径），重算后 report 必须不再解锁
+    db.updateArtifact(ids.quiz, { status: 'draft', confirmed: false });
+    const arts2 = db.listArtifacts({ notebookId: 999003 });
+    assert(!computeUnlockedStages(arts2).includes('report'), '撤销 quiz 后 report 不应再解锁（save 必须触发重算）');
+  } finally {
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}
+  }
+});
+
+test('codex3轮#1 · quiz/homework 保存后调 syncWorkflowStageAvailability 重算解锁', () => {
+  const ipc = path.resolve(__dirname, '..', 'src', 'main', 'ipc', 'v2');
+  const quizH = fs.readFileSync(path.resolve(ipc, 'quiz.handlers.js'), 'utf8');
+  const hwH = fs.readFileSync(path.resolve(ipc, 'homework.handlers.js'), 'utf8');
+  assert(/v2:quizSave[\s\S]{0,200}syncWorkflowStageAvailability/.test(quizH) && /syncWorkflowStageAvailability\(notebookId, \{ preferredStage: 'quiz' \}\)/.test(quizH),
+    'quizSave 未在保存后调 syncWorkflowStageAvailability 重算');
+  assert(/syncWorkflowStageAvailability\(notebookId, \{ preferredStage: 'homework' \}\)/.test(hwH),
+    'homeworkSave 未在保存后调 syncWorkflowStageAvailability 重算');
+});
+
+test('codex3轮#2/#3 · 详情加载 loadSeq 守卫 + 重新生成强制新建（autoSave idArg）', () => {
+  const ui = path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2');
+  const quiz = fs.readFileSync(path.resolve(ui, 'QuizStage.jsx'), 'utf8');
+  const hw = fs.readFileSync(path.resolve(ui, 'HomeworkStage.jsx'), 'utf8');
+  // #2 详情请求纳入 seq 守卫
+  assert(/const seq = loadSeqRef\.current;[\s\S]{0,120}quizGetV2[\s\S]{0,80}if \(seq !== loadSeqRef\.current\) return/.test(quiz),
+    'loadQuiz 未对详情请求做 loadSeq 守卫');
+  assert(/const seq = loadSeqRef\.current;[\s\S]{0,120}homeworkGetV2[\s\S]{0,80}if \(seq !== loadSeqRef\.current\) return/.test(hw),
+    'loadHomework 未对详情请求做 loadSeq 守卫');
+  // #3 重新生成强制新建 + autoSave 显式 idArg
+  assert(/autoSave\(res\.data\?\.quizSet, null\)/.test(quiz) && /const autoSave = async \(qs, idArg = quizId\)/.test(quiz),
+    'QuizStage 重新生成未强制新建（autoSave idArg 缺失）');
+  assert(/autoSave\(res\.data\?\.homeworkSet, null\)/.test(hw) && /const autoSave = async \(hs, idArg = homeworkId\)/.test(hw),
+    'HomeworkStage 重新生成未强制新建（autoSave idArg 缺失）');
+});
+
 // ── 结果汇总 ─────────────────────────────────────────────────────────────
 console.log(`\n═══ 结果：${pass}/${pass + fail} 通过 ═══`);
 if (fail > 0) {

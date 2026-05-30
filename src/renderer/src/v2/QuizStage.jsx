@@ -82,7 +82,11 @@ export default function QuizStage({ selectedNotebookId, api, assistantStatus, se
 
   // ── 切换到已存的 quiz ──
   const loadQuiz = async (quizArtifactId) => {
+    // v4.3.3 codex 第3轮复审（2026-05-30）：详情请求也纳入 loadSeq 防护——
+    //   切换笔记本后旧详情迟到返回不再 setState 写回当前页面。
+    const seq = loadSeqRef.current;
     const res = await api.quizGetV2({ quizId: quizArtifactId });
+    if (seq !== loadSeqRef.current) return;
     if (!res?.success) {
       window.alert(`加载失败：${res?.error || '未知'}`);
       return;
@@ -120,8 +124,9 @@ export default function QuizStage({ selectedNotebookId, api, assistantStatus, se
       setQuizId(null);  // 还没保存
       setAssistantStatus(`✅ 已生成 ${res.data?.quizSet?.questions?.length || 0} 道题，请审核 + 保存`);
 
-      // 立即自动保存（D8 思路：生成完就落库）
-      await autoSave(res.data?.quizSet);
+      // v4.3.3 codex 第3轮复审（2026-05-30）：重新生成必须新建 artifact，不能覆盖旧（已确认）版本。
+      //   setQuizId(null) 是异步的，autoSave 闭包仍可能读到旧 quizId 走 update，故显式传 null 强制 create。
+      await autoSave(res.data?.quizSet, null);
     } catch (e) {
       window.alert(`异常：${e.message}`);
     } finally {
@@ -130,12 +135,14 @@ export default function QuizStage({ selectedNotebookId, api, assistantStatus, se
   };
 
   // 自动保存
-  const autoSave = async (qs) => {
+  // v4.3.3 codex 第3轮复审：idArg 显式控制 update/create——重新生成传 null 强制新建，
+  //   手动保存默认用当前 quizId（更新）。不再依赖 setQuizId 异步生效后的闭包值。
+  const autoSave = async (qs, idArg = quizId) => {
     if (!qs) return;
     try {
       const saveRes = await api.quizSaveV2({
         notebookId: selectedNotebookId,
-        quizId: quizId || undefined,
+        quizId: idArg || undefined,
         metadata: {
           lessonNumber: selectedLesson.lessonNumber,
           topic: selectedLesson.topic,
