@@ -36,8 +36,19 @@ export default function HomeworkStage({ selectedNotebookId, api, assistantStatus
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // v4.3.3 codex 审计修复 #4（2026-05-30）：进入阶段与手动切换共用"优先 confirmed"选取规则。
+  const pickPreferredHomeworkByLesson = (list, lessonNo) => {
+    const matches = (list || []).filter((h) => h.lessonNumber === lessonNo);
+    return matches.find((h) => h.confirmed) || matches[0] || null;
+  };
+
   useEffect(() => {
     if (!selectedNotebookId) return;
+    // v4.3.3 codex 审计修复 #3（2026-05-30）：切换笔记本先清空旧状态，避免跨笔记本残留。
+    setSelectedLesson(null);
+    setHomeworkSet(null);
+    setHomeworkId(null);
+    setSavedHomeworks([]);
     (async () => {
       const lectureRes = await api.lessonListV2(selectedNotebookId);
       let firstLesson = null;
@@ -45,21 +56,19 @@ export default function HomeworkStage({ selectedNotebookId, api, assistantStatus
         const allLessons = (lectureRes.data?.lessons || []).filter((l) => l.confirmed);
         setLessons(allLessons);
         firstLesson = allLessons[0] || null;
-        if (!selectedLesson && firstLesson) {
-          setSelectedLesson(firstLesson);
-        }
+        if (firstLesson) setSelectedLesson(firstLesson);
+      } else {
+        setLessons([]);
       }
       const hwRes = await api.homeworkListV2(selectedNotebookId);
       const homeworks = hwRes?.success ? (hwRes.data?.homeworks || []) : [];
       setSavedHomeworks(homeworks);
-      // v4.3.3 修复（老师测试 2026-05-30）：进入阶段自动加载已存作业内容，
-      //   否则 homeworkSet 一直为 null → 面板误显示"该节尚未生成课后作业"（其实已保存/已确认）。
-      const targetNo = selectedLesson?.lessonNumber ?? firstLesson?.lessonNumber;
-      if (targetNo != null) {
-        const matches = homeworks.filter((h) => h.lessonNumber === targetNo);
-        const existing = matches.find((h) => h.confirmed) || matches[0];
-        if (existing) await loadHomework(existing.id);
-      }
+      // v4.3.3 修复（老师测试 2026-05-30）：进入阶段自动加载已存作业内容（优先 confirmed）；
+      //   没有匹配 artifact 时清空编辑区，不残留旧内容（codex #3）。
+      const targetNo = firstLesson?.lessonNumber;
+      const existing = targetNo != null ? pickPreferredHomeworkByLesson(homeworks, targetNo) : null;
+      if (existing) await loadHomework(existing.id);
+      else { setHomeworkSet(null); setHomeworkId(null); }
     })();
   }, [selectedNotebookId]);
 
@@ -181,7 +190,8 @@ export default function HomeworkStage({ selectedNotebookId, api, assistantStatus
                 const ln = Number(e.target.value);
                 const found = lessons.find((l) => l.lessonNumber === ln);
                 setSelectedLesson(found || null);
-                const existing = savedHomeworks.find((h) => h.lessonNumber === ln);
+                // v4.3.3 codex #4：手动切换也用"优先 confirmed"规则，和自动加载一致
+                const existing = pickPreferredHomeworkByLesson(savedHomeworks, ln);
                 if (existing) {
                   loadHomework(existing.id);
                 } else {

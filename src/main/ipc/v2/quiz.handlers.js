@@ -14,6 +14,8 @@
 
 const { generateQuizFromPpt } = require('../../services/quiz.service');
 const { resolveProviderConfig, createAiClientByConfig } = require('../../api/provider-config');
+// v4.3.3 修复（codex 审计 2026-05-30）：列表"已确认"复用统一规则（confirmed + status），不读裸字段。
+const { isArtifactConfirmed } = require('../../v2/contracts');
 
 // v4.3.3 Bug1 真根因修复（codex 审计 2026-05-29）：
 //   改用统一的 pickLatestArtifactByLesson（多来源解析 lessonNumber：metadata / metadata.lessonContext
@@ -104,7 +106,9 @@ function register(ipcMain, getDeps) {
       let artifact;
       const title = `第 ${metadata.lessonNumber} 节·在线测验（${(content.questions || []).length} 题）`;
       if (quizId && typeof db.updateArtifact === 'function') {
-        artifact = db.updateArtifact(quizId, { content, metadata, title, status: 'draft' });
+        // v4.3.3 修复（codex 审计 2026-05-30）：编辑保存后必须把 confirmed 置回 false，
+        //   否则留下"confirmed=true 但 status=draft"不一致态——报告悄悄锁回、UI 仍显示已确认。
+        artifact = db.updateArtifact(quizId, { content, metadata, title, status: 'draft', confirmed: false });
       } else {
         artifact = db.createArtifact({
           notebookId, type: 'quiz_set', stage: 'quiz',
@@ -161,7 +165,7 @@ function register(ipcMain, getDeps) {
           lessonNumber: Number(a.metadata?.lessonNumber) || 0,
           topic: a.metadata?.topic || '',
           totalQuestions: (a.content?.questions || []).length,
-          confirmed: !!a.confirmed,
+          confirmed: isArtifactConfirmed(a),
           createdAt: a.createdAt,
           updatedAt: a.updatedAt,
         }));

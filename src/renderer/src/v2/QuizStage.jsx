@@ -36,9 +36,21 @@ export default function QuizStage({ selectedNotebookId, api, assistantStatus, se
   const [generating, setGenerating] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // v4.3.3 codex 审计修复 #4（2026-05-30）：进入阶段与手动切换节课共用同一"优先 confirmed"选取规则，
+  //   避免两条路径加载到不同版本（同节有 confirmed 版 + draft 版时）。
+  const pickPreferredQuizByLesson = (list, lessonNo) => {
+    const matches = (list || []).filter((q) => q.lessonNumber === lessonNo);
+    return matches.find((q) => q.confirmed) || matches[0] || null;
+  };
+
   // ── 加载本节本的所有 lecture artifacts 和已存 quiz 列表 ──
   useEffect(() => {
     if (!selectedNotebookId) return;
+    // v4.3.3 codex 审计修复 #3（2026-05-30）：切换笔记本先清空旧状态，避免跨笔记本残留旧节次/旧题集。
+    setSelectedLesson(null);
+    setQuizSet(null);
+    setQuizId(null);
+    setSavedQuizzes([]);
     (async () => {
       const lectureRes = await api.lessonListV2(selectedNotebookId);
       let firstLesson = null;
@@ -46,22 +58,20 @@ export default function QuizStage({ selectedNotebookId, api, assistantStatus, se
         const allLessons = (lectureRes.data?.lessons || []).filter((l) => l.confirmed);
         setLessons(allLessons);
         firstLesson = allLessons[0] || null;
-        if (!selectedLesson && firstLesson) {
-          setSelectedLesson(firstLesson);
-        }
+        if (firstLesson) setSelectedLesson(firstLesson);
+      } else {
+        setLessons([]);
       }
       const quizRes = await api.quizListV2(selectedNotebookId);
       const quizzes = quizRes?.success ? (quizRes.data?.quizzes || []) : [];
       setSavedQuizzes(quizzes);
-      // v4.3.3 修复（老师测试 2026-05-30）：进入阶段自动加载已存题集内容。
-      //   之前只加载下拉列表、不加载 quizSet，导致 quizSet 一直为 null →
-      //   面板误显示"该节尚未生成测验题"（其实已保存/已确认）。优先加载 confirmed 题集。
-      const targetNo = selectedLesson?.lessonNumber ?? firstLesson?.lessonNumber;
-      if (targetNo != null) {
-        const matches = quizzes.filter((q) => q.lessonNumber === targetNo);
-        const existing = matches.find((q) => q.confirmed) || matches[0];
-        if (existing) await loadQuiz(existing.id);
-      }
+      // v4.3.3 修复（老师测试 2026-05-30）：进入阶段自动加载已存题集内容（优先 confirmed），
+      //   否则 quizSet 一直为 null → 面板误显示"该节尚未生成测验题"（其实已保存/已确认）。
+      //   没有匹配 artifact 时必须清空编辑区，不残留旧内容（codex #3）。
+      const targetNo = firstLesson?.lessonNumber;
+      const existing = targetNo != null ? pickPreferredQuizByLesson(quizzes, targetNo) : null;
+      if (existing) await loadQuiz(existing.id);
+      else { setQuizSet(null); setQuizId(null); }
     })();
   }, [selectedNotebookId]);
 
@@ -204,8 +214,8 @@ export default function QuizStage({ selectedNotebookId, api, assistantStatus, se
                 const ln = Number(e.target.value);
                 const found = lessons.find((l) => l.lessonNumber === ln);
                 setSelectedLesson(found || null);
-                // 检查是否已有该节的 quiz
-                const existing = savedQuizzes.find((q) => q.lessonNumber === ln);
+                // v4.3.3 codex #4：手动切换也用"优先 confirmed"规则，和自动加载一致
+                const existing = pickPreferredQuizByLesson(savedQuizzes, ln);
                 if (existing) {
                   loadQuiz(existing.id);
                 } else {

@@ -538,6 +538,12 @@ class DatabaseManager {
     if (patch.confirmed === true && patch.lockedByUser === undefined) {
       normalizedPatch.lockedByUser = true;
     }
+    // v4.3.3 修复（codex 审计 2026-05-30）：显式撤销确认（confirmed:false）时，集中清掉确认残留，
+    //   避免留下"confirmed=false 但 confirmedAt/lockedByUser 仍在"的状态（quiz/homework/video 保存共用此路径）。
+    if (patch.confirmed === false) {
+      normalizedPatch.confirmedAt = null;
+      if (patch.lockedByUser === undefined) normalizedPatch.lockedByUser = false;
+    }
     allData.artifacts[index] = {
       ...allData.artifacts[index],
       ...normalizedPatch,
@@ -560,9 +566,13 @@ class DatabaseManager {
         ? { ...(allData.artifacts[index].lifecycle || {}), ...patch.lifecycle }
         : {
             ...(allData.artifacts[index].lifecycle || {}),
-            confirmedAt: patch.confirmed
-              ? (allData.artifacts[index].lifecycle?.confirmedAt || new Date().toISOString())
-              : allData.artifacts[index].lifecycle?.confirmedAt || null
+            // v4.3.3 修复（codex 审计 2026-05-30）：撤销确认时 lifecycle.confirmedAt 也要清空，
+            //   不再保留旧确认时间残留。
+            confirmedAt: patch.confirmed === false
+              ? null
+              : (patch.confirmed
+                  ? (allData.artifacts[index].lifecycle?.confirmedAt || new Date().toISOString())
+                  : allData.artifacts[index].lifecycle?.confirmedAt || null)
           },
       updatedAt: new Date().toISOString()
     };

@@ -1714,9 +1714,9 @@ test('Bug1 · Quiz/Homework 进阶段自动加载已存内容（不再误显示"
   const dir = path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2');
   const quiz = fs.readFileSync(path.resolve(dir, 'QuizStage.jsx'), 'utf8');
   const hw = fs.readFileSync(path.resolve(dir, 'HomeworkStage.jsx'), 'utf8');
-  assert(/find\(\(q\) => q\.confirmed\) \|\| matches\[0\][\s\S]{0,80}loadQuiz\(existing\.id\)/.test(quiz),
+  assert(/pickPreferredQuizByLesson\(quizzes, targetNo\)[\s\S]{0,140}loadQuiz\(existing\.id\)/.test(quiz),
     'QuizStage 加载 effect 未自动 loadQuiz 已存题集');
-  assert(/find\(\(h\) => h\.confirmed\) \|\| matches\[0\][\s\S]{0,80}loadHomework\(existing\.id\)/.test(hw),
+  assert(/pickPreferredHomeworkByLesson\(homeworks, targetNo\)[\s\S]{0,140}loadHomework\(existing\.id\)/.test(hw),
     'HomeworkStage 加载 effect 未自动 loadHomework 已存作业');
 });
 
@@ -1741,6 +1741,65 @@ test('Bug4 · 微课保存把 confirmed 同步置回 false（消除 confirmed=tr
   const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'ipc', 'v2', 'micro-video.handlers.js'), 'utf8');
   assert(/updateArtifact\(artifactId, \{ content: microVideo, status: 'draft', confirmed: false \}\)/.test(src),
     'saveMicroVideo 编辑保存未把 confirmed 置回 false（留下不一致态）');
+});
+
+// ── 【35】codex 审计修复（2026-05-30）：撤销确认一致性 + 跨笔记本清理 + 行为测试 ──
+console.log('\n【35】codex 审计修复 · 撤销确认状态一致性（真实 DB 行为）+ quiz/homework 残留');
+
+test('codex#1/#2 行为 · 撤销确认后真实 DB 清 confirmed/status/confirmedAt（报告不会误解锁）', () => {
+  const os = require('os');
+  const tmp = path.join(os.tmpdir(), 'yuke-db-test-' + Date.now() + '-' + Math.floor(Math.random() * 1e6));
+  fs.mkdirSync(tmp, { recursive: true });
+  process.env.ELECTRON_USER_DATA = tmp;
+  const dbModPath = path.resolve(__dirname, '..', 'src', 'main', 'database', 'db-simple.js');
+  delete require.cache[require.resolve(dbModPath)];
+  const DatabaseManager = require(dbModPath);
+  const { isArtifactConfirmed } = require(path.resolve(__dirname, '..', 'src', 'main', 'v2', 'contracts.js'));
+  const db = new DatabaseManager();
+  try {
+    const a = db.createArtifact({ notebookId: 999001, type: 'quiz_set', stage: 'quiz', content: { questions: [] }, status: 'draft', confirmed: false, metadata: { lessonNumber: 1 } });
+    const confirmed = db.updateArtifact(a.id, { confirmed: true, status: 'confirmed', confirmedAt: new Date().toISOString() });
+    assert(isArtifactConfirmed(confirmed) === true, '确认后 isArtifactConfirmed 应为 true');
+    // 编辑保存（=撤销确认路径，handler 现在会传 confirmed:false）
+    const saved = db.updateArtifact(a.id, { content: { questions: [1] }, status: 'draft', confirmed: false });
+    assert(saved.confirmed === false, 'save 后 confirmed 应为 false');
+    assert(saved.status === 'draft', 'save 后 status 应为 draft');
+    assert(!saved.confirmedAt, 'save 后顶层 confirmedAt 应清空');
+    assert(!(saved.lifecycle && saved.lifecycle.confirmedAt), 'save 后 lifecycle.confirmedAt 应清空');
+    assert(isArtifactConfirmed(saved) === false, 'save 后 isArtifactConfirmed 应为 false（报告不会误解锁）');
+  } finally {
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) {}
+  }
+});
+
+test('codex#1 · quiz/homework 保存把 confirmed 置回 false + 列表用 isArtifactConfirmed', () => {
+  const dir = path.resolve(__dirname, '..', 'src', 'main', 'ipc', 'v2');
+  const quiz = fs.readFileSync(path.resolve(dir, 'quiz.handlers.js'), 'utf8');
+  const hw = fs.readFileSync(path.resolve(dir, 'homework.handlers.js'), 'utf8');
+  assert(/updateArtifact\(quizId, \{ content, metadata, title, status: 'draft', confirmed: false \}\)/.test(quiz),
+    'quizSave 编辑分支未把 confirmed 置回 false');
+  assert(/updateArtifact\(homeworkId, \{ content, metadata, title, status: 'draft', confirmed: false \}\)/.test(hw),
+    'homeworkSave 编辑分支未把 confirmed 置回 false');
+  assert(/confirmed: isArtifactConfirmed\(a\)/.test(quiz) && /isArtifactConfirmed.*contracts/s.test(quiz),
+    'quizList 仍读裸 confirmed 字段（未用 isArtifactConfirmed）');
+  assert(/confirmed: isArtifactConfirmed\(a\)/.test(hw),
+    'homeworkList 仍读裸 confirmed 字段（未用 isArtifactConfirmed）');
+});
+
+test('codex#3/#4 · Quiz/Homework 切笔记本清空旧态 + 进入与切换共用优先 confirmed 选取', () => {
+  const dir = path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2');
+  const quiz = fs.readFileSync(path.resolve(dir, 'QuizStage.jsx'), 'utf8');
+  const hw = fs.readFileSync(path.resolve(dir, 'HomeworkStage.jsx'), 'utf8');
+  // #3 切笔记本 effect 开头重置编辑区
+  assert(/\[selectedNotebookId\]\)/.test(quiz) && /setQuizSet\(null\)[\s\S]{0,80}setSavedQuizzes\(\[\]\)/.test(quiz),
+    'QuizStage 切笔记本未清空旧态');
+  assert(/setHomeworkSet\(null\)[\s\S]{0,80}setSavedHomeworks\(\[\]\)/.test(hw),
+    'HomeworkStage 切笔记本未清空旧态');
+  // #4 共用选取函数，effect + onChange 都用
+  assert((quiz.match(/pickPreferredQuizByLesson\(/g) || []).length >= 2,
+    'QuizStage 进入/切换未共用 pickPreferredQuizByLesson');
+  assert((hw.match(/pickPreferredHomeworkByLesson\(/g) || []).length >= 2,
+    'HomeworkStage 进入/切换未共用 pickPreferredHomeworkByLesson');
 });
 
 // ── 结果汇总 ─────────────────────────────────────────────────────────────

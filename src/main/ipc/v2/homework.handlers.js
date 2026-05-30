@@ -13,6 +13,8 @@
 
 const { generateHomeworkFromLecture } = require('../../services/homework.service');
 const { resolveProviderConfig, createAiClientByConfig } = require('../../api/provider-config');
+// v4.3.3 修复（codex 审计 2026-05-30）：列表"已确认"复用统一规则（confirmed + status），不读裸字段。
+const { isArtifactConfirmed } = require('../../v2/contracts');
 // v4.3.3 Bug1 真根因修复（codex 审计 2026-05-29 · 问题4）：
 //   课后作业找讲稿/PPT 同样改用统一多来源节次解析 + 鲁棒回退，
 //   不再只读 metadata.lessonNumber（否则 createArtifact 没存 metadata 时报"本节尚无讲稿"）。
@@ -83,7 +85,9 @@ function register(ipcMain, getDeps) {
       let artifact;
       const title = `第 ${metadata.lessonNumber} 节·课后作业（${(content.tasks || []).length} 道）`;
       if (homeworkId && typeof db.updateArtifact === 'function') {
-        artifact = db.updateArtifact(homeworkId, { content, metadata, title, status: 'draft' });
+        // v4.3.3 修复（codex 审计 2026-05-30）：编辑保存后把 confirmed 置回 false，
+        //   消除"confirmed=true 但 status=draft"不一致态（报告悄悄锁回、UI 仍显示已确认）。
+        artifact = db.updateArtifact(homeworkId, { content, metadata, title, status: 'draft', confirmed: false });
       } else {
         artifact = db.createArtifact({
           notebookId, type: 'homework_set', stage: 'homework',
@@ -139,7 +143,7 @@ function register(ipcMain, getDeps) {
           topic: a.metadata?.topic || '',
           totalTasks: (a.content?.tasks || []).length,
           totalEstimatedMinutes: a.content?.metadata?.totalEstimatedMinutes || 0,
-          confirmed: !!a.confirmed,
+          confirmed: isArtifactConfirmed(a),
           createdAt: a.createdAt,
           updatedAt: a.updatedAt,
         }));
