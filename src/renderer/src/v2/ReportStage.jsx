@@ -93,6 +93,17 @@ export default function ReportStage({
   };
 
   const onExport = async (format) => {
+    // v4.3.3 导出守卫（老师测试 2026-05-30）：有未保存改动时先提示保存，
+    //   避免导出"上次保存版"（不含新改动）——这是老师误以为"内容丢了"的根源。
+    //   导出读的是 DB 里最新已保存的报告，先 onSave 落库再导出，保证导出=当前编辑内容。
+    if (dirty) {
+      const ok = window.confirm(
+        '当前有未保存修改。导出读取的是"上次保存版"，不含这些新改动。\n\n' +
+        '点"确定"先保存再导出（推荐）；点"取消"放弃本次导出。'
+      );
+      if (!ok) return;
+      await onSave();
+    }
     setExportingFormat(format);
     try {
       await handleExportReport(format);
@@ -248,7 +259,7 @@ export default function ReportStage({
                 className="v2-btn v2-btn-primary"
                 onClick={onSave}
                 disabled={!dirty || saving}
-              >{saving ? '⏳ 保存中…' : '💾 保存修改'}</button>
+              >{saving ? '⏳ 保存中…' : (dirty ? '💾 保存修改' : '✓ 已保存')}</button>
             </div>
           </div>
         ) : (
