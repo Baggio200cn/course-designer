@@ -154,10 +154,7 @@ export function LectureReader({ open, script, onClose, api }) {
         <button className="v2-assistant-close" onClick={closeAll} aria-label="关闭">✕</button>
         <div className="v2-reader-head">
           <img src={zhouAvatar} alt="周老师" className="v2-assistant-avatar" draggable={false} />
-          <div>
-            <div className="v2-assistant-name">周老师为你朗读讲稿</div>
-            <div className="v2-assistant-role">语速参考真人录音 · 可调档试听</div>
-          </div>
+          <div className="v2-assistant-name">为您朗读</div>
         </div>
 
         {!supported ? (
@@ -185,20 +182,18 @@ export function LectureReader({ open, script, onClose, api }) {
                     : <button className="v2-reader-play" onClick={pause}>⏸ 暂停</button>)}
               <button className="v2-reader-stop" onClick={stop} disabled={!speaking}>⏹ 停止</button>
             </div>
-            <div className="v2-reader-hint">
-              共 {chunks.length} 段
-              {speaking ? ` · 朗读中 ${progress.done + 1}/${chunks.length}` : ''}
-              {' · 调整语速后请重新点"开始朗读"生效'}
-            </div>
+            {speaking ? (
+              <div className="v2-reader-hint">朗读中 {progress.done + 1}/{chunks.length}</div>
+            ) : null}
 
-            {/* v4.3.3 功能5+：周老师真声（声音复刻）选段试听 */}
+            {/* 小周老师声音测试（声音复刻选段试听） */}
             <div className="v2-reader-clone">
-              <div className="v2-reader-clone-title">🎙 周老师真声（选段试听 · 需在 API 配置填声音复刻）</div>
+              <div className="v2-reader-clone-title">🎙 小周老师声音测试</div>
               <textarea
                 className="v2-reader-clone-text"
                 value={cloneText}
                 onChange={(e) => setCloneText(e.target.value)}
-                placeholder="从上方讲稿复制一段（≤1000 字）粘贴这里，用周老师真声朗读。按字符计费，建议选关键段落。"
+                placeholder="可复制粘贴文本到这里（≤1000 字）"
                 rows={3}
               />
               <button
@@ -206,16 +201,10 @@ export function LectureReader({ open, script, onClose, api }) {
                 style={{ marginTop: 8 }}
                 onClick={playCloneVoice}
                 disabled={cloneLoading}
-              >{cloneLoading ? '合成中…（约 1-3 秒）' : '▶ 用周老师真声朗读这段'}</button>
+              >{cloneLoading ? '合成中…' : '▶ 用小周老师真声朗读'}</button>
             </div>
 
-            {/* v4.3.3 Codex R2（问题2）：TTS 错误显式提示，不再静默 */}
             {error ? <div className="v2-reader-warn" style={{ marginTop: 10 }}>{error}</div> : null}
-            {/* v4.3.3 Codex 审计R1（问题6）：可见合规提醒，防误用于参赛视频配音 */}
-            <div className="v2-reader-compliance">
-              ⚠ 此为软件内试听功能，帮你打磨课堂语速。<strong>参赛演示视频的解说请用真人录音</strong>，
-              切勿用本朗读做配音（评审指南"原则上不能使用软件生成逐字稿配音"）。
-            </div>
           </>
         )}
       </div>

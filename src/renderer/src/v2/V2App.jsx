@@ -161,7 +161,10 @@ function resolveStageState({ stage, currentStage, unlockedStages, quality, artif
     STAGE_PRIMARY_ARTIFACTS[stage]?.includes(item.type) && artifactIsConfirmed(item)
   )).length;
   const nextStage = getNextStageKey(stage);
-  const completed = nextStage ? arr(unlockedStages).includes(nextStage) : confirmedCount > 0;
+  // v4.3.3 Bug3 修复（老师测试 2026-05-30）：
+  //   "已完成"直接看本阶段是否有已确认的主产物（confirmedCount>0），
+  //   不再用"下游是否解锁"反推——后者在状态滞后/确认后又改回草稿时会把未确认阶段误显示为"已完成"。
+  const completed = confirmedCount > 0;
 
   if (locked) {
     // v4.3.3 Bug2 修复（老师反馈 · 2026-05-29）：
@@ -3026,8 +3029,11 @@ export default function V2App() {
     }}
     const res = await api.saveMicroVideoV2({ notebookId: selectedNotebookId, artifactId: state.artifactId, microVideo: payload });
     if (!res?.success) { window.alert(`保存失败：${res?.error || '未知'}`); return; }
-    setMicroVideoState((prev) => ({ ...prev, microVideo: payload, artifactId: res.data.artifactId }));
-    setAssistantStatus('微课视频方案已保存。');
+    // v4.3.3 修复（老师测试 2026-05-30）：保存=改成草稿态，confirmed 已被后端置回 false，
+    //   本地 confirmed 也同步清掉，并提示需要重新点"确认"才能解锁报告（避免"保存后报告悄悄锁回"困惑）。
+    setMicroVideoState((prev) => ({ ...prev, microVideo: payload, artifactId: res.data.artifactId, confirmed: false }));
+    setAssistantStatus('✅ 微课视频方案已保存为草稿。如需解锁实施报告，请重新点「确认（解锁实施报告）」。');
+    await loadNotebookContext(selectedNotebookId);
   };
   const handleConfirmMicroVideo = async () => {
     if (!selectedNotebookId || !microVideoState.artifactId) return;
@@ -3818,6 +3824,7 @@ export default function V2App() {
                 assistantStatus={assistantStatus}
                 setAssistantStatus={setAssistantStatus}
                 busy={busy}
+                onStageDataChanged={() => loadNotebookContext(selectedNotebookId)}
               />
             ) : null}
 
@@ -3829,6 +3836,7 @@ export default function V2App() {
                 assistantStatus={assistantStatus}
                 setAssistantStatus={setAssistantStatus}
                 busy={busy}
+                onStageDataChanged={() => loadNotebookContext(selectedNotebookId)}
               />
             ) : null}
 

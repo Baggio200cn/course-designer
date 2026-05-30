@@ -6,6 +6,7 @@
  * 关键契约：storyboard.length === jimengPrompts.length，时长 60-90s
  */
 import React from 'react';
+import AssistantStatusAvatar from './AssistantStatusAvatar';
 import ArtifactPanel from './ArtifactPanel';
 
 export default function MicroVideoStage({
@@ -40,7 +41,7 @@ export default function MicroVideoStage({
           </div>
           <div className="v2-status-box">
             <span>助手状态</span>
-            <strong>{assistantStatus}</strong>
+            <AssistantStatusAvatar stage="video" status={assistantStatus} />
           </div>
           <div className="v2-grid-two">
             <div>

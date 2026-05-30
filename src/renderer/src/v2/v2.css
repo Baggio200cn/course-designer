@@ -3339,3 +3339,70 @@ textarea, input, select {
   font-family: inherit;
   box-sizing: border-box;
 }
+
+/* ── 助手状态头像（按阶段老师 + 状态反馈）v4.3.3 2026-05-30 老师反馈 ── */
+.v2-assist-status { display: inline-flex; align-items: center; gap: 8px; }
+.v2-assist-ava-wrap { position: relative; flex: 0 0 auto; width: 30px; height: 30px; }
+.v2-assist-ava {
+  width: 30px; height: 30px; border-radius: 50%; object-fit: cover;
+  display: block; border: 2px solid #cbd5e1; background: #fff;
+}
+.v2-assist-ava-fallback { display: flex; align-items: center; justify-content: center; font-size: 16px; }
+.v2-assist-text { font-weight: 600; }
+.v2-assist-badge {
+  position: absolute; right: -2px; bottom: -2px; width: 13px; height: 13px;
+  border-radius: 50%; border: 2px solid #fff; box-sizing: border-box;
+}
+
+/* 待命 */
+.v2-assist-idle .v2-assist-ava { border-color: #cbd5e1; filter: grayscale(0.4) opacity(0.85); }
+.v2-assist-idle .v2-assist-badge { background: #94a3b8; }
+.v2-assist-idle .v2-assist-text { color: #64748b; }
+
+/* 处理中：呼吸 + 旋转光环 */
+.v2-assist-busy .v2-assist-ava { border-color: #3b82f6; animation: v2AssistPulse 1.4s ease-in-out infinite; }
+.v2-assist-busy .v2-assist-ava-wrap::before {
+  content: ''; position: absolute; inset: -4px; border-radius: 50%;
+  border: 2px solid transparent; border-top-color: #3b82f6;
+  animation: v2AssistSpin 0.9s linear infinite;
+}
+.v2-assist-busy .v2-assist-badge { background: #3b82f6; }
+.v2-assist-busy .v2-assist-text { color: #2563eb; }
+
+/* 完成：绿对勾 */
+.v2-assist-done .v2-assist-ava { border-color: #16a34a; }
+.v2-assist-done .v2-assist-badge { background: #16a34a; }
+.v2-assist-done .v2-assist-badge::after {
+  content: '✓'; position: absolute; inset: 0; color: #fff;
+  font-size: 9px; line-height: 9px; text-align: center; font-weight: 700;
+}
+.v2-assist-done .v2-assist-text { color: #15803d; }
+
+/* 出错：红叹号 + 灰度 */
+.v2-assist-error .v2-assist-ava { border-color: #dc2626; filter: grayscale(0.6); }
+.v2-assist-error .v2-assist-badge { background: #dc2626; }
+.v2-assist-error .v2-assist-badge::after {
+  content: '!'; position: absolute; inset: 0; color: #fff;
+  font-size: 9px; line-height: 9px; text-align: center; font-weight: 700;
+}
+.v2-assist-error .v2-assist-text { color: #b91c1c; }
+
+@keyframes v2AssistPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+@keyframes v2AssistSpin { to { transform: rotate(360deg); } }
+
+/* ── 讲稿朗读 · 3D 触发按钮（老师反馈 2026-05-30：显示要醒目）── */
+.v2-reader-trigger {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  padding: 9px 18px; border: none; border-radius: 10px; cursor: pointer;
+  font-size: 14px; font-weight: 700; color: #fff; letter-spacing: 0.5px;
+  background: linear-gradient(180deg, #8b7cf6 0%, #6d5ae0 100%);
+  box-shadow: 0 4px 0 #4c3fb0, 0 6px 12px rgba(76, 63, 176, 0.35);
+  transition: transform 0.06s ease, box-shadow 0.06s ease;
+}
+.v2-reader-trigger:hover {
+  background: linear-gradient(180deg, #9b8df8 0%, #7a67e8 100%);
+}
+.v2-reader-trigger:active {
+  transform: translateY(4px);
+  box-shadow: 0 0 0 #4c3fb0, 0 2px 6px rgba(76, 63, 176, 0.3);
+}

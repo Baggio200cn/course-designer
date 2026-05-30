@@ -9,6 +9,7 @@
  *   - 老师可视化预览 + 编辑 + 保存 + 确认（解锁 design）+ 导出 Word
  */
 import React, { useState } from 'react';
+import AssistantStatusAvatar from './AssistantStatusAvatar';
 import ArtifactPanel from './ArtifactPanel';
 
 export default function ScheduleStage({
@@ -136,7 +137,7 @@ export default function ScheduleStage({
           </div>
           <div className="v2-status-box">
             <span>助手状态</span>
-            <strong>{assistantStatus}</strong>
+            <AssistantStatusAvatar stage="schedule" status={assistantStatus} />
           </div>
 
           {/* P6 修复（2026-05-18）：审计条只在「真正手工导入外部 JSON」时显示

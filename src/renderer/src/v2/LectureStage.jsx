@@ -12,6 +12,7 @@
  *   ④ A/B/C 候选 → 正式稿 → 确认 → 导出
  */
 import React, { useState, useEffect, useMemo } from 'react';
+import AssistantStatusAvatar from './AssistantStatusAvatar';
 import ArtifactPanel from './ArtifactPanel';
 import LectureChatPanel from './LectureChatPanel';   // v4.3.0 D6.3
 // v4.3.3 新版 · 预览全屏（讲稿正式稿大屏阅读模式）
@@ -61,6 +62,8 @@ export default function LectureStage({
   const [lecturePreviewFs, setLecturePreviewFs] = useState(false);
   // v4.3.3 功能5：讲稿朗读面板开关
   const [readerOpen, setReaderOpen] = useState(false);
+  // v4.3.3（老师反馈 2026-05-30）：朗读哪段讲稿——可来自编辑区表单，也可来自「查看」只读 modal
+  const [readerScript, setReaderScript] = useState('');
   const [lessons, setLessons] = useState([]);     // [{id, lessonNumber, topic, theoryHours, ...}]
   const [usedHours, setUsedHours] = useState(0);
   const [currentLessonId, setCurrentLessonId] = useState(null);   // 编辑中的节课 artifact id；null=新建
@@ -774,7 +777,7 @@ export default function LectureStage({
           </div>
           <div className="v2-status-box v2-field-top-gap">
             <span>助手状态</span>
-            <strong>{assistantStatus}</strong>
+            <AssistantStatusAvatar stage="lecture" status={assistantStatus} />
           </div>
         </div>
 
@@ -1061,8 +1064,8 @@ export default function LectureStage({
               {lessonForm.finalScript ? (
                 <button
                   type="button"
-                  className="v2-btn v2-btn-xs v2-btn-secondary"
-                  onClick={() => setReaderOpen(true)}
+                  className="v2-reader-trigger"
+                  onClick={() => { setReaderScript(lessonForm.finalScript); setReaderOpen(true); }}
                   title="周老师按真人语速朗读正式稿，帮你打磨课堂节奏"
                 >🔊 周老师朗读</button>
               ) : null}
@@ -1547,7 +1550,13 @@ export default function LectureStage({
             }}>
               {viewModal.content}
             </pre>
-            <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
+              <button
+                type="button"
+                className="v2-reader-trigger"
+                onClick={() => { setReaderScript(viewModal.content); setReaderOpen(true); }}
+                title="周老师按真人语速朗读这份讲稿（不改动确认状态）"
+              >🔊 周老师朗读</button>
               <button
                 className="v2-btn v2-btn-secondary"
                 onClick={() => navigator.clipboard?.writeText(viewModal.content)}
@@ -1579,7 +1588,7 @@ export default function LectureStage({
       {/* v4.3.3 功能5：周老师朗读讲稿正式稿（Web Speech API + 语速可调） */}
       <LectureReader
         open={readerOpen}
-        script={lessonForm.finalScript}
+        script={readerScript}
         onClose={() => setReaderOpen(false)}
         api={api}
       />

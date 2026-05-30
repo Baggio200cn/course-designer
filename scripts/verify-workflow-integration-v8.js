@@ -1494,6 +1494,16 @@ test('功能5 · LectureStage 加"周老师朗读"按钮 + 渲染 LectureReader'
     '朗读按钮未限定 finalScript 存在时显示');
 });
 
+test('功能5+ · confirmed 节次经只读 modal 即可朗读（不必解锁破坏确认）2026-05-30', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'LectureStage.jsx'), 'utf8');
+  // 朗读源改为 readerScript（可来自表单，也可来自 viewModal.content）
+  assert(/script=\{readerScript\}/.test(src), 'LectureReader 未改用 readerScript（无法朗读只读 modal 内容）');
+  assert(/setReaderScript\(viewModal\.content\)/.test(src),
+    '只读查看 modal 未提供朗读入口（confirmed 节次只能靠解锁才能朗读）');
+  assert(/setReaderScript\(lessonForm\.finalScript\)/.test(src),
+    '编辑区朗读未把 finalScript 传给 readerScript');
+});
+
 test('功能5 · 语速默认档参考周老师真人录音（0.9× 标准档）', () => {
   const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'LectureReader.jsx'), 'utf8');
   assert(/标准·周老师/.test(src), '缺"标准·周老师"语速档');
@@ -1591,10 +1601,11 @@ test('CodexR1-C · LectureReader 分段队列朗读（splitScriptIntoChunks + vo
   assert(/onend\s*=\s*\(\)\s*=>\s*\{[^}]*speakChunk\(idx \+ 1/.test(src), 'onend 未链式播下一段');
 });
 
-test('CodexR1-C · 可见合规提醒（防误用于参赛视频配音）', () => {
+test('CodexR1-C · 合规提醒保留在代码（UI 已按老师要求精简 2026-05-30）', () => {
+  // 老师要求"其他内容解释全部去掉"，移除了弹窗内可见合规块；
+  // 合规意识仍保留在文件头注释，防误用于参赛视频配音（指南"原则上不能使用软件生成逐字稿配音"）。
   const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'LectureReader.jsx'), 'utf8');
-  assert(/v2-reader-compliance/.test(src), '缺可见合规提醒 UI（不只注释）');
-  assert(/参赛演示视频的解说请用真人录音/.test(src), '合规提醒文案缺失');
+  assert(/参赛演示视频的解说请用真人录音/.test(src), '合规提醒文案在代码中完全消失（至少注释要保留）');
 });
 
 // ── 【31】Codex 审计第2轮·讲稿朗读鲁棒性收口 ────────────────────────────────
@@ -1665,6 +1676,71 @@ test('VoiceClone · LectureReader 选段试听走真声合成（混合模式）'
   const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'LectureReader.jsx'), 'utf8');
   assert(/synthesizeLectureVoiceV2/.test(src), 'LectureReader 未调用 synthesizeLectureVoiceV2');
   assert(/playCloneVoice/.test(src), '缺 playCloneVoice 选段试听逻辑');
+});
+
+// ── 【33】助手状态头像（按阶段老师 + 状态反馈）老师反馈 2026-05-30 ──────────
+console.log('\n【33】助手状态头像 · 阶段老师头像 + busy/done/error/idle 状态反馈');
+
+test('AssistantAvatar · 组件存在且按状态文案推断 4 态', () => {
+  const p = path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'AssistantStatusAvatar.jsx');
+  assert(fs.existsSync(p), '缺 AssistantStatusAvatar.jsx');
+  const src = fs.readFileSync(p, 'utf8');
+  assert(/deriveAssistantState/.test(src), '缺 deriveAssistantState 状态推断');
+  assert(/'idle'/.test(src) && /'busy'/.test(src) && /'done'/.test(src) && /'error'/.test(src),
+    '未覆盖 idle/busy/done/error 4 态');
+  assert(/stageAssistantAvatar/.test(src), '未复用 StageAssistant 的阶段老师头像映射');
+});
+
+test('AssistantAvatar · 8 个活跃阶段都换成头像组件（不再裸 🤖 字符串）', () => {
+  const dir = path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2');
+  const stages = {
+    'ScheduleStage.jsx': 'schedule', 'DesignStage.jsx': 'design', 'PptStage.jsx': 'ppt',
+    'LectureStage.jsx': 'lecture', 'QuizStage.jsx': 'quiz', 'HomeworkStage.jsx': 'homework',
+    'MicroVideoStage.jsx': 'video', 'ReportStage.jsx': 'report',
+  };
+  for (const [file, stage] of Object.entries(stages)) {
+    const src = fs.readFileSync(path.resolve(dir, file), 'utf8');
+    assert(new RegExp(`AssistantStatusAvatar stage="${stage}"`).test(src),
+      `${file} 未挂 AssistantStatusAvatar stage="${stage}"`);
+    assert(!/<strong>\{assistantStatus\}<\/strong>/.test(src),
+      `${file} 仍保留裸 <strong>{assistantStatus}</strong>（未换头像）`);
+  }
+});
+
+// ── 【34】老师手动测试发现的 4 个 bug 修复（2026-05-30）──────────────────────
+console.log('\n【34】老师测试 4 bug 修复 · 测验/作业自动加载 + 卡片确认态 + 微课保存一致性');
+
+test('Bug1 · Quiz/Homework 进阶段自动加载已存内容（不再误显示"尚未生成"）', () => {
+  const dir = path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2');
+  const quiz = fs.readFileSync(path.resolve(dir, 'QuizStage.jsx'), 'utf8');
+  const hw = fs.readFileSync(path.resolve(dir, 'HomeworkStage.jsx'), 'utf8');
+  assert(/find\(\(q\) => q\.confirmed\) \|\| matches\[0\][\s\S]{0,80}loadQuiz\(existing\.id\)/.test(quiz),
+    'QuizStage 加载 effect 未自动 loadQuiz 已存题集');
+  assert(/find\(\(h\) => h\.confirmed\) \|\| matches\[0\][\s\S]{0,80}loadHomework\(existing\.id\)/.test(hw),
+    'HomeworkStage 加载 effect 未自动 loadHomework 已存作业');
+});
+
+test('Bug2/Bug3 · Quiz/Homework 确认后通知父级刷新阶段卡（onStageDataChanged）', () => {
+  const dir = path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2');
+  const quiz = fs.readFileSync(path.resolve(dir, 'QuizStage.jsx'), 'utf8');
+  const hw = fs.readFileSync(path.resolve(dir, 'HomeworkStage.jsx'), 'utf8');
+  const app = fs.readFileSync(path.resolve(dir, 'V2App.jsx'), 'utf8');
+  assert(/onStageDataChanged\?\.\(\)/.test(quiz), 'QuizStage 确认后未调用 onStageDataChanged');
+  assert(/onStageDataChanged\?\.\(\)/.test(hw), 'HomeworkStage 确认后未调用 onStageDataChanged');
+  assert((app.match(/onStageDataChanged=\{\(\) => loadNotebookContext/g) || []).length >= 2,
+    'V2App 未给 Quiz/Homework 传 onStageDataChanged 刷新回调');
+});
+
+test('Bug3 · 阶段卡"已完成"按本阶段已确认产物判定（不靠下游解锁反推）', () => {
+  const app = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'renderer', 'src', 'v2', 'V2App.jsx'), 'utf8');
+  assert(/const completed = confirmedCount > 0;/.test(app),
+    'resolveStageState 仍用下游解锁反推 completed（会把未确认阶段误显示已完成）');
+});
+
+test('Bug4 · 微课保存把 confirmed 同步置回 false（消除 confirmed=true/status=draft 不一致）', () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main', 'ipc', 'v2', 'micro-video.handlers.js'), 'utf8');
+  assert(/updateArtifact\(artifactId, \{ content: microVideo, status: 'draft', confirmed: false \}\)/.test(src),
+    'saveMicroVideo 编辑保存未把 confirmed 置回 false（留下不一致态）');
 });
 
 // ── 结果汇总 ─────────────────────────────────────────────────────────────

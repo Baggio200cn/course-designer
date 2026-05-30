@@ -11,6 +11,7 @@
  *   - reflectionAndImprovement（4 项反思改进）
  */
 import React, { useState, useEffect } from 'react';
+import AssistantStatusAvatar from './AssistantStatusAvatar';
 import ArtifactPanel from './ArtifactPanel';
 // v4.3.3 新版 · 报告最大化预览
 import { PreviewFullscreen, PreviewFullscreenToggle } from './PreviewFullscreen';
@@ -111,7 +112,7 @@ export default function ReportStage({
           </div>
           <div className="v2-status-box">
             <span>助手状态</span>
-            <strong>{assistantStatus}</strong>
+            <AssistantStatusAvatar stage="report" status={assistantStatus} />
           </div>
           <div className="v2-inline-actions v2-field-top-gap">
             <button className="v2-btn v2-btn-primary" onClick={handleGenerateReport} disabled={busy}>

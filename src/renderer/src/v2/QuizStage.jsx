@@ -9,6 +9,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
+import AssistantStatusAvatar from './AssistantStatusAvatar';
 
 const TYPE_LABEL = {
   single: '单选',
@@ -26,7 +27,7 @@ const TYPE_COLOR = {
   short_answer: '#EF4444',
 };
 
-export default function QuizStage({ selectedNotebookId, api, assistantStatus, setAssistantStatus, busy }) {
+export default function QuizStage({ selectedNotebookId, api, assistantStatus, setAssistantStatus, busy, onStageDataChanged }) {
   const [lessons, setLessons] = useState([]);                  // 本笔记本所有节课
   const [selectedLesson, setSelectedLesson] = useState(null);  // {lessonNumber, topic, ...}
   const [quizSet, setQuizSet] = useState(null);                // 当前编辑中的测验题集
@@ -40,16 +41,26 @@ export default function QuizStage({ selectedNotebookId, api, assistantStatus, se
     if (!selectedNotebookId) return;
     (async () => {
       const lectureRes = await api.lessonListV2(selectedNotebookId);
+      let firstLesson = null;
       if (lectureRes?.success) {
         const allLessons = (lectureRes.data?.lessons || []).filter((l) => l.confirmed);
         setLessons(allLessons);
-        if (!selectedLesson && allLessons.length > 0) {
-          setSelectedLesson(allLessons[0]);
+        firstLesson = allLessons[0] || null;
+        if (!selectedLesson && firstLesson) {
+          setSelectedLesson(firstLesson);
         }
       }
       const quizRes = await api.quizListV2(selectedNotebookId);
-      if (quizRes?.success) {
-        setSavedQuizzes(quizRes.data?.quizzes || []);
+      const quizzes = quizRes?.success ? (quizRes.data?.quizzes || []) : [];
+      setSavedQuizzes(quizzes);
+      // v4.3.3 修复（老师测试 2026-05-30）：进入阶段自动加载已存题集内容。
+      //   之前只加载下拉列表、不加载 quizSet，导致 quizSet 一直为 null →
+      //   面板误显示"该节尚未生成测验题"（其实已保存/已确认）。优先加载 confirmed 题集。
+      const targetNo = selectedLesson?.lessonNumber ?? firstLesson?.lessonNumber;
+      if (targetNo != null) {
+        const matches = quizzes.filter((q) => q.lessonNumber === targetNo);
+        const existing = matches.find((q) => q.confirmed) || matches[0];
+        if (existing) await loadQuiz(existing.id);
       }
     })();
   }, [selectedNotebookId]);
@@ -145,6 +156,9 @@ export default function QuizStage({ selectedNotebookId, api, assistantStatus, se
     setAssistantStatus('✅ 已确认本节测验');
     const list = await api.quizListV2(selectedNotebookId);
     if (list?.success) setSavedQuizzes(list.data?.quizzes || []);
+    // v4.3.3 修复（老师测试 2026-05-30）：确认后通知父级刷新阶段卡 + 报告解锁状态，
+    //   否则卡片/报告"还需确认"列表滞后（Bug2/Bug3）。
+    onStageDataChanged?.();
   };
 
   // 编辑单题
@@ -237,7 +251,7 @@ export default function QuizStage({ selectedNotebookId, api, assistantStatus, se
           {assistantStatus ? (
             <div className="v2-status-box v2-field-top-gap">
               <span>助手状态</span>
-              <strong>{assistantStatus}</strong>
+              <AssistantStatusAvatar stage="quiz" status={assistantStatus} />
             </div>
           ) : null}
         </div>

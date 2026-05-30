@@ -1,4 +1,5 @@
 import React from 'react';
+import AssistantStatusAvatar from './AssistantStatusAvatar';
 import { buildPptTextFramework, PPT_TEMPLATE_PRESETS } from './stage-helpers';
 // v4.3.3 新版 · PPT 网格最大化预览（老师反馈：视觉预览不能撑满）
 import { PreviewFullscreen, PreviewFullscreenToggle } from './PreviewFullscreen';
@@ -1028,7 +1029,7 @@ export default function PptStage({
             {missingCount > 0 && <span style={{ color: '#f59e0b', marginLeft: 8 }}>{missingCount} 待配图</span>}
           </span>
         )}
-        {assistantStatus && <span className="ppt-stat ppt-stat-muted">{assistantStatus}</span>}
+        {assistantStatus && <span className="ppt-stat ppt-stat-muted"><AssistantStatusAvatar stage="ppt" status={assistantStatus} /></span>}
         {/* P6 修复（2026-05-18）：动态练习题入口从 PPT 阶段删除
             原 v4.2 时代把"动态练习"页混入 PPT pipeline，违反 v4.3 七阶段工作流
             正确归属：「⑤ 课堂互动测验 + 作业」独立 stage（PPT 后） */}

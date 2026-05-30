@@ -9,6 +9,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
+import AssistantStatusAvatar from './AssistantStatusAvatar';
 
 const TYPE_LABEL = {
   reading: '📖 阅读延伸',
@@ -26,7 +27,7 @@ const TYPE_COLOR = {
   research: '#06B6D4',
 };
 
-export default function HomeworkStage({ selectedNotebookId, api, assistantStatus, setAssistantStatus, busy }) {
+export default function HomeworkStage({ selectedNotebookId, api, assistantStatus, setAssistantStatus, busy, onStageDataChanged }) {
   const [lessons, setLessons] = useState([]);
   const [selectedLesson, setSelectedLesson] = useState(null);
   const [homeworkSet, setHomeworkSet] = useState(null);
@@ -39,16 +40,25 @@ export default function HomeworkStage({ selectedNotebookId, api, assistantStatus
     if (!selectedNotebookId) return;
     (async () => {
       const lectureRes = await api.lessonListV2(selectedNotebookId);
+      let firstLesson = null;
       if (lectureRes?.success) {
         const allLessons = (lectureRes.data?.lessons || []).filter((l) => l.confirmed);
         setLessons(allLessons);
-        if (!selectedLesson && allLessons.length > 0) {
-          setSelectedLesson(allLessons[0]);
+        firstLesson = allLessons[0] || null;
+        if (!selectedLesson && firstLesson) {
+          setSelectedLesson(firstLesson);
         }
       }
       const hwRes = await api.homeworkListV2(selectedNotebookId);
-      if (hwRes?.success) {
-        setSavedHomeworks(hwRes.data?.homeworks || []);
+      const homeworks = hwRes?.success ? (hwRes.data?.homeworks || []) : [];
+      setSavedHomeworks(homeworks);
+      // v4.3.3 修复（老师测试 2026-05-30）：进入阶段自动加载已存作业内容，
+      //   否则 homeworkSet 一直为 null → 面板误显示"该节尚未生成课后作业"（其实已保存/已确认）。
+      const targetNo = selectedLesson?.lessonNumber ?? firstLesson?.lessonNumber;
+      if (targetNo != null) {
+        const matches = homeworks.filter((h) => h.lessonNumber === targetNo);
+        const existing = matches.find((h) => h.confirmed) || matches[0];
+        if (existing) await loadHomework(existing.id);
       }
     })();
   }, [selectedNotebookId]);
@@ -135,6 +145,8 @@ export default function HomeworkStage({ selectedNotebookId, api, assistantStatus
     setAssistantStatus('✅ 已确认本节作业');
     const list = await api.homeworkListV2(selectedNotebookId);
     if (list?.success) setSavedHomeworks(list.data?.homeworks || []);
+    // v4.3.3 修复（老师测试 2026-05-30）：确认后通知父级刷新阶段卡 + 报告解锁状态（Bug2/Bug3）。
+    onStageDataChanged?.();
   };
 
   const updateTask = (idx, patch) => {
@@ -214,7 +226,7 @@ export default function HomeworkStage({ selectedNotebookId, api, assistantStatus
           {assistantStatus ? (
             <div className="v2-status-box v2-field-top-gap">
               <span>助手状态</span>
-              <strong>{assistantStatus}</strong>
+              <AssistantStatusAvatar stage="homework" status={assistantStatus} />
             </div>
           ) : null}
         </div>

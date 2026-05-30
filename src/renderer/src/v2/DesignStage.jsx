@@ -14,6 +14,7 @@
  *   📝 文字预览 / ✏️ 编辑 / { } JSON
  */
 import React, { useState, useEffect } from 'react';
+import AssistantStatusAvatar from './AssistantStatusAvatar';
 import ArtifactPanel from './ArtifactPanel';
 // v4.3.3 新版 · 预览全屏 + 排版升级（老师反馈）
 import { PreviewFullscreen, PreviewFullscreenToggle } from './PreviewFullscreen';
@@ -548,7 +549,7 @@ export default function DesignStage({
           </div>
           <div className="v2-status-box">
             <span>助手状态</span>
-            <strong>{assistantStatus}</strong>
+            <AssistantStatusAvatar stage="design" status={assistantStatus} />
           </div>
           <div className="v2-inline-actions v2-field-top-gap">
             <button

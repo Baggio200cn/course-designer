@@ -111,7 +111,10 @@ function register(ipcMain, getDeps) {
 
       let artifact;
       if (artifactId && db.updateArtifact) {
-        artifact = db.updateArtifact(artifactId, { content: microVideo, status: 'draft' });
+        // v4.3.3 修复（老师测试 2026-05-30）：编辑保存后必须同步把 confirmed 置回 false。
+        //   原来只改 status='draft' 不动 confirmed，会留下"confirmed=true 但 status=draft"的
+        //   不一致态——isArtifactConfirmed 判 false（报告会悄悄重新锁住），UI 却仍显示已确认。
+        artifact = db.updateArtifact(artifactId, { content: microVideo, status: 'draft', confirmed: false });
       } else {
         artifact = db.createArtifact({
           notebookId,
