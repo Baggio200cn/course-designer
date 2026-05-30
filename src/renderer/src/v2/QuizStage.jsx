@@ -82,9 +82,9 @@ export default function QuizStage({ selectedNotebookId, api, assistantStatus, se
 
   // ── 切换到已存的 quiz ──
   const loadQuiz = async (quizArtifactId) => {
-    // v4.3.3 codex 第3轮复审（2026-05-30）：详情请求也纳入 loadSeq 防护——
-    //   切换笔记本后旧详情迟到返回不再 setState 写回当前页面。
-    const seq = loadSeqRef.current;
+    // v4.3.3 codex 第3轮复审（2026-05-30）：详情请求纳入 loadSeq 防护，切换笔记本后旧详情不写回。
+    // v4.3.3 codex 第4轮复审：seq 改为自增——同笔记本内快速切 A→B 节时，B 的调用让 A 的迟到响应失效。
+    const seq = ++loadSeqRef.current;
     const res = await api.quizGetV2({ quizId: quizArtifactId });
     if (seq !== loadSeqRef.current) return;
     if (!res?.success) {

@@ -79,7 +79,8 @@ export default function HomeworkStage({ selectedNotebookId, api, assistantStatus
 
   const loadHomework = async (hwArtifactId) => {
     // v4.3.3 codex 第3轮复审（2026-05-30）：详情请求纳入 loadSeq 防护，切换笔记本后迟到返回不写回。
-    const seq = loadSeqRef.current;
+    // v4.3.3 codex 第4轮复审：seq 自增——同笔记本内快速切节课时，新调用让旧详情迟到响应失效。
+    const seq = ++loadSeqRef.current;
     const res = await api.homeworkGetV2({ homeworkId: hwArtifactId });
     if (seq !== loadSeqRef.current) return;
     if (!res?.success) {
